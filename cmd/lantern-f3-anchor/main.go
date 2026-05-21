@@ -41,10 +41,12 @@ type rpcResp[T any] struct {
 
 func main() {
 	var (
-		network = flag.String("network", "mainnet", "network name (mainnet|calibnet)")
-		out     = flag.String("out", "", "output JSON path")
-		url     = flag.String("url", os.Getenv("FOREST_URL"), "Forest/Lotus RPC URL")
-		token   = flag.String("token", os.Getenv("FOREST_TOKEN"), "RPC bearer token")
+		network    = flag.String("network", "mainnet", "network name (mainnet|calibnet)")
+		out        = flag.String("out", "", "output JSON path")
+		url        = flag.String("url", os.Getenv("FOREST_URL"), "Forest/Lotus RPC URL")
+		token      = flag.String("token", os.Getenv("FOREST_TOKEN"), "RPC bearer token")
+		instance   = flag.Uint64("instance", 0, "GPBFT instance to anchor to (0 = latest - 100, gives the subscriber a small backlog to verify)")
+		lagBehind  = flag.Uint64("lag", 100, "when -instance is 0, anchor at latest minus this many instances")
 	)
 	flag.Parse()
 	if *out == "" || *url == "" || *token == "" {
@@ -65,7 +67,7 @@ func main() {
 	}
 	fmt.Printf("chain head height=%d\n", head.Height)
 
-	// 2. Latest F3 cert (for the instance we'll anchor to).
+	// 2. Latest F3 cert — informational, and used to default the anchor instance.
 	var latest struct {
 		GPBFTInstance uint64
 	}
@@ -74,20 +76,31 @@ func main() {
 	}
 	fmt.Printf("latest F3 cert instance=%d\n", latest.GPBFTInstance)
 
-	// 3. Current F3 power table at head.
-	var pt []anchor.ForestPowerEntry
-	tipsetKey := head.Cids
-	if err := call(ctx, *url, *token, "Filecoin.F3GetF3PowerTable", []any{tipsetKey}, &pt); err != nil {
-		die("F3GetF3PowerTable: %v", err)
+	// 3. Resolve the anchor instance.
+	anchorInstance := *instance
+	if anchorInstance == 0 {
+		if latest.GPBFTInstance < *lagBehind {
+			die("latest instance %d < lag %d, set -instance explicitly", latest.GPBFTInstance, *lagBehind)
+		}
+		anchorInstance = latest.GPBFTInstance - *lagBehind
 	}
-	fmt.Printf("power table entries=%d\n", len(pt))
+	fmt.Printf("anchor instance=%d (latest=%d, lag=%d)\n", anchorInstance, latest.GPBFTInstance, latest.GPBFTInstance-anchorInstance)
 
-	// 4. Build the anchor.
+	// 4. Pull the committee for that specific instance via F3GetF3PowerTableByInstance.
+	// Critically NOT F3GetF3PowerTable(headTipsetKey), which returns the current
+	// committee snapshot, not the committee that signed any specific cert.
+	var pt []anchor.ForestPowerEntry
+	if err := call(ctx, *url, *token, "Filecoin.F3GetF3PowerTableByInstance", []any{anchorInstance}, &pt); err != nil {
+		die("F3GetF3PowerTableByInstance(%d): %v", anchorInstance, err)
+	}
+	fmt.Printf("power table entries=%d (committee for instance %d)\n", len(pt), anchorInstance)
+
+	// 5. Build the anchor.
 	a, err := anchor.FromForestPowerEntries(
 		*network,
-		latest.GPBFTInstance,
+		anchorInstance,
 		pt,
-		fmt.Sprintf("head=%d", head.Height),
+		fmt.Sprintf("head=%d latest_cert=%d", head.Height, latest.GPBFTInstance),
 		time.Now().UTC().Format(time.RFC3339),
 	)
 	if err != nil {
