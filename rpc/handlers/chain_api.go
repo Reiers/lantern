@@ -99,6 +99,12 @@ type ChainAPI struct {
 	// which honours bounded per-subscriber buffers and drop-slow
 	// semantics. The daemon wires this in Phase 9.
 	HeadNotify *headnotify.Distributor
+
+	// NetInfoSource is the live libp2p host adapter used by NetPeers,
+	// NetBandwidthStats, NetAutoNatStatus and friends. Nil-able: when
+	// nil (e.g. wallet-only CLI invocations) those methods return safe
+	// zero values, matching the Phase 9 stub behaviour.
+	NetInfoSource NetInfo
 }
 
 // AuthIssuer abstracts the rpc/server Auth type.

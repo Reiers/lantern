@@ -39,6 +39,7 @@ import (
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/ipfs/go-cid"
 
+	"github.com/Reiers/lantern/build"
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	headnotify "github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
@@ -46,6 +47,7 @@ import (
 	"github.com/Reiers/lantern/net/combined"
 	"github.com/Reiers/lantern/net/glif"
 	"github.com/Reiers/lantern/net/hsync"
+	llibp2p "github.com/Reiers/lantern/net/libp2p"
 	"github.com/Reiers/lantern/rpc/handlers"
 	"github.com/Reiers/lantern/rpc/server"
 	"github.com/Reiers/lantern/state/hamt"
@@ -118,6 +120,18 @@ ENVIRONMENT
 }
 
 // --- helpers ---
+
+func splitCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
 
 func dataDir() string {
 	if h := os.Getenv("LANTERN_HOME"); h != "" {
@@ -257,6 +271,8 @@ func cmdDaemon(args []string) error {
 	hsPath := fs.String("header-store", filepath.Join(dataDir(), "headerstore"), "Header store BadgerDB path")
 	syncInterval := fs.Duration("sync-interval", 6*time.Second, "Header-store sync poll interval")
 	notifyBufSize := fs.Int("notify-buf", headnotify.DefaultBufferSize, "ChainNotify per-subscriber buffer size")
+	p2pListen := fs.String("p2p-listen", "/ip4/0.0.0.0/tcp/0,/ip4/0.0.0.0/udp/0/quic-v1", "libp2p listen multiaddrs (comma-separated). Empty disables the libp2p host.")
+	noLibp2p := fs.Bool("no-libp2p", false, "Skip starting the libp2p host (RPC stays up; Net* stats return zero).")
 	fs.Parse(args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -315,6 +331,27 @@ func cmdDaemon(args []string) error {
 		defer sync.Stop()
 		fmt.Printf("  header store: %s (sync every %s, buf=%d)\n",
 			*hsPath, syncInterval.String(), *notifyBufSize)
+	}
+
+	// Phase 10 Part A: bring up the live libp2p host so the Net* RPC
+	// methods Curio's webui consumes return real data. The host dials the
+	// Filecoin mainnet bootstrap peers in the background; bandwidth +
+	// AutoNAT state are captured by the BandwidthCounter and the
+	// AmbientAutoNAT subsystem on the host respectively.
+	var p2pHost *llibp2p.Host
+	if !*noLibp2p && *p2pListen != "" {
+		listeners := splitCSV(*p2pListen)
+		p2pHost, err = llibp2p.New(ctx, llibp2p.HostConfig{
+			ListenAddrs:    listeners,
+			BootstrapPeers: build.MainnetBootstrapPeers,
+			MaxPeers:       50,
+		})
+		if err != nil {
+			return fmt.Errorf("start libp2p host: %w", err)
+		}
+		defer p2pHost.Close()
+		chainAPI.NetInfoSource = p2pHost.NetInfo()
+		fmt.Printf("  libp2p: id=%s listen=%v\n", p2pHost.ID(), p2pHost.ListenAddrs())
 	}
 
 	srv, err := server.New(server.Config{
