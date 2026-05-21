@@ -147,6 +147,14 @@ type FullNode interface {
 
 	// Market convenience (composes Mpool/Wallet) — Tier 3 stub.
 	MarketAddBalance(ctx context.Context, wallet, addr address.Address, amt big.Int) (cid.Cid, error)
+
+	// Payment channels (Tier 3) — Phase 7 read-only + sign.
+	PaychGet(ctx context.Context, from, to address.Address, amt big.Int, opts PaychGetOpts) (*ChannelInfo, error)
+	PaychAvailableFunds(ctx context.Context, ch address.Address) (*ChannelAvailableFunds, error)
+	PaychVoucherCreate(ctx context.Context, ch address.Address, amt big.Int, lane uint64) (*VoucherCreateResult, error)
+	PaychVoucherCheckValid(ctx context.Context, ch address.Address, sv *PaychSignedVoucher) error
+	PaychVoucherCheckSpendable(ctx context.Context, ch address.Address, sv *PaychSignedVoucher, secret []byte, proof []byte) (bool, error)
+	PaychVoucherList(ctx context.Context, ch address.Address) ([]*PaychSignedVoucher, error)
 }
 
 // KeyType is wallet.KeyType, re-exported so callers don't pull wallet into
@@ -297,4 +305,74 @@ type BlockTemplate struct {
 	Epoch            abi.ChainEpoch
 	Timestamp        uint64
 	WinningPoStProof []interface{}
+}
+
+// --- Paych types (Lotus-compatible subset) ---
+
+// PaychGetOpts mirrors paychapi.PaychGetOpts.
+type PaychGetOpts struct {
+	OffChain bool
+}
+
+// ChannelInfo mirrors paychapi.ChannelInfo.
+type ChannelInfo struct {
+	Channel      address.Address
+	WaitSentinel cid.Cid
+}
+
+// ChannelAvailableFunds mirrors paychapi.ChannelAvailableFunds.
+type ChannelAvailableFunds struct {
+	Channel             *address.Address
+	From                address.Address
+	To                  address.Address
+	ConfirmedAmt        big.Int
+	PendingAmt          big.Int
+	NonReservedAmt      big.Int
+	PendingAvailableAmt big.Int
+	PendingWaitSentinel *cid.Cid
+	QueuedAmt           big.Int
+	VoucherReedeemedAmt big.Int
+}
+
+// VoucherCreateResult mirrors paychapi.VoucherCreateResult.
+type VoucherCreateResult struct {
+	Voucher *PaychSignedVoucher
+	Shortfall big.Int
+}
+
+// PaychSignedVoucher is a Lantern-side mirror of paych.SignedVoucher
+// from go-state-types/builtin/v18/paych. Re-declaring it here keeps the
+// api package free of go-state-types/v18 imports in handler signatures.
+type PaychSignedVoucher struct {
+	ChannelAddr     address.Address
+	TimeLockMin     abi.ChainEpoch
+	TimeLockMax     abi.ChainEpoch
+	SecretHash      []byte
+	Extra           *PaychModVerifyParams
+	Lane            uint64
+	Nonce           uint64
+	Amount          big.Int
+	MinSettleHeight abi.ChainEpoch
+	Merges          []PaychMerge
+	Signature       *PaychSignature
+}
+
+// PaychModVerifyParams mirrors paych.ModVerifyParams.
+type PaychModVerifyParams struct {
+	Actor  address.Address
+	Method abi.MethodNum
+	Data   []byte
+}
+
+// PaychMerge mirrors paych.Merge.
+type PaychMerge struct {
+	Lane  uint64
+	Nonce uint64
+}
+
+// PaychSignature is a thin alias for crypto.Signature; declared here so
+// callers don't have to import go-state-types/crypto.
+type PaychSignature struct {
+	Type uint8
+	Data []byte
 }

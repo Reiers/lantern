@@ -119,3 +119,13 @@ func (a *Accessor) LoadMultisig(ctx context.Context, target addr.Address) (actor
 	ms, err := actors.LoadMultisig(ctx, actor.Code, actor.Head, a.bg, defaultRegistry)
 	return ms, append(proof, actor.Head), err
 }
+
+// LoadPaych loads any payment-channel actor by address.
+func (a *Accessor) LoadPaych(ctx context.Context, target addr.Address) (actors.PaychState, []cid.Cid, error) {
+	actor, proof, err := a.GetActor(ctx, target)
+	if err != nil {
+		return nil, proof, fmt.Errorf("loading actor %s: %w", target, err)
+	}
+	ps, err := actors.LoadPaych(ctx, actor.Code, actor.Head, a.bg, defaultRegistry)
+	return ps, append(proof, actor.Head), err
+}
