@@ -56,6 +56,8 @@ So running Lantern is closer to running your own full node — in security terms
 
 Lantern's gateway at `gateway.lantern.reiers.io` is a **convenience**, not a trust requirement. It exists to make first-run fast for users who don't yet have peers connected. Once Lantern is bootstrapped, it can pull blocks from any libp2p Bitswap peer that has them; the gateway is just one such peer. Every byte is verified locally regardless of source.
 
+The long-term architecture is **swarm-native**: Lantern joins the same Filecoin libp2p network every Lotus, Forest, and Curio node is already on, and pulls state from any honest peer via Bitswap. Content-addressing means one honest peer is sufficient for correctness; multiple peers add availability and speed. The central HTTP gateway becomes a last-resort fallback as the swarm of state-serving "beacons" grows. See [`SWARM-ARCHITECTURE.md`](SWARM-ARCHITECTURE.md) for the full design and V1.2 roadmap.
+
 ### What are the soft trust points?
 
 Two, named explicitly:
@@ -144,11 +146,10 @@ Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on m
 | 6     | Persistent header store, libp2p, gossipsub mempool, StateWaitMsg        | ✅ Shipped  |
 | 7     | Pure-Go VM shell, gas estimation, paych vouchers, block production scaffolding | ✅ Shipped  |
 | 8     | Live Curio binding test, FVM bridge, block publisher, DHT, paych byte-exact, TRUST-MODEL.md | ✅ Shipped  |
-| 9     | `ChainNotify` + daemon header-store wiring — the V1.1 Curio-actually-advances unlock | 🔄 In progress |
+| 9     | `ChainNotify` end-to-end + daemon header-store wiring + real Curio bind on lex — the V1.1 unlock | ✅ Shipped  |
 
-**69 of 71** methods in the Curio FULLNODE_API surface are implemented after Phase 8. The remaining 2:
-- `ChainNotify` (chain-head subscription) — Phase 9's headline. The single most important gap for real Curio use.
-- `SyncSubmitBlock` is a hard-gated stub. Never publishes without explicit `AllowBlockSubmit=true` plus a configured bridge.
+**71 of 71** methods in the Curio FULLNODE_API surface are implemented after Phase 9. The V1.1 unlock landed: `ChainNotify` is wired through a head-change distributor (Lotus-style apply/revert events, bounded per-subscriber buffer with drop-slow semantics) and `StateAccountKey` decodes the account actor state. Live-validated against `lotus v1.36` CLI for 6 minutes and against a real Curio 1.28.1 binary on lex for 10 minutes — see [`docs/phase9-part-b-curio-bind.md`](docs/phase9-part-b-curio-bind.md). The 1 remaining hard-gated stub:
+- `SyncSubmitBlock` is never lit without explicit `AllowBlockSubmit=true` plus a configured bridge. See [`docs/SAFETY-CHECKLIST.md`](docs/SAFETY-CHECKLIST.md) §1.
 
 ---
 
