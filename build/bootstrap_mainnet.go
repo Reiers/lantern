@@ -1,0 +1,33 @@
+// Mainnet libp2p bootstrap peers. Copied verbatim from
+// github.com/filecoin-project/lotus/build/bootstrap/mainnet.pi at commit
+// master @ 2026-05-21. See LICENSE-LOTUS.
+//
+// These are the seed peers Lantern dials on startup to enter the Filecoin
+// mainnet DHT + gossipsub mesh.
+
+package build
+
+// MainnetBootstrapPeers is the canonical bootstrap multiaddr list.
+var MainnetBootstrapPeers = []string{
+	"/dns/bootstrap.filecoin.chain.love/tcp/1235/p2p/12D3KooWBF8cpp65hp2u9LK5mh19x67ftAam84z9LsfaquTDSBpt",
+	"/dns/bootstrap-venus.mainnet.filincubator.com/tcp/8888/p2p/QmQu8C6deXwKvJP2D8B6QGyhngc3ZiDnFzEHBDx8yeBXST",
+	"/dns/bootstrap-mainnet-0.chainsafe-fil.io/tcp/34000/p2p/12D3KooWKKkCZbcigsWTEu1cgNetNbZJqeNtysRtFpq7DTqw3eqH",
+	"/dns/bootstrap-mainnet-1.chainsafe-fil.io/tcp/34000/p2p/12D3KooWGnkd9GQKo3apkShQDaq1d6cKJJmsVe6KiQkacUk1T8oZ",
+	"/dns/bootstrap-mainnet-2.chainsafe-fil.io/tcp/34000/p2p/12D3KooWHQRSDFv4FvAjtU32shQ7znz7oRbLBryXzZ9NMK2feyyH",
+	"/dns/n1.mainnet.fil.devtty.eu/udp/443/quic-v1/p2p/12D3KooWAke3M2ji7tGNKx3BQkTHCyxVhtV1CN68z6Fkrpmfr37F",
+	"/dns/n1.mainnet.fil.devtty.eu/tcp/443/p2p/12D3KooWAke3M2ji7tGNKx3BQkTHCyxVhtV1CN68z6Fkrpmfr37F",
+}
+
+// MainnetGossipTopicMessages is the mainnet message-pool gossipsub topic.
+// Yes, the topic name is literally "testnetnet" for historical reasons:
+// Filecoin's network name was "testnetnet" before the mainnet rebrand and
+// the topic name was never changed, to preserve backward compatibility.
+// Source: lotus/build/buildconstants/params_mainnet.go (NetworkBundle).
+const MainnetGossipTopicMessages = "/fil/msgs/testnetnet"
+
+// MainnetGossipTopicBlocks is the canonical block topic.
+const MainnetGossipTopicBlocks = "/fil/blocks/testnetnet"
+
+// MainnetNetworkName is the wire-name string Filecoin libp2p protocols
+// expect.
+const MainnetNetworkName = "testnetnet"

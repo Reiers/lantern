@@ -86,6 +86,13 @@ type MpoolPublisher interface {
 	Publish(ctx context.Context, sm *types.SignedMessage) (cid.Cid, error)
 }
 
+// MpoolPendingLister is an optional capability of MpoolPublisher: query
+// locally pending messages for nonce derivation and `MpoolPending`. Lantern's
+// net/mpool.Pool satisfies this; tests can implement only MpoolPublisher.
+type MpoolPendingLister interface {
+	Pending() []*types.SignedMessage
+}
+
 // ErrMpoolNotWired is returned by MpoolPush when no publisher is configured.
 var ErrMpoolNotWired = errors.New("lantern: mpool publisher not configured (no libp2p host) — see PHASE4-BLOCKERS.md")
 
@@ -827,16 +834,40 @@ func (c *ChainAPI) MpoolPushMessage(ctx context.Context, msg *types.Message, spe
 	return sm, nil
 }
 
-// MpoolGetNonce returns the current actor nonce. Tier 2 (#15).
+// MpoolGetNonce returns the current actor nonce, accounting for any
+// locally pending messages from the same sender (unsubmitted nonces stack
+// on top of the on-chain nonce). Tier 2 (#15).
 func (c *ChainAPI) MpoolGetNonce(ctx context.Context, a address.Address) (uint64, error) {
 	act, err := c.StateGetActor(ctx, a, types.TipSetKey{})
+	var onChain uint64
 	if err != nil {
-		if errors.Is(err, accessor.ErrAddressNotFound) {
-			return 0, nil
+		if !errors.Is(err, accessor.ErrAddressNotFound) {
+			return 0, err
 		}
-		return 0, err
+		onChain = 0
+	} else {
+		onChain = act.Nonce
 	}
-	return act.Nonce, nil
+	if pl, ok := c.Mpool.(MpoolPendingLister); ok && pl != nil {
+		next := onChain
+		for _, sm := range pl.Pending() {
+			if sm.Message.From == a && sm.Message.Nonce >= next {
+				next = sm.Message.Nonce + 1
+			}
+		}
+		return next, nil
+	}
+	return onChain, nil
+}
+
+// MpoolPending returns the locally-tracked pending signed messages. We do
+// not maintain a full mempool view; Lantern relies on the rest of the
+// network's full nodes for inclusion. Tier 2 (Phase 6 Part D).
+func (c *ChainAPI) MpoolPending(_ context.Context, _ []types.TipSetKey) ([]*types.SignedMessage, error) {
+	if pl, ok := c.Mpool.(MpoolPendingLister); ok && pl != nil {
+		return pl.Pending(), nil
+	}
+	return nil, nil
 }
 
 // ----------------- SP block production (Tier 4) -----------------

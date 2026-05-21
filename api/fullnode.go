@@ -137,6 +137,7 @@ type FullNode interface {
 	MpoolPush(ctx context.Context, sm *types.SignedMessage) (cid.Cid, error)
 	MpoolPushMessage(ctx context.Context, msg *types.Message, spec *MessageSendSpec) (*types.SignedMessage, error)
 	MpoolGetNonce(ctx context.Context, a address.Address) (uint64, error)
+	MpoolPending(ctx context.Context, tsk []types.TipSetKey) ([]*types.SignedMessage, error)
 
 	// SP block production (SP) — Tier 4 stubs.
 	MinerGetBaseInfo(ctx context.Context, m address.Address, epoch abi.ChainEpoch, key types.TipSetKey) (*MiningBaseInfo, error)
