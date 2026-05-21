@@ -1,0 +1,3458 @@
+{
+  "network": "mainnet",
+  "instance": 466453,
+  "entries": [
+    {
+      "id": 1889668,
+      "power": "163179261560094720",
+      "pubkey": "iU2TCGu+4I7meu7/8tOtyUUQZJDDOXsbNlp8oy9vmrvnf/gP9C31IotaZfK4R2v1"
+    },
+    {
+      "id": 1315096,
+      "power": "139875127641767936",
+      "pubkey": "jFAicXRUU606z7Mmro2/y6tUD/1PGCNG9gRFIf4c3IiOuUFpFhQhhLIMbtRJWrp/"
+    },
+    {
+      "id": 870558,
+      "power": "131434211235069952",
+      "pubkey": "thFEz3cC8AF3dqBMWOAQDLwAJh+ITdi8xcQR0W+4S53nZT+JMu7B1LYTqVs1fxeS"
+    },
+    {
+      "id": 3055005,
+      "power": "128237243738357760",
+      "pubkey": "jFAicXRUU606z7Mmro2/y6tUD/1PGCNG9gRFIf4c3IiOuUFpFhQhhLIMbtRJWrp/"
+    },
+    {
+      "id": 1518369,
+      "power": "127838017938259968",
+      "pubkey": "kEic+Zo7DZ+32CcGHAwYvbxPb52JklDGHIZ7Cpht7MS12SxWnKg2XK0a2FAl/9yI"
+    },
+    {
+      "id": 3055029,
+      "power": "125174932056309760",
+      "pubkey": "jFAicXRUU606z7Mmro2/y6tUD/1PGCNG9gRFIf4c3IiOuUFpFhQhhLIMbtRJWrp/"
+    },
+    {
+      "id": 3055018,
+      "power": "122529781957787648",
+      "pubkey": "jFAicXRUU606z7Mmro2/y6tUD/1PGCNG9gRFIf4c3IiOuUFpFhQhhLIMbtRJWrp/"
+    },
+    {
+      "id": 1106668,
+      "power": "122176117170765824",
+      "pubkey": "mNigTghYvVhZYrV/1eiTGXCUc9hw9MjAYkrGEQs9DXWuYBeFWs0lEPrjjpWzW2tG"
+    },
+    {
+      "id": 1082888,
+      "power": "116659111428718592",
+      "pubkey": "joVVD824RQ+XRT6CKwzeEgVuR1+Q7YG1QaltRPB2gDeUxqIeDXPmpBz6uM6ntBwi"
+    },
+    {
+      "id": 1697248,
+      "power": "116617222603931648",
+      "pubkey": "qZ97ZvW6UTViLy6swYLKUYRBtSfViWafhPuLuVe7RjR/ioN2KAAjFp9h5rtCqY7o"
+    },
+    {
+      "id": 1083914,
+      "power": "112600642203156480",
+      "pubkey": "kkq9WrvaEw4gzHy7QzO9BRSppu+rIsoNtnlovQLlukNEWQsabbZEtULhxsahHDoY"
+    },
+    {
+      "id": 3373337,
+      "power": "112268761490259968",
+      "pubkey": "kEj1YpbqRgTYIrdcPsAVcyyEswFnCK5fxDSDxXbW9F895sy0nruOVScEwBauPzwC"
+    },
+    {
+      "id": 3377778,
+      "power": "108508740960911360",
+      "pubkey": "kuKBWkV1jU9rDpwKpKNPPqfGVNDOiHvAlkYOnlUisvRsGm2RXFYogPjSXvgOTOpm"
+    },
+    {
+      "id": 3230423,
+      "power": "108213676707676160",
+      "pubkey": "rLoQrc/GFxSkxQtIVKIqGJPFaeKvi5PnQPoW1S97Hlp/GxCRmBFhC+aDophbpaqM"
+    },
+    {
+      "id": 3377773,
+      "power": "108109171563429888",
+      "pubkey": "gDIO/BoxuCczahbSTacTuO8VpU4acxARGwypc7a4HvomqULdGwZDAja0FV5HB9qz"
+    },
+    {
+      "id": 3373733,
+      "power": "108088177763287040",
+      "pubkey": "q8C+RoYciwm3ss4dFpSw4L6VrWKHnoI4MgAteXyo1f6119OKnjT86i8SOLgKKd7M"
+    },
+    {
+      "id": 3373373,
+      "power": "107453622115106816",
+      "pubkey": "ijYOTvQ2fPEh9aIMUz4ENIP4fkemTEATevBCl7EZsJefQt6+ntI9DgibKK3xWOmw"
+    },
+    {
+      "id": 114153,
+      "power": "106759692839026688",
+      "pubkey": "qwA7GklLT+rMNf7S+JHxRX2Oz5hmp6N6FWHnQYjBGeX/eAtTDbqKdYc0ASxQuB37"
+    },
+    {
+      "id": 2131881,
+      "power": "103993441842626560",
+      "pubkey": "uZy0HjjZb9T02IxeE2pIVo8cuFE5Z7d76lwOSMzEVGu2gx3gLT4LxES23kjoTGWa"
+    },
+    {
+      "id": 3100009,
+      "power": "103374708853964800",
+      "pubkey": "l8vXyEV3m6+bNaD5WslRdrWZVwhMQDRVbp5w4TGhtWFM9bxHAYfmUnJFKF3tYnUu"
+    },
+    {
+      "id": 1083931,
+      "power": "102881268651261952",
+      "pubkey": "ufDrn/uNV9tDqoNOCymMkI9yXMaBFiAPtNQlUO4j/NiVNAV1ez2OGXBPE4D+jUoy"
+    },
+    {
+      "id": 2131801,
+      "power": "101383699454492672",
+      "pubkey": "jmm9dZFbRqSkB7pXcGSA36lhyqNFg1U7d8lTSaPTXw3z7ENHt/0jCVEP74ciaUCk"
+    },
+    {
+      "id": 3281237,
+      "power": "99866871624368128",
+      "pubkey": "kltKHzY4C6qjt5zeD770/OjYfMMwGy5PGrc+6VVLRapibNXVnc1JNRWSO8YnTLqE"
+    },
+    {
+      "id": 2131855,
+      "power": "99858505028075520",
+      "pubkey": "pDCyePR6LoUx0HLHMIYP6ttG8Ub0befNNhA7X4XKwXM2xAeOzZHsLeSp16ysqNES"
+    },
+    {
+      "id": 1083499,
+      "power": "95735851819991040",
+      "pubkey": "o8DuoLsemLAAb2eeBltLzOaa/3djksbpj4z89OS7b0nusS7EMLanGxdgVWEPd/i7"
+    },
+    {
+      "id": 1084949,
+      "power": "95719393505312768",
+      "pubkey": "oGu8RjoUZyqIAZud6jii3yrx2aL8lAcraB8l+w0EW0WQUiAcciCtvdDo1wrCDkug"
+    },
+    {
+      "id": 1084149,
+      "power": "95703553665925120",
+      "pubkey": "k8U+XjHlQtMDQpiFoHqFLfsqnqN2hIV/wyfF6UNPaLYHXmquY+GbPXbbx5ph9xZY"
+    },
+    {
+      "id": 1081419,
+      "power": "95701492081623040",
+      "pubkey": "tlx/bM3omgtudrqX88ZxNyxGwYq4AC99VZsPcmJAsc6ZDlw8YS3wjGvFG4LEnpKS"
+    },
+    {
+      "id": 1083939,
+      "power": "90073023339560960",
+      "pubkey": "rZ8F0cY3YqR5+/a0GPNx+Mv4AVQ/RYzGUjTNxhUVtGRVz55rbp81VpHmEiETy2pt"
+    },
+    {
+      "id": 1083768,
+      "power": "90071992547409920",
+      "pubkey": "gmYR4+3gDdTHVvk8a+ZvPVBWqnbuHhmTufC/4ITThpW8y2ycQR9gezdm6ctQziEr"
+    },
+    {
+      "id": 1083949,
+      "power": "90071992547409920",
+      "pubkey": "sjCCC1Er9dkQrczb3yumNT6WzFgwzMRY7KKbQi0xTPHUEs/FaFZV7OkjSdqPxFqw"
+    },
+    {
+      "id": 1084968,
+      "power": "90017704160788480",
+      "pubkey": "s9TMEqyuY0f3OEeJbEetHTOpbdohWUOBN+Ymj2mLlcvB5E/3vrdj7fTeErVUuVAV"
+    },
+    {
+      "id": 1084413,
+      "power": "89017938853494784",
+      "pubkey": "pObPq6xw1+FX+1F5OCF3jzwwLe2suVELwq68czsA2TwFwqm6YXHfzwW8zR2MvPs1"
+    },
+    {
+      "id": 1084941,
+      "power": "87564556280266752",
+      "pubkey": "jNwj2LLHcVfLnr2rJ0F8uHF+C3uUMPs+pyOAAdHeom1qv9DnpSYJdT5f98E+IOGn"
+    },
+    {
+      "id": 3623016,
+      "power": "83749379780902912",
+      "pubkey": "mAEnKo151VoVVFnHhhP72UHUxQpHZhxo34gPFrSNqA9T0mndbuYZFxkAbdhPutyg"
+    },
+    {
+      "id": 1084913,
+      "power": "82405304125358080",
+      "pubkey": "mNokjvMWohp4+IlJFTDMFna/XKCwEhy8LqyYi1qtQKfft4yF83yyMbyX16eBYNih"
+    },
+    {
+      "id": 3175111,
+      "power": "81921244131229696",
+      "pubkey": "rZAljt6LwaoO6ab7omfA34SEL8lTpfQ5V0dsLz0FaXulUWBB9PmNJI2+IdQRB7iv"
+    },
+    {
+      "id": 3175168,
+      "power": "80816990859558912",
+      "pubkey": "iIuY3SPt6dJQbm2O1ogYmxeZ/7ZWrXSw/Gg4xBbSJjEdi/ZRLG/eJXBjs1SieK7x"
+    },
+    {
+      "id": 2808899,
+      "power": "80292970489708544",
+      "pubkey": "ipcRkkVpV0DYLCTtJEzaBxfAmfszV6QdVEa3DZcWxf2nCXC+ZziB6l3WiSmZWt0Z"
+    },
+    {
+      "id": 3238633,
+      "power": "79921043501744128",
+      "pubkey": "jU5qdRluoZ88GpO5/jk4te18xxPkW3eoD/8Py+KgxZEz2aVgHRhaudVZovK6k8Qb"
+    },
+    {
+      "id": 3241413,
+      "power": "79890557823877120",
+      "pubkey": "q/JHaWxkOYRrt9qRLIxzIvH2LViySEb1vtd4Luu0ZK1GMkXUiEk/hWOojCRnupJe"
+    },
+    {
+      "id": 1531188,
+      "power": "79871797406728192",
+      "pubkey": "uM9ykzvCUIUGZ/yDiw0ZsOy90SqpdezWDKsPDt5FRHTfQ8Ged4riTN30i6pURuZe"
+    },
+    {
+      "id": 2252024,
+      "power": "79548721376788480",
+      "pubkey": "tdxMQqZ0ar8wdvgAzJSQv3yxqERJVS7oC73Zc+R1wQrZlz+lJjblgyiR1CaDnDVc"
+    },
+    {
+      "id": 3499888,
+      "power": "79262831173697536",
+      "pubkey": "qlZMcWOic9N7nhqIY8dMs+syfYeuJfqf+hK3xcK+gv9CW4ft/T6/BpXsXiMBA1hv"
+    },
+    {
+      "id": 2822222,
+      "power": "79204041661349888",
+      "pubkey": "rmJUGAi0o+CRauzLfDRrJJ0HmTsZbnel8Kdd/luYsSLJHkzOoOeyMU2EXtA7QCRG"
+    },
+    {
+      "id": 1422327,
+      "power": "78768549157404672",
+      "pubkey": "tCxwV73fYT6hFmsnAy3N9BiwgYvsjLBOHscm7SBIhQpZmOKy6G7nzYrj+3U3trTD"
+    },
+    {
+      "id": 2252023,
+      "power": "78429762137096192",
+      "pubkey": "hvdpM3pz6VFQO8StBJ/nXaSD0CFB/inDnD16U/p9mMXVCsW5Whuw4Q7mEZ5+Ig/J"
+    },
+    {
+      "id": 3540153,
+      "power": "76277038628995072",
+      "pubkey": "kYxj233eh14/Ea3kwPOiSSEBcuGAHbIAn4BsuEf8un3l9zeq/zGndlDoyvhJoys4"
+    },
+    {
+      "id": 3315260,
+      "power": "75606233456836608",
+      "pubkey": "l7y6k3oj7Uc4AQDrTwBkorpDBaIfQ5jtpuUg/92yxMOeEcCNM/sg3tNcEtRzeXzf"
+    },
+    {
+      "id": 3241759,
+      "power": "74232312073551872",
+      "pubkey": "gpDchhbesMD/x7e8RYjAmY6I6Ldp35AnYhyE8lbZQKn3ReWCnzQnKi0lEKt48bic"
+    },
+    {
+      "id": 2368946,
+      "power": "74099180972277760",
+      "pubkey": "h3n/0JYlMvuXUMC1wUTi6BRInkDYZQgjt9in5InFTqhwl2yLr9mx9Iz1wfiFNWbN"
+    },
+    {
+      "id": 3166668,
+      "power": "72690775296573440",
+      "pubkey": "i6BVep93w+bWF12wB5o7Cu7yhLg1i+ABBmCagU6O1wVrghJkp4sRA0W2LRfiIwnl"
+    },
+    {
+      "id": 3166666,
+      "power": "72598347600363520",
+      "pubkey": "pm9vrSCxNDNdW1Y8jIfd1QvG1WbcXyQg76ZVRqAceN8XjUMFIfr4gdhzpZuWylFz"
+    },
+    {
+      "id": 3540144,
+      "power": "72535572358365184",
+      "pubkey": "gw7Yf1UQ3hJpctWFH6OefN8mdYDfG9twxYKOW5y/q1kE2XGr6ZfoHvycZ8/Kb1gc"
+    },
+    {
+      "id": 3540147,
+      "power": "72375524697047040",
+      "pubkey": "pa/sTn+SUHeZfTvhmC1wnjJkOA6LJQbcPf+ysrRmzKNYXRtvjyZS0xzm2WmNrTK7"
+    },
+    {
+      "id": 2639492,
+      "power": "72371710766088192",
+      "pubkey": "sAtq/A4E4+3failgkpgBS1OPdQa46DGgPEW8/VUARerH3brw/VKuwAMICf9sBhj3"
+    },
+    {
+      "id": 377277,
+      "power": "68835681371160576",
+      "pubkey": "g25uUE1TEGjOhMIiTwA9ENXa/xzufZaJ7/5W6sBva7Zyzn7W6CNkp6IRVc73IJoU"
+    },
+    {
+      "id": 2105010,
+      "power": "68496138436608000",
+      "pubkey": "p8j9eQiZyo5DzA9eHfWwePThCQYw2F9vZ5HkpQem7eLAsoKGCe5pM6dUXg0xW3kh"
+    },
+    {
+      "id": 2808888,
+      "power": "68434978102312960",
+      "pubkey": "kb1S3CrmLSaZjv8EMJ10n58BjHbgy7wNEKf7ChWn6jVeRkMknY7wfbN7ISEKBBX/"
+    },
+    {
+      "id": 3513598,
+      "power": "67532691372769280",
+      "pubkey": "uVa68LNHqLwhNQMXL3qPuuF328Ic+Wv6PpslgPBltjrsNPqkCClKnW4AtYWgqxhU"
+    },
+    {
+      "id": 3513633,
+      "power": "67530698507943936",
+      "pubkey": "rrFJYnjYZI0Pvo46u8YUEK+VjTaZYWzgMGh3IInBHnRDmOxbGDZZ3+soxkhdoLgM"
+    },
+    {
+      "id": 3099981,
+      "power": "66231488080773120",
+      "pubkey": "hzoPSjLzsJLlb8qBQfXhq9E0DkLjo5il8JD5s08sjhoFyLrtsSoiNy0lR4nhKGem"
+    },
+    {
+      "id": 1111110,
+      "power": "66152872999387136",
+      "pubkey": "mFe5BYUpCJazvMZf4EkzVLPVcub81iJenWtLGyZeLQtFMNOi6TGIukEetGj+GhSn"
+    },
+    {
+      "id": 1909705,
+      "power": "65994749483417600",
+      "pubkey": "kl1I3LiOUHBmY43kkntHmDl89Isd3KhFELttZXnQVimrMKJKdcYZLqSS8mfoRMSg"
+    },
+    {
+      "id": 1989014,
+      "power": "65366653466050560",
+      "pubkey": "kIPpegXkc0ikq/ruVmGhwWJc34cK1pvw6HnKigE3lAZSeod6o6tT6deN4TvCN6k2"
+    },
+    {
+      "id": 1989015,
+      "power": "63300258800599040",
+      "pubkey": "ohv0a2IRg+0K/p2/0nYy6mdpUMuYXMvDhjrdFyWmB2U53M+zvn/knhznjhvTqP6F"
+    },
+    {
+      "id": 3559994,
+      "power": "62203564671369216",
+      "pubkey": "g5lsyuUOJU+UkzjS/gtN4l6XuwlyHN4D5BstiilzOecfnoiI3SPtIVTd29XsRG5E"
+    },
+    {
+      "id": 3559991,
+      "power": "62127354771668992",
+      "pubkey": "kvACi2kCrzYpjB/fWc+4vcePajvEhh+95iZ82fcBp+61OBzOhqdbD64u+bVSBfWU"
+    },
+    {
+      "id": 3559993,
+      "power": "62078151626326016",
+      "pubkey": "o7ITn663cDGzq479qrTmSfXWkEGDLx0CX4w1+yGeyKXEzCWsBmgghqNqtTvXlfQc"
+    },
+    {
+      "id": 3559995,
+      "power": "61963149582008320",
+      "pubkey": "hXStSWCD6VuW11IhS7saGbMuwziwi8sZx6+3DjmY5ECDw0zVqAeLBmKvT5wMlDTp"
+    },
+    {
+      "id": 1938671,
+      "power": "61335568960716800",
+      "pubkey": "pwABKDCOac39m2GD6R68WYtXuGjFiC/yvbn89SGzElwLn6L5Mnvxkcr5MjPcU950"
+    },
+    {
+      "id": 2362412,
+      "power": "61159715819749376",
+      "pubkey": "jBbvJzeK0ekmZmLApYHSJ1N7EIpDRggXCN5WamY9pX5Ig1xbyVmsuO1TM59HKYr0"
+    },
+    {
+      "id": 3559992,
+      "power": "61142948267425792",
+      "pubkey": "kLkka/O9FOmsQU05ICwWA3KXsRmYMCho57LuvVI5kYpTT7EQvi1vvmTipakQFPol"
+    },
+    {
+      "id": 1938674,
+      "power": "61140749244170240",
+      "pubkey": "seeLsV17rfZ5QQ1ofEWWR84JsrFqoX+c15/wVOG68meHRhecfvhSpDqKXnYoK3ZN"
+    },
+    {
+      "id": 1927554,
+      "power": "60591680625049600",
+      "pubkey": "lWz+TfSFXmGUa2F0F+fNMHRgAvXVavQOHGle5j4FfvBJxS58/LccWVuOpqSzNcNF"
+    },
+    {
+      "id": 2948413,
+      "power": "57606506555637760",
+      "pubkey": "ixFLSvdaLRNE00FLSityVlKHrA6jZj6nBj6JkWeIyt7czh1lLUgjFNBKpt5XVWil"
+    },
+    {
+      "id": 3358608,
+      "power": "57542219485151232",
+      "pubkey": "gmn0nKzocArxiITS6l2nBKJEfL8Pmiy+2sNpydx894NDFDDAeuBFI8BL40wrinEH"
+    },
+    {
+      "id": 2889390,
+      "power": "57037165690880000",
+      "pubkey": "g28K3y/eARAWD5pBCEUWAEgScDtcI/Z8CWFxWEo/Ck2oJJ2tEMLyA3zTHISkHghK"
+    },
+    {
+      "id": 3253411,
+      "power": "56940958423449600",
+      "pubkey": "h/TdKW+KaFRcpWRyA85dIZl7unFeV4Wa7jHIxPbWOuXc0ZF1cY4UlD3Nq0vBm/Wi"
+    },
+    {
+      "id": 3321215,
+      "power": "56912439840604160",
+      "pubkey": "gv7WJAyGk7QGGc0UQwbNnFMznZmjn69BIYhvKIIiBo0njoil8lwpM82bucbIz6k8"
+    },
+    {
+      "id": 3081952,
+      "power": "56390549774532608",
+      "pubkey": "j5G6bIE/VJ+e9gkDueXSfkVs1PnCiXX0xjE7rSb/bxXCKJs0MFYg3vtymJES79uk"
+    },
+    {
+      "id": 2003699,
+      "power": "56289068287262720",
+      "pubkey": "si1V7yOHoGmCi5/ZAG3q+jFTtlAYaiRPXKSI7f61VpJ9xzkO7nIESnGOPR48sIdR"
+    },
+    {
+      "id": 1989013,
+      "power": "56274379499110400",
+      "pubkey": "tfU61YOzC+URZXWtUY576wR6kYVTU/z3ZaUO5qWLmjGL6m9xac35QnbKiBjKUlal"
+    },
+    {
+      "id": 3377777,
+      "power": "55639445893808128",
+      "pubkey": "iu9KpZDeSY+7cD8AOJNSfOTBiVM/7kIZvCzzK7QgTu8EurSH+wCfZ+PpaFjJsQWB"
+    },
+    {
+      "id": 2822088,
+      "power": "55561071330590720",
+      "pubkey": "khxeplOgDqFKRP0LsS+zQvKn8gLPeB8CInOf947RygfZgDWQY8L++vp67OVVbyO7"
+    },
+    {
+      "id": 3601451,
+      "power": "55135354172211200",
+      "pubkey": "jqvXiusby6QeriPgBCYLEHrVqcMB7c56uk5ZxBIuvGGmuNLGb5zpJWmqEQW/io3D"
+    },
+    {
+      "id": 3100088,
+      "power": "55053337476726784",
+      "pubkey": "kNtGgnlDEcIBPu3pmHEhWYQKEFdviC76bgegqiv63z4IZ1lTkQiDTz7ToUTi6OZd"
+    },
+    {
+      "id": 3649204,
+      "power": "55048424034140160",
+      "pubkey": "rfCCAhbFYSOb5iifqc6kbGIShXHjEX/BzTVyJ++7EpGAgEN1gOQC3W1hgOABLX0h"
+    },
+    {
+      "id": 3649217,
+      "power": "54830170976026624",
+      "pubkey": "pnYRaJ4dfMyynLEFwmMX2ICDvz8JM2vF4TsaPzXEwSS0c9JMFU0u65oI4HWCSsly"
+    },
+    {
+      "id": 3099888,
+      "power": "54750250224582656",
+      "pubkey": "kKjmD3Bs7inhp8LerU8LBALGlCIO1mvXL1T955vtLiznfvcvV8vEnOKDIZBwPvDA"
+    },
+    {
+      "id": 1859603,
+      "power": "54589034332160000",
+      "pubkey": "qzCJ1YHU1C/PS7PMWAvF+ow+DGPWSigJ+G9pj2NvGKdpsPXzCi9l4hctH1QJCGXW"
+    },
+    {
+      "id": 3649227,
+      "power": "54511209524756480",
+      "pubkey": "p/bSNf+dGcKZ46EPk8hgVKyS3/B6M//1sz3vRHY1LLs0eFUw1Y5n7dQTYGZBSF+c"
+    },
+    {
+      "id": 1923786,
+      "power": "54403148147589120",
+      "pubkey": "idAJjRxSq71dP9TgsTGX5nDv/KZ46OPyd2GCeO/P8Zig0SA4sBmx3snTR5jItmF9"
+    },
+    {
+      "id": 3649212,
+      "power": "54255092034961408",
+      "pubkey": "rFglehsRdkBHI0SU0ciLORgpXBFqsadyeEZSwr8L4Dr//UMbVytLekFpZAEkp52W"
+    },
+    {
+      "id": 3312989,
+      "power": "54120367500820480",
+      "pubkey": "jm642sM7/YH3AEYhAblTrzzEOztagga9Ynl1rYnEU9zlXlSBxtPVwM/sPyEo8B6r"
+    },
+    {
+      "id": 3099777,
+      "power": "53660531122241536",
+      "pubkey": "h/7F+XFATUaP5MpS4RYrXmUmbUhZiKF0AlZtPP2dVQzFc2PdOk3AVt3/85ajFgWS"
+    },
+    {
+      "id": 3289271,
+      "power": "53482788195663872",
+      "pubkey": "ljf7SVEjXFfGKyQcnK6me/VE+6Nu8TslOXAPykgkILbOAGsoBMvPQ9mAd/Lp54u2"
+    },
+    {
+      "id": 3100014,
+      "power": "53408090124451840",
+      "pubkey": "q3gClp80ku7zRSMhjEcJMABKK2nAVVZcJVusIW4SkHNoYY77oXLNhsN4zxebY2Du"
+    },
+    {
+      "id": 3635411,
+      "power": "53085314742222848",
+      "pubkey": "gWsdG6LuHSWh1x3XpZcI0Wuz1XG1yewN0yF9kEh6aOpi+Gj6KeDAzCiGgO8gUk/L"
+    },
+    {
+      "id": 3604724,
+      "power": "52787553249525760",
+      "pubkey": "lqfF5WycQ0A2Ac2JNhtAULzQ8gxefW4TGu1TtP5DpPwg1a8ppdsrI4K6MBknnDhF"
+    },
+    {
+      "id": 3605143,
+      "power": "52787553249525760",
+      "pubkey": "qZC51cdMSpreVgMnpZKx78hsg/3Qs2hdI+4Xlleb27ri5HcuhE1bzpxPgv8qult6"
+    },
+    {
+      "id": 3542777,
+      "power": "52493571328049152",
+      "pubkey": "i77voUQbXjgZ5S7LdcwkWO17983TM+XHztEsqKLbIci/qDanceqX82bVoJTwQRK+"
+    },
+    {
+      "id": 1969779,
+      "power": "52445106917081088",
+      "pubkey": "penYPuxtIZz/ceD2fSMflk7NIicwqMLRMhNcX7LTVeFypEOmvljWLn7Wj/7yrcQw"
+    },
+    {
+      "id": 3611998,
+      "power": "51316681569468416",
+      "pubkey": "gSrXcTYbHxo/HJy9Da4H34GEAG/DE3mhVoMNmjCjmhaMEi1seNrbw3oSukxqszCT"
+    },
+    {
+      "id": 3526821,
+      "power": "50995349296250880",
+      "pubkey": "pFa4XLI6/6uaIJ4y0Ny0NXvck88XRKBupdnhOuB4PZpomzliBt99/lHhx8FjGYEF"
+    },
+    {
+      "id": 2920450,
+      "power": "50934876156723200",
+      "pubkey": "uQaici79zgdUe6q6Z1fkyyIxbV579QBqVRWYPsGHQ7U1v+TzmV3450cQdMtajh1h"
+    },
+    {
+      "id": 3088052,
+      "power": "50592996759961600",
+      "pubkey": "oiD6loz+iz5ejyb2inTyPS+HzhaZJ6J3oZKanu33wXTxPglWFpji7cU/JWj9PH25"
+    },
+    {
+      "id": 3298673,
+      "power": "50100862227316736",
+      "pubkey": "p+L8Ln7b09xd79e/PUysMb/+wC7GEGNJS5qbNyt94DS+/pw/Aq8JLZWDlSYECW3G"
+    },
+    {
+      "id": 3298672,
+      "power": "50100140672811008",
+      "pubkey": "kSGj2yJsM4Y3JtDWfPZI1rtwJ8s8dLV/lM1tjFuPF+5890NGV4uOHEMtEFzmfHOy"
+    },
+    {
+      "id": 3231999,
+      "power": "50057603316711424",
+      "pubkey": "l1wDDLkhkCvqIldS2/x59vPIBVoUN9EpvXUyVZ+am1efUlFZ6i1AE6BnBmup5o3u"
+    },
+    {
+      "id": 3367915,
+      "power": "49795335433748480",
+      "pubkey": "j2GNZVO93LG7D3Ih9ZZOCdnPoKXDqTyATApNJESmWUCeP5mRnmXk2SvNJWABSUuX"
+    },
+    {
+      "id": 3408862,
+      "power": "49592441178685440",
+      "pubkey": "mBZlPqc0zuUb+pDY1kQSeKJBXzsjBL6qMb7EDT8MWcIC704pVZBSKY4/+MkdpnUU"
+    },
+    {
+      "id": 3100008,
+      "power": "49176688344432640",
+      "pubkey": "lVstXYUlj5Fqwg0M19p73wrm0Yat9U+iXAEP3ur3ly2r/A4fWPAvMzyrGwG4Usyj"
+    },
+    {
+      "id": 1946104,
+      "power": "48470973678092288",
+      "pubkey": "g28K3y/eARAWD5pBCEUWAEgScDtcI/Z8CWFxWEo/Ck2oJJ2tEMLyA3zTHISkHghK"
+    },
+    {
+      "id": 3500000,
+      "power": "48261344914309120",
+      "pubkey": "hpFWubfzyMeQB4F47L7UqDd/ta+kAzJ1G8tvua8tRaEVjgpxmAA+lS2BND+6y6+G"
+    },
+    {
+      "id": 3499999,
+      "power": "48165824841646080",
+      "pubkey": "mDHHZpk3ghFYAb3O/3UuvzDoRttHvPk2v837mYr38rZ5N06wwHUCUycvCt416q+W"
+    },
+    {
+      "id": 3567899,
+      "power": "47879951818424320",
+      "pubkey": "tJyxfJfFGkm6rdGclISj33nsfX5S/VMqgzqhpF/26XEk002wBlJINVMrjLFumEVj"
+    },
+    {
+      "id": 3577777,
+      "power": "47328168779972608",
+      "pubkey": "gmeINp5rpc9lRiMKGctSvMxMyhtuk9TTPnT7yROJmVNX6r0orYVAZKqcDPW6hLDR"
+    },
+    {
+      "id": 3601993,
+      "power": "47247732632453120",
+      "pubkey": "t8gOdcWHWPKjGpWvvfuo/Bc7M3oAsA277UH93vRy1OzZOCRAQK/FII7rz5MvW5nz"
+    },
+    {
+      "id": 2816097,
+      "power": "46749825663762432",
+      "pubkey": "i/lw0TQqkqIHfcfpXuDK0vbDOmKzgPSJNsmbmtGNqTUtZSY/MXO3zOEAa090Er7B"
+    },
+    {
+      "id": 3601967,
+      "power": "46585895352008704",
+      "pubkey": "tsd6l8sFIV9c8GV6afuiX/Bk1C7zrxHX/5i064aS6rw5wtGK+Q0eeiCYc+yg5dIQ"
+    },
+    {
+      "id": 3099287,
+      "power": "46569814994452480",
+      "pubkey": "lQQS5GGtf2/l6tDrONH081eRB9tONotzVt0I848k2jO0QWnYZld5p0RBMWt0HbNz"
+    },
+    {
+      "id": 3577778,
+      "power": "46202165793914880",
+      "pubkey": "lqTxgZQgOX5tPcs3KC0E18cNeG59HDiTl9v1ZdD9Hv07kyzHw25L5oCnVHrowNpa"
+    },
+    {
+      "id": 3593579,
+      "power": "45985355844812800",
+      "pubkey": "reeVVrIWONsPMLgXDDMBULlgquH54a+rhmOAwbFjurJBKkY/iuNn+HLhxPr+XADH"
+    },
+    {
+      "id": 3573579,
+      "power": "45767583823036416",
+      "pubkey": "oauUszExlPW8jPFAF6qgsd7fvorO7QgB7Ama871zvvvGclMjzAbXwLdqdGT01iQF"
+    },
+    {
+      "id": 1313,
+      "power": "45612277805613056",
+      "pubkey": "rs56hY9/srxSIYzgyAGRnaeGbB2jM9quvpMe0l9ZXKI4iIwkkXrdOuvYIvbeZWGk"
+    },
+    {
+      "id": 3614397,
+      "power": "45412716445171712",
+      "pubkey": "t2aHpmPwV/P21uQrW39ilsUN35tPrNy2TvkVj83LbU0tqv25COeXNiAqjux5vVTS"
+    },
+    {
+      "id": 3100004,
+      "power": "45189927901593600",
+      "pubkey": "lRZI5GoRH5g+jgQPiIGF5n0dJCYQC9nfkAmEiFTb0iMgOLm5/Bb1b0tt/TFm5MHO"
+    },
+    {
+      "id": 2029742,
+      "power": "45136086191570944",
+      "pubkey": "rqUFg1s5nhm+ztLZPWoBRBCe61JTQEb3qbpWSDEvNrbRQ2Y7WLgMuTj2y9NFAxo6"
+    },
+    {
+      "id": 3573377,
+      "power": "45107808126894080",
+      "pubkey": "jTWZotZ+NdfoOuhsd2+hM+XmxoDIwyA+HcFtVDP6paRKe4PkNQA5f5ClyNnAcqX8"
+    },
+    {
+      "id": 3588888,
+      "power": "45035652676321280",
+      "pubkey": "gJzyeFg8agSCSrHJ/uv1VetJwPeewxpWdya2+EIk1mC1prpeUtCUad0ckNXxy+M6"
+    },
+    {
+      "id": 3615571,
+      "power": "44995176904523776",
+      "pubkey": "l0gx+IDc2l/+Ro90yWwNfhdYxh7dc2UuelYbIN2JwXG2sQ49OM1vlTfHYdy0/xec"
+    },
+    {
+      "id": 2062851,
+      "power": "44847120791896064",
+      "pubkey": "priOeOZ0PXeMtpaxZoeT/f+GVDzeOXfiFx6KfmkLnkrPy5Qe2mJ+GJLfdLffandR"
+    },
+    {
+      "id": 3098965,
+      "power": "44668484512120832",
+      "pubkey": "tOIA3eBlLq7cCiKvDUSvp0rC49OzC55yeajUeZzlrjBWez/nb/JtqQWMukbebphl"
+    },
+    {
+      "id": 3275917,
+      "power": "44662437198168064",
+      "pubkey": "jD8ih7qm4owMZ5yiF6eUmx2gr2ANbMOrCdPLvX5BRGAU/fePal5PDkmYPq+6TA0T"
+    },
+    {
+      "id": 3348693,
+      "power": "44523042155528192",
+      "pubkey": "kmmu1ZWa4S10jnpW7ow0ngWJfu9BieSuzjTA6ZBcNcGZVhXht0WVXEbY5cbbRlo9"
+    },
+    {
+      "id": 3226668,
+      "power": "44348389189484544",
+      "pubkey": "mW8JIlgYRpYFBTyApYo67iY83Zbc80SB/wI6t+jdoFlRqqNJSqRR6qGwnP5AylQ8"
+    },
+    {
+      "id": 3233333,
+      "power": "44345021935124480",
+      "pubkey": "oojEbGAqQeG+gqXFRdK2CnT0gjH3fhTw10g4dBJLd+9uq6wKiQpVYLOE9o4iCgA0"
+    },
+    {
+      "id": 3603117,
+      "power": "44306882625536000",
+      "pubkey": "qR+qh216Dv9rY7eEmykTdFsGD/Ic2I6Wte4sHPMMQ56g5yMvDcgXwnjF2ql9sjpY"
+    },
+    {
+      "id": 3226666,
+      "power": "44055712938065920",
+      "pubkey": "lqqJbvcNA0oNNXwfROXTszWqT1qlOa41WvTItqGVuUucgqkyh3Yy7b/OaBAOuoX2"
+    },
+    {
+      "id": 3099101,
+      "power": "44031317523824640",
+      "pubkey": "rHEWvS80i65tFXzjYF7qZy96EIkg0yXWQKznD0ZEPc4xok8Z7ZqMjuD0PSiSviSu"
+    },
+    {
+      "id": 3567898,
+      "power": "43780835031121920",
+      "pubkey": "owPXXs9JmaE4tOdXQ7Zpai8odVH25LjjUFTXKmy6invbTtZpU3FQOA0amRdAdzcU"
+    },
+    {
+      "id": 3099987,
+      "power": "43692186906132480",
+      "pubkey": "tT2SBVcOkqxW0wQi6awmUrogmjEU/+nm8LSaeQifsbUo39iy0GK7TNKyk6vbvXmH"
+    },
+    {
+      "id": 2808877,
+      "power": "43536193693941760",
+      "pubkey": "po9XlbpsYimOhur6Aa5DHpJ1GeQvrW2vcdytyG9Jfoo+Amsw9KSvbxSfV+VZwDYB"
+    },
+    {
+      "id": 3298637,
+      "power": "43512244956299264",
+      "pubkey": "jXfQrtrVoEljuYSLe/WDdq/ACfe/hUpLHS0KPtGDYqQHQ0XDoZj6dPhQSnzVCQqh"
+    },
+    {
+      "id": 3253580,
+      "power": "43333711755739136",
+      "pubkey": "tEeh9d0qCi0yrr+fxQhGzk+meO8FP5Eqq2tdOaAaGUhhkKsIDmZlpchE5ub3RST8"
+    },
+    {
+      "id": 3099008,
+      "power": "42840890028326912",
+      "pubkey": "hj2WBcsyRKfoJSQ2Yl/XHoyuKsZ3Hxqqid/+YPuJhmGeMK2J/FMPXtjJnNl3oufe"
+    },
+    {
+      "id": 3558637,
+      "power": "42485129297264640",
+      "pubkey": "rHKYpI6x+De1K/n9Sw/OOhSy8mEh6yI8bKEfSYMdzFjuCjddn5j+g3yDuzfNJaga"
+    },
+    {
+      "id": 1996719,
+      "power": "42420773507301376",
+      "pubkey": "lZEZQy0CJCI6EDyysE8rG2hej2neuQye/LPklBDznaChnDswFggag1traR66udQh"
+    },
+    {
+      "id": 3510628,
+      "power": "42153935779135488",
+      "pubkey": "q6cC+vX4bonDuPxvPoI965UiiaoSx0/GYsjRp7vYKWZIrHczypswGGlYx/JzuDxn"
+    },
+    {
+      "id": 3349417,
+      "power": "41388125930389504",
+      "pubkey": "pUDPY9E4jFX0b6QfYVYnbmi9EM4x+EVHpMrKkYiXA7TBXA8NzEhUjBeGxqrhGul9"
+    },
+    {
+      "id": 3214920,
+      "power": "41207015749451776",
+      "pubkey": "t7UTOKtt/NVgIZgGTETzNzdrPAXCgcnajXlCUgQfA1DZAASNGzPaxtFG88GPzEgb"
+    },
+    {
+      "id": 2820000,
+      "power": "41098026659348480",
+      "pubkey": "jE1uf7CTaZlnMsjxGJLIjstio5cOdtY1fI+5SBERon2cSRKc6Zx3I1C+Y19sQhkD"
+    },
+    {
+      "id": 2588263,
+      "power": "41090467516907520",
+      "pubkey": "lpqJ4USTRzFIzn0TaXW7bnet7sD0xKUg3yg/3AqX8RwlwGDa68kCZDlEq5G8yhov"
+    },
+    {
+      "id": 2201190,
+      "power": "41040294782697472",
+      "pubkey": "jBMMkb1XvNJ+OtVrpYcfvBwinQS1sHp1XL7gNIEx+L41Vi32oEJyJLQbhv/PqndI"
+    },
+    {
+      "id": 3308920,
+      "power": "40926365406461952",
+      "pubkey": "l0xhnLcb/h1TCtflJJQbLNyAcqclz3TkHOqXJRhziuKenGmD7Atj4q4zKm0aHLMZ"
+    },
+    {
+      "id": 1084788,
+      "power": "40783978650664960",
+      "pubkey": "giiW71yJSWRKtNnV39f/H4/IYFOuBYwtUILnKA+XuWQUBTu3kwYnxuHCW7jlRJF7"
+    },
+    {
+      "id": 2639655,
+      "power": "40517347080929280",
+      "pubkey": "jijOGosFxKsRscGlJ4wSpXy5ulK6fSOBg9QfzpajZms3kdTQnWS9EDePCIw6AYh6"
+    },
+    {
+      "id": 3348688,
+      "power": "40310329657262080",
+      "pubkey": "p8OoNr3AqIny2bTxa07sc93Y6UDetJz1I9V7p8YMorxnA0l7yCBA6BwtnDNkjYMZ"
+    },
+    {
+      "id": 3325538,
+      "power": "40133892400742400",
+      "pubkey": "pUdrvsGp8PKztYmEq8EKAZrrq6Sh7A6I0GfzgQ5EcWR0VGbHZ4CGStkQVOD7Gove"
+    },
+    {
+      "id": 2063867,
+      "power": "39901411525263360",
+      "pubkey": "kr+tyq8Oz2YNNnMGwfaqmGV2+xHvECsMhJFmWCbiyQxAaKDkmcBaoJvKiNULB3Vx"
+    },
+    {
+      "id": 3623232,
+      "power": "39880283171848192",
+      "pubkey": "oPKuhTI3luv+lODtm18x+44VaBJHtd8AJ4EjsOeXdhBohDB2oDTMsGd+530BA1+f"
+    },
+    {
+      "id": 3582468,
+      "power": "39836680663859200",
+      "pubkey": "pc/+yERemCSlRg5o6OFdm0urHnVTbb3jOZTrBePhejbthqNyg9i/h2Lkt92BK8Oy"
+    },
+    {
+      "id": 2063327,
+      "power": "39798383849766912",
+      "pubkey": "ifZ9okSF0sKRcZwOihNd31Uu0ACGJRu+2ZfuTwTuG90Th9QzpYPG3dtFzCTVlyTp"
+    },
+    {
+      "id": 2826253,
+      "power": "39751056195846144",
+      "pubkey": "l1IJor4EgsvsMgJ31QpaN2b+AW/N087Kk4SKyL8i9Gl7yi8I0l8fgY6yGDZV7A8i"
+    },
+    {
+      "id": 1858258,
+      "power": "39662194731778048",
+      "pubkey": "lzc0xuWGWSK/AreLBGe74m8mHuNs+VVueQ63eIZ2ckuprYoQL7/l3tcbdrn7aqG/"
+    },
+    {
+      "id": 3149598,
+      "power": "39456629007056896",
+      "pubkey": "huLjPffaTYXcQJBIlcy3K+J6d/m0Fxh2l4tCaTvv91ebouFmzCp1A0bRB7PiIwS9"
+    },
+    {
+      "id": 3524179,
+      "power": "39236072437186560",
+      "pubkey": "p933fpcig0pz+qhqhTrtuCRmlIhw9+5BL00m5QVHGvgHGIc8ZmfpTTOL0d9DjaWi"
+    },
+    {
+      "id": 3220172,
+      "power": "39166390887776256",
+      "pubkey": "p7PERLhq4oZ0Wy0Cy9eKeuU2fmCGn/m8WFEJyVv2G2rHZ2sfmuvjzVXpxmVIcPeY"
+    },
+    {
+      "id": 2828269,
+      "power": "39064170666131456",
+      "pubkey": "rGSSgzD9gqbVbrCROTg02/1xo1vnwROTX+UmzT6F+P9BMNLVvfhl4zpP4+YvytsS"
+    },
+    {
+      "id": 2825282,
+      "power": "39031906871803904",
+      "pubkey": "pAlkK1riuHVz9YnvcLVP2WMWH9f1pbKPOquRurOVqKkrMJ9iXGTxCRXKUXBGnMY5"
+    },
+    {
+      "id": 3558501,
+      "power": "39031666353635328",
+      "pubkey": "tsNQQ1kkSd0aI2Y8XuAGdOzJhneO+XIoKGOaOmX20Gv+ouSiCTEvHn6MyGAWgmnO"
+    },
+    {
+      "id": 2866666,
+      "power": "38735794646548480",
+      "pubkey": "jBJuTVe5Kfc8BmcYAhguQ5HKxGC3hS+qtR2n7HTVXyfi8HOUl2yGCSwLW8AakZLl"
+    },
+    {
+      "id": 2826588,
+      "power": "38649878120759296",
+      "pubkey": "qcC6Eydro96r+8ePdo0scyzS+7Gjv+qR6ybAalwmFrxue97Dw+T6rVnUgJcIj7v6"
+    },
+    {
+      "id": 2079257,
+      "power": "38627836348596224",
+      "pubkey": "puJxLXm1e8f7ANI5xTcc63NDGvTv4TsIIV+nLuA2hCRoc3vY5OAAs7cJDul+Vcrn"
+    },
+    {
+      "id": 3610683,
+      "power": "38623781899468800",
+      "pubkey": "ksizl8WGCi1aDDuPWPkq7O7GBSRW2DdOYHsOFLbHzQ+QlUwjfqW5Aw4f0HLhv+IW"
+    },
+    {
+      "id": 407287,
+      "power": "38540974930001920",
+      "pubkey": "ruCTFk4fykd3+BNwC/GMY5YIj+Jc1SZGZuKGJ9Yi1avvOiy7VBpZ29UtBm9V8QtI"
+    },
+    {
+      "id": 3144777,
+      "power": "38358181121884160",
+      "pubkey": "gmz3+PTuO+8+3UZN8hpESZ4zxqC6yx7WQLhIxWUauLKaa2oifUXysPb/bpxSrd4R"
+    },
+    {
+      "id": 1234567,
+      "power": "38313169864622080",
+      "pubkey": "jy6cwg9o9pBFmb3drr6ixYZ2reVAVvkz3lHTMhxMJE1Bh2hOz7CnNOnHV535C+B9"
+    },
+    {
+      "id": 3156722,
+      "power": "38277504456196096",
+      "pubkey": "kkpFNtvFhWdMBkMVwWFQiScLDXDXd0lelxpzWrNuOfASL9YIxbHw2Bpm4O52OMpm"
+    },
+    {
+      "id": 2252111,
+      "power": "38096840951857152",
+      "pubkey": "jIdtWtpZ11vJm2g2xL9vgVBkWxpfnrXHuAXbF5tGKcx8p137elsodFAta7o/gAIk"
+    },
+    {
+      "id": 2827996,
+      "power": "38068511347572736",
+      "pubkey": "sODK4HTzYovjB8x73RPzWncchWsyD72F/T87ZC36CVf+14saiw0+aP5XCzXcU+vy"
+    },
+    {
+      "id": 2252097,
+      "power": "37911160925716480",
+      "pubkey": "mTo9H5mZ+/LlG1jaHN3pMEA6eqqs7qrdsXEb0AdFMp6dEmlIjeImgRCeMVJTcULl"
+    },
+    {
+      "id": 3308933,
+      "power": "37603297669939200",
+      "pubkey": "sU11oqblOvuSmlb4A5Dbo8NZHqI4MmqmaRDkC/NJ/D1PLoPbqp8fKlJvMyrJRTKI"
+    },
+    {
+      "id": 2846602,
+      "power": "37332590176239616",
+      "pubkey": "rX1g4Geio3wLxupvi+rmqKkyEdaOCIXYZPQV0nZvypkbOAaTl7Q6r3RVJ4wasyZY"
+    },
+    {
+      "id": 3179570,
+      "power": "37084104843329536",
+      "pubkey": "ks2IzTikjHabf1WzKpd49e40VkgORy9vHXTJJ9t0wM0O+lTbMBmZ0ADMbmnz1hpo"
+    },
+    {
+      "id": 3559187,
+      "power": "37076734679449600",
+      "pubkey": "jIjc3iELSKw4FeOr14X4U9vENxMtfdNztxE0jiZMj6mJAWwOK9/9nAZFk3E8VgQX"
+    },
+    {
+      "id": 3340635,
+      "power": "36564602779074560",
+      "pubkey": "ivcoWikqXiwSImao6kkVzAq83PW2xOGP2nJZshQQZZSfTjqVnT47Vgqzjus+3gkA"
+    },
+    {
+      "id": 3519208,
+      "power": "36130020808196096",
+      "pubkey": "r/7E3HfRdhIfOtPL3RNT/cDY+wqYvIqI0MxiRxC+kDRe8/68y/m/s9qU7R4m5ZsB"
+    },
+    {
+      "id": 1941622,
+      "power": "35960249340919808",
+      "pubkey": "g28K3y/eARAWD5pBCEUWAEgScDtcI/Z8CWFxWEo/Ck2oJJ2tEMLyA3zTHISkHghK"
+    },
+    {
+      "id": 3499694,
+      "power": "35788313210126336",
+      "pubkey": "k3DSrXZyt7n0TwIQC0ggofbCkL3KmpmBT0OlAryCucYp6/ckulnPROA5L+8Fk98Y"
+    },
+    {
+      "id": 3499693,
+      "power": "35770343066959872",
+      "pubkey": "mWIku8qU41T/KOtSfCsJUnlB65OWRFQR8sC6+5OrFH7RfIDTcGngQ3OfEB5Jsuok"
+    },
+    {
+      "id": 3308922,
+      "power": "35751410851119104",
+      "pubkey": "qgjsnLao6hDSMUEWdXZkhnVeXy5rWqxGE+0Vb1iiivqMCPoCF4smqghinKJJs8u8"
+    },
+    {
+      "id": 2826815,
+      "power": "35664789950693376",
+      "pubkey": "picVF9m7genMveWKiCCVN8Sl6OPIFFgLmXyC44ccbMHAQTFlQRAm8lvhNRrrr6Iu"
+    },
+    {
+      "id": 3276671,
+      "power": "35591569348231168",
+      "pubkey": "ipaqtUhJpE0M5LVfx6HrbIvxIo/yWfmhe4vAzn91Tlpiex00dfVzNQn/F6aE/9H5"
+    },
+    {
+      "id": 2827843,
+      "power": "35556316256665600",
+      "pubkey": "p8jYb8Gt/y+qG4OBBnhx9mUdEzDhPnfuRA9GXF5JoAOJ3Cf6t4peLq8oUnHPSu+1"
+    },
+    {
+      "id": 2825675,
+      "power": "35434167386767360",
+      "pubkey": "k61+VaCSd6OYwUnBbTDQcsFQmmheocsyInhfcB6j99xz61ag3l+X5zI9pAKjUzRB"
+    },
+    {
+      "id": 3519200,
+      "power": "35284427646959616",
+      "pubkey": "kC2hkDhtHFv2rbXdJ4Wl0X3KO28B6CCIM4ln2xXR4K+k6BY5eMOfl9MsdystI0DE"
+    },
+    {
+      "id": 3276663,
+      "power": "35230165030141952",
+      "pubkey": "ipaqtUhJpE0M5LVfx6HrbIvxIo/yWfmhe4vAzn91Tlpiex00dfVzNQn/F6aE/9H5"
+    },
+    {
+      "id": 2827109,
+      "power": "35229039748710400",
+      "pubkey": "uZmkYSrrXaMxcJqJbONEpRAPbyiZVk1CsPba8dtiW2aJGUQJ5SLRiEcFCL6K1hoF"
+    },
+    {
+      "id": 3081958,
+      "power": "35044149996552192",
+      "pubkey": "l3laKF9e1PxoA2/QIvl0zdTgV8KbPJxdBg9nDwxr1SGMcTHxnHMKrWRkFjRBDnSP"
+    },
+    {
+      "id": 1083688,
+      "power": "34999894653534208",
+      "pubkey": "mRdnV051ms9l6QkK9aHLmOIpIxfFsf24jz1WczqFNnZNMAR08lfI00S3BEbwRxaf"
+    },
+    {
+      "id": 2826602,
+      "power": "34857748415905792",
+      "pubkey": "tQtAiag+99VKvaSL2Ozc67+eDKwCrHIFZ6bWtQOb0bl4ztJ+8e07+o26VBLTOU6Q"
+    },
+    {
+      "id": 3519199,
+      "power": "34821533251665920",
+      "pubkey": "hmOXkaeb5BBUDN6DDniCbHpbyaCPwdShMV3WIfEwkUx2ia70fDJ17yMCGDS128A9"
+    },
+    {
+      "id": 3663680,
+      "power": "34732266651385856",
+      "pubkey": "qBZ/cWz15UzZ6jBV+KbsrS5IQ6v6ZVDOwb6d7c9SbgYK8I4wwgkYa/1oH/gb9N4M"
+    },
+    {
+      "id": 3663684,
+      "power": "34630424386863104",
+      "pubkey": "gPIOOl5Gi5KIr8/y6QeVdz3JvrIU9CWKUg3hfGvPJzexMqZ3ZP2OCsHTfA0thm45"
+    },
+    {
+      "id": 2827953,
+      "power": "34619360551108608",
+      "pubkey": "jFxth7u4FkZyBjLuYRKqh7yKwrtL716FFd0AqTxYAbsOmOiBx88bw2369ij+CaXP"
+    },
+    {
+      "id": 3028326,
+      "power": "34443919727001600",
+      "pubkey": "lenQREl5zkeXIealVLiUefEFHAeIpT30hQd1HRsLvk4kYaDbmeMmkrBFWlu+lY2+"
+    },
+    {
+      "id": 3402379,
+      "power": "34423716200841216",
+      "pubkey": "rqIdH/IQkOC3ysWeH07mPJqmGbwWTsrx8Vgl7lyEx2KxgOjeriLYj8dUemeMmTs8"
+    },
+    {
+      "id": 2827135,
+      "power": "34404234229186560",
+      "pubkey": "klcZ8Qv05keFpwakFh8qSmejC0rxACSPyUvAqoaAAr8yIrlu0Bw+hYvhNqPCJxM0"
+    },
+    {
+      "id": 3402347,
+      "power": "34270540487196672",
+      "pubkey": "hojdR4awx92xv0ctUPGYaR92VlORUipZGxJ/cj+hXTfICvVrygH+CC0nqgizoN63"
+    },
+    {
+      "id": 3644142,
+      "power": "34117605291720704",
+      "pubkey": "pqcFsey4KVh6s/PtEOh02mDPhOY82O9hyCDh3O+CpVUtX1KnM5IhkLa+VdgKz54j"
+    },
+    {
+      "id": 2827010,
+      "power": "34094790425444352",
+      "pubkey": "t8CggTkFlTX8xh7MX5uhU2QreRjlj6d+86tt6/lVnM1U4t1LnKmLLNd0ChjymsRE"
+    },
+    {
+      "id": 3645007,
+      "power": "34075445892743168",
+      "pubkey": "gqdlu9IxUsrKM/JpDH4ziquI325pM3uHxBUydFnROSVLJJBqVMOC0F7IjnwY+bxQ"
+    },
+    {
+      "id": 3079766,
+      "power": "34064931812802560",
+      "pubkey": "tJB5zvkKwhAskjh6VVAggdq+ky1UVpNTRAWLYyfcVRYP4veWDxC2Unf6QRb2KyY3"
+    },
+    {
+      "id": 3046733,
+      "power": "33982460943400960",
+      "pubkey": "gMINn60Ot141e4QLH5HjCW1x9lCdBQNXLLnCDqDMGvGrxo0KlvgkjTA1LLW6HlMr"
+    },
+    {
+      "id": 3202108,
+      "power": "33814037003239424",
+      "pubkey": "hTASvxzi1rKW3bdb1xHMkz7cNYH2BdQFpOYoxs5ZlUGGwh6Aj5UNJISxYuUWiiFE"
+    },
+    {
+      "id": 2826762,
+      "power": "33782322964725760",
+      "pubkey": "k4ELg4TlO+FiT0Wf9NutujfyyDpCalf/sbhipEKtsHMVSw7NBOCkdH69hyyg8yhj"
+    },
+    {
+      "id": 2825281,
+      "power": "33742946704556032",
+      "pubkey": "lr2LoqwZG11HFzPrekGddxCsBEZ6ZTzAYYHrtgl7DSsSB/MKgFAfTu9xaYpxha0w"
+    },
+    {
+      "id": 1939387,
+      "power": "33704893294313472",
+      "pubkey": "g28K3y/eARAWD5pBCEUWAEgScDtcI/Z8CWFxWEo/Ck2oJJ2tEMLyA3zTHISkHghK"
+    },
+    {
+      "id": 2828242,
+      "power": "33373338998931456",
+      "pubkey": "sXQjlITF/26df74RWJFEd8dnmaEg0T4f2kve2RUhobUdZYHXB5iiycUCk/qskUZu"
+    },
+    {
+      "id": 3519438,
+      "power": "33333412982947840",
+      "pubkey": "oM2gQxXT/Rd2JrK5nyCnQYczCLREKtXi7vcSNWKP2Q3YntrJO/yKdb177xJWDmob"
+    },
+    {
+      "id": 2827565,
+      "power": "33146770884132864",
+      "pubkey": "khlSR10IjJEhQ1agRtlcUG7iMjI4ELF+qny6eCccqJ+pLjFA7veXv0BBersTCvvq"
+    },
+    {
+      "id": 2825420,
+      "power": "33111655231520768",
+      "pubkey": "gjLvYjLIasIctbXtaHglwZYqznKSgMi78jULTvUfZ5NgebVimfRu+FlL99dGDUP6"
+    },
+    {
+      "id": 2826715,
+      "power": "33061215135596544",
+      "pubkey": "iQ75Gi6yU3A9W4Z7RTexZcL8BBO0eyOb0RPCLcbcnbvZj6kW0fovdKGHVKgxrD0q"
+    },
+    {
+      "id": 2827151,
+      "power": "33012011990253568",
+      "pubkey": "gzDhgxFTN0ZKMFj92wNMN9C/U4lyr6qIwdSsZm0YSoWRm9yL9aNA8ZdVXZ3mECqY"
+    },
+    {
+      "id": 2827448,
+      "power": "33003250256969728",
+      "pubkey": "oRVIb2WmjKW5RVM8tf++52xFl61gFRpVklFv1UxTRo4DkFjfSxoNrJybuaCKltmV"
+    },
+    {
+      "id": 2827377,
+      "power": "32786646466297856",
+      "pubkey": "hMIjaJIzSDVObrtGUAwQI6HzEyrBJkCeNhfvIxATLRO6nNk/ERJXJWL6IYlHoBec"
+    },
+    {
+      "id": 3645885,
+      "power": "32370550034661376",
+      "pubkey": "ggvfnCr7aolAN2wwB7P8ERb7HN92kiKFpVBCMVhE5GRdLrdeziGwFvOEYUwAUd2I"
+    },
+    {
+      "id": 3336022,
+      "power": "32356943578267648",
+      "pubkey": "sdcD2skMlFJESWhwM5QHjfCvF8rIXtJYKpqcdx6sh6VVfFoGm/jheCVb7m80eRKJ"
+    },
+    {
+      "id": 3151449,
+      "power": "31761403413004288",
+      "pubkey": "gqfPE9N8zOfF9D+SaAjva1WjvVB/LD1NPI0VOPIOvwsAyQeXUODMqTBAZxa9r0Iz"
+    },
+    {
+      "id": 1975299,
+      "power": "31594123026759680",
+      "pubkey": "mATAut6GTcxoSuLHBJ0Ap4aGifAZabUYvV1i1M5+3oi3Qfn9laTeKaOaGFjmWZyx"
+    },
+    {
+      "id": 3645884,
+      "power": "31524888153948160",
+      "pubkey": "lif7KAnAwSDXSdvOzMEU+xv3BGi45diX+oRCoWFYMtgJ7LYIhXxkykODV1i4cPUt"
+    },
+    {
+      "id": 1081394,
+      "power": "31423011529687040",
+      "pubkey": "gL/+ZnjAJ+rQZ+VuU3P5GhdkcNLmsSCy5vWYu/0eZRLqsycIYqyGVzjRoHFStqxZ"
+    },
+    {
+      "id": 2827694,
+      "power": "31204243075497984",
+      "pubkey": "qRzMoW10j4MfY96NKbdmKLFM3hQhZKEznm/SfMCxCO3tNWbrjK8R7yp6w8RI1oh+"
+    },
+    {
+      "id": 3385462,
+      "power": "31178026595123200",
+      "pubkey": "s05OF3tUt64+2oUAGDf8fx3Z32RY8PtG81TyRSHriy+y9rR5aK6BVE4Pkq3Gcogf"
+    },
+    {
+      "id": 3402285,
+      "power": "31123154092949504",
+      "pubkey": "ijffkWDO7o7NW4aCSoH7fRIdU+dTNV3j1/EyDmz6G0PisGqLcY5RHYaXD/TKKFVL"
+    },
+    {
+      "id": 3402308,
+      "power": "31122741776089088",
+      "pubkey": "l5CtEdmQtsCmCzaAxvSZEp1Nrbnljkf6GIjO6jYjAFlN0wD153QdlrJ8hqz8YCzT"
+    },
+    {
+      "id": 3385456,
+      "power": "31120680191787008",
+      "pubkey": "uQ/sXssT9f8Qs9bPoIrYhXjTQ7iiiWWg54fxCH3JDxF1BN2JSXD/hwDQ1g7IxZsj"
+    },
+    {
+      "id": 3646493,
+      "power": "30896311100243968",
+      "pubkey": "sELWg+6+tnTN5nJgObVsbcagmPyT717nI1Jeo6sdRPrNzg2u+f0R95sVXoR6IOnq"
+    },
+    {
+      "id": 3645883,
+      "power": "30598068571209728",
+      "pubkey": "jmJZ1anx9QRsvQryU3E5CEYzIVoLnyzIRgLkxp/2vcpygBBZfdvlnCx7zMJhY9KC"
+    },
+    {
+      "id": 2826007,
+      "power": "29734522446675968",
+      "pubkey": "jTmJglig39LiqtjjWGUAJ2TGKNl32oObTaqS4lMsx8rb0lqWbBnMJOclfourmR6t"
+    },
+    {
+      "id": 3199233,
+      "power": "29046009124356096",
+      "pubkey": "qdDhiwOPkop+BvyspAo9cQkUNQSMefNt5jYdBj2hD/BrYgtlvnAyud8bMtylv2iT"
+    },
+    {
+      "id": 3253497,
+      "power": "28748758732767232",
+      "pubkey": "mCKcw7tbXEIIoknVIB7vD0dtnWCgJP0dlrBxNf/FxAPWDTQix2pykZ7Ljkdw5T1Y"
+    },
+    {
+      "id": 3529375,
+      "power": "28545555240058880",
+      "pubkey": "oP52Sj6j8eQDIKYI8PUWeu/gbeVb0rzEXu7IVgQCxZ3IHdywYt0w8lD9AT2z1kaA"
+    },
+    {
+      "id": 1975316,
+      "power": "28353957304729600",
+      "pubkey": "kwYhhPPDPYXSnBOdMrRiD96F0gs2pSxGPp8QICsVHXJCXSwONKnsVrbr6V4TirRs"
+    },
+    {
+      "id": 1975326,
+      "power": "28350177733509120",
+      "pubkey": "j2q1JwQgaV9WK5aCv93sh2OULBx6BnL2DHPVZj68WJ9/ifuZXFg4cO223+7VXaGo"
+    },
+    {
+      "id": 1975338,
+      "power": "28341365265924096",
+      "pubkey": "mBwgYuxKNSsJQXM5FBSPmo3RolKgxTglshqak7tuXzvOi/2k5OKrou4y34bBYtM4"
+    },
+    {
+      "id": 1975336,
+      "power": "28330350553858048",
+      "pubkey": "gOzShETkfJq+oFG/adeL/g/zF23TIcbY4+CZ504VfQRwEeNcZcaP3lPf1XYcLmis"
+    },
+    {
+      "id": 3299999,
+      "power": "28220718273527808",
+      "pubkey": "t3Fd3GjAzWXxHVmPZ53xsslcAFmyffDIU28jn9Lk9awdfg+s6H3ElJA7pVKuWyiC"
+    },
+    {
+      "id": 3073961,
+      "power": "28164814979203072",
+      "pubkey": "ozkFtM5Jzy9FlExRateERun3NcuS3BAWWNvoJagrBAZgPnmaOdNFixv81wTnnNBL"
+    },
+    {
+      "id": 2831202,
+      "power": "28090460505374720",
+      "pubkey": "udhA0FBk6sEaE3g/Il/zHsWjpr7OrrsaYnjjrOR4MtINYE9mjQlh40B/YFu+e1LE"
+    },
+    {
+      "id": 3363420,
+      "power": "27939397915639808",
+      "pubkey": "g28K3y/eARAWD5pBCEUWAEgScDtcI/Z8CWFxWEo/Ck2oJJ2tEMLyA3zTHISkHghK"
+    },
+    {
+      "id": 3368008,
+      "power": "27910827793186816",
+      "pubkey": "gu//LcW6CPuFwcn5/UURc3rnkAT01hC6HRQXB7yQHCmg0yutykzufh73QF0Vss50"
+    },
+    {
+      "id": 3151456,
+      "power": "27837194873864192",
+      "pubkey": "lKSMq95p3T6r8VOGbI/4ErOTi+6C7m/CYdb3p8LQLZJNE50OxXDXmk1a+fywW7ft"
+    },
+    {
+      "id": 2827880,
+      "power": "27720612281581568",
+      "pubkey": "kwWF6HWiJogQYN67Rl69HqqSC+l2YXs4kjDkcFoIsFnYuTel8V3oDQFoMtKGUGU+"
+    },
+    {
+      "id": 3620433,
+      "power": "27708139696553984",
+      "pubkey": "h74p+43LkDXBQSsNyMLxSbs/GHflOCyOuvqhOtsrES/kdirqBKxv1qyApEIZowZs"
+    },
+    {
+      "id": 3099988,
+      "power": "27561320534507520",
+      "pubkey": "t5w5EadbjhECezOMiMe84h8tn15B9r4Ode5nmHZ/eQVvfZ65p8+gqTUcGZczYk+S"
+    },
+    {
+      "id": 2826126,
+      "power": "27451231932776448",
+      "pubkey": "l6yP+8F1gy43CJRQeOsDgHsRW8F3pzV4qCGIKX4ZL01BulQj1afoZCZC1g7P+Ntx"
+    },
+    {
+      "id": 3741653,
+      "power": "27346572169707520",
+      "pubkey": "kIEcLc5AVZ0o2pm/zhmdQF/QNVa99sW1OXMQnWfvn7QIuyiuyS1T1RjQ/3smTxGE"
+    },
+    {
+      "id": 3100007,
+      "power": "27266513979310080",
+      "pubkey": "tTYqI/iOAZvj/+XjMNAs8K15JwiLbSB7ehfhNKZz+4tqIJLdqSueyTwZ58ZS/QAS"
+    },
+    {
+      "id": 3620447,
+      "power": "27108562262032384",
+      "pubkey": "jSdKRufcm6SOezgjSyaij4171vCI+553jl2jU7cg0BtuBDSWIN3ru3jYG4ROEtg3"
+    },
+    {
+      "id": 3620441,
+      "power": "27089664405929984",
+      "pubkey": "qK8jyV7PB9W9VcHmZulRVaM1HyyXJIX7SMueiwCxNAqqyO5A4QDyvz8uU9/U4out"
+    },
+    {
+      "id": 2827288,
+      "power": "27082173982965760",
+      "pubkey": "qhLv0zdTAy3Prn6ZsBOLpBkepS4QV2sk10AbxP/FpqNuO7ngl2He8QjtQjZNfOo1"
+    },
+    {
+      "id": 3229933,
+      "power": "27025342975705088",
+      "pubkey": "uT8TxH2lE3DMfO1zwNf5rXDHnZdzWPd28C6R3P9WTJFweRmWPKSTJlXu6fYE9gSn"
+    },
+    {
+      "id": 2827045,
+      "power": "26993525857976320",
+      "pubkey": "lMV/h8WmXhQQgLaa4hzikzhF6wsh2NQ/Y5LXMtQx20nwr33wUrF0aFju6Z00GDvq"
+    },
+    {
+      "id": 3229932,
+      "power": "26958461744971776",
+      "pubkey": "gUcaE0J8kb/CzNzfoBEMxFOlUAF4xdoPuiMRsYpN2RUbt6FyEX84I4Y5qcNiYqnJ"
+    },
+    {
+      "id": 3336023,
+      "power": "26819150185758720",
+      "pubkey": "gZlfYmP6k13QfPotbmaCLUPi+42i3R5Vir+vAMKNoJ8VTr2hwvAvVpsWDRSNX73X"
+    },
+    {
+      "id": 3214937,
+      "power": "26786766132346880",
+      "pubkey": "lsYda2CPPMuALmEatG6S6uPO00Jjgm2SqhIJmuzje+kKYGWKl3/9/Sj3GvfBMRft"
+    },
+    {
+      "id": 3600845,
+      "power": "26778262097100800",
+      "pubkey": "jX2/0mUfObHolSOhBEF8GEUH+Fl/iAvV+Wa/j7er8NMC4mQaopLIzYHy8+MjRsx3"
+    },
+    {
+      "id": 3179572,
+      "power": "26737906584387584",
+      "pubkey": "g+6VezTT8zFxYXKHwuewHn2jwprjvKL5HttXTg6ZFzablWrKaRLP1+9cVBjA1+13"
+    },
+    {
+      "id": 3233000,
+      "power": "26721912126177280",
+      "pubkey": "krOaoxgiIGvGgP2sB1lAuaqYfpXHe71VNw3ZS2i9vBnCF5mbzzIKPUfd4SUQWODl"
+    },
+    {
+      "id": 3620434,
+      "power": "26626495132729344",
+      "pubkey": "sronUpKKmdmcNY6TcxTs01PpJ7BDuJpMHu0YEJq8K+nTLFrwUD9BVk7gG9XHJFLm"
+    },
+    {
+      "id": 3620446,
+      "power": "26523690795532288",
+      "pubkey": "pkNtTZyv+1bSAnIwQMoOdqpgPvFEdoLU5UXe0DyBRqJFZ7EA1jotuzW2ymtA1cYu"
+    },
+    {
+      "id": 3236778,
+      "power": "26400476773744640",
+      "pubkey": "pnfba6Tz7RzdxChf+7EjedTs66T5pJWiTgo/aa+X299V8AvUw3HF14L1Qu1PpXF3"
+    },
+    {
+      "id": 3100006,
+      "power": "26368281698893824",
+      "pubkey": "rJe1/FY9s73zsMXzxpMm+zmFlg0pq+lY/klFnkc7rktQB48PF9SMLCXhJStW/hPn"
+    },
+    {
+      "id": 3284098,
+      "power": "26320384223608832",
+      "pubkey": "mT3YtPmBk/AwyBtgnPlTFNsgjmxiKjMCeRcaNFp7wm0pWVngb+APoO913ESDd3Jk"
+    },
+    {
+      "id": 3028325,
+      "power": "26259430047744000",
+      "pubkey": "gO08lVGpt/62SOG9IPBAqzKHyF9W3tCfEnbCAmd6WU+zgDlkzEhwwSSLcA9EtT34"
+    },
+    {
+      "id": 3028318,
+      "power": "26252214502686720",
+      "pubkey": "jZPBrObPmtYjckWXmzE5ybGxSFULDUkiEN56sZtUwkUjb3RBEqpfv4eYCcvrHKbc"
+    },
+    {
+      "id": 3028321,
+      "power": "26245342555013120",
+      "pubkey": "gWKZPliAxKX+rPnkHIUKougD8Hhh2VQhP5uTjb5iUs8QUPVrS7PqOrneS2f2cGlF"
+    },
+    {
+      "id": 3028315,
+      "power": "26222321530306560",
+      "pubkey": "oJnfjUmuJLArETjRDHfI3uUC8DxiVy+sb5nr4jGNo2LWGfT6RHOVtckIKhsyyDCB"
+    },
+    {
+      "id": 3028310,
+      "power": "26117180730900480",
+      "pubkey": "sYNga3eTyNPmLmdLiKI+rnNuc1BbJOooTqaw4Yb+onDJYAeaVxH4g9jOKFFNWu/h"
+    },
+    {
+      "id": 3620442,
+      "power": "26086016448200704",
+      "pubkey": "i65rZ71QLhHe8S4GNRCOMNRLqwfVzL5OtKjxXnOXERVnB7Ro888qQ3h3O5K4pwKl"
+    },
+    {
+      "id": 3074589,
+      "power": "25926140585574400",
+      "pubkey": "rU686aNNFxtGEY71AgA1yrYH5D+nni2/Gee176dUddqi3VDeHSEPdTfG89ogwNII"
+    },
+    {
+      "id": 2215209,
+      "power": "25879067744010240",
+      "pubkey": "htrmc0rDkhx2zovO7qRnl4BlTpP+Wm6lA/eAfyzVp2XC9+oRf6kDNqiumUk+viw/"
+    },
+    {
+      "id": 3074592,
+      "power": "25869103419883520",
+      "pubkey": "mO3hKI/Tw1nuFsIEWBqzaWpCbLDw1GB4JD8tHmj3Oo/0xgoCxt3lW/r400N5uuHM"
+    },
+    {
+      "id": 3178144,
+      "power": "25796106155720704",
+      "pubkey": "uTugkFyLTwr9u3ZilN3LNr/lQia61Eam3jxSgBzgqpBb1qNW5Z/OjasUZnfBQa9t"
+    },
+    {
+      "id": 3178077,
+      "power": "25780231956594688",
+      "pubkey": "teOwAknJq1y9BU+sDD1XzumXgrbvLqgEyNzCO6XjqYNwQYB0lxltO9y8dphnPpAS"
+    },
+    {
+      "id": 3074583,
+      "power": "25778737307975680",
+      "pubkey": "kRITxKj89+D38tuKYLXK8GIEi8/8MW0pL1j/ak1WvWAR452uP1ALhkf70YZGpUay"
+    },
+    {
+      "id": 3074587,
+      "power": "25775644931522560",
+      "pubkey": "kbUgQOzVc0D1XCf31BKJAGzP9z2loMsEK5mTAgIJnE08axrJI0758UB6z2AWlibY"
+    },
+    {
+      "id": 3074586,
+      "power": "25768085789081600",
+      "pubkey": "iQTTkQx6M3ajJk7LtFZjpg+vWHTDNPrc+cLl+NGic7Jc4TCpGrr3S6PttoXkWZQl"
+    },
+    {
+      "id": 3378086,
+      "power": "25684591624847360",
+      "pubkey": "q+Sl08gcbkI6D+rbaNPZtaI2LBy+onYFRHGTokMhHjp8cytITNZxV/a2Rt7Bjz/N"
+    },
+    {
+      "id": 3662920,
+      "power": "25675348855226368",
+      "pubkey": "oFwYDQsdhWdhhHuWkWfqKaJIZvRhijL0/JLA1+Hf1WKf94HKp6zKERoRcLuU6qec"
+    },
+    {
+      "id": 3073919,
+      "power": "25670985168453632",
+      "pubkey": "p1GeRiFMHbkHw7c/NOagtE49pM1F09aerjiiLwHjASuOQbzJf7v1+BdP2ar8vkYu"
+    },
+    {
+      "id": 3624256,
+      "power": "25605873464246272",
+      "pubkey": "rM4bEIkJseWifkG6n04iw3pEniYhcWTWUAZxEqamKffKvu/tgoyrCyQ+DtfGC1sg"
+    },
+    {
+      "id": 3321072,
+      "power": "25545434684456960",
+      "pubkey": "g28K3y/eARAWD5pBCEUWAEgScDtcI/Z8CWFxWEo/Ck2oJJ2tEMLyA3zTHISkHghK"
+    },
+    {
+      "id": 3630883,
+      "power": "25330342722273280",
+      "pubkey": "p+Pr+2+yfoGlknJS6dZMan7jrcyIFiI4xLxP/xlxWNPNdseHSgDbO8J3dOMrQF+y"
+    },
+    {
+      "id": 3637813,
+      "power": "25302030297858048",
+      "pubkey": "r2y6BCNUsJS+2otPVNFgfdpeBCzhexNALUs7WF+8mNENnqtH9AfEAO9RYGaWrdd/"
+    },
+    {
+      "id": 3637821,
+      "power": "25278803114721280",
+      "pubkey": "l6l726xgywyi+cvHJkRYWqr4yD0oJdVZEeUtq+ztNh1PzuRE7lxr1NXtFMIdUxi9"
+    },
+    {
+      "id": 1904546,
+      "power": "25093277707403264",
+      "pubkey": "qZ97ZvW6UTViLy6swYLKUYRBtSfViWafhPuLuVe7RjR/ioN2KAAjFp9h5rtCqY7o"
+    },
+    {
+      "id": 3601955,
+      "power": "24566628817567744",
+      "pubkey": "kJGuON+91IIoPgnXrIPO39+Pzhb89dsS+pY8blJ0aJ+6A8jLnp0/5JeyJBecNhob"
+    },
+    {
+      "id": 2230977,
+      "power": "23657710658519040",
+      "pubkey": "tfV8/CtPHRGBpbvhbcf7GGMlwvy3XMBP9RENEzvoJEOH8oN6aTkfYgBQa8AHc2+8"
+    },
+    {
+      "id": 2230983,
+      "power": "23421796694884352",
+      "pubkey": "hkUacfwA3ivxmTGF16FblKtqeG8OCSKtBy4N6x1eTpayGotCmm+Jx5xWojx497ck"
+    },
+    {
+      "id": 1315130,
+      "power": "23223334846070784",
+      "pubkey": "hTq8QgvnwTmdFIjupvAU/Fcd+tFNu2RTh0vhFSMauXwGiDKn6xe8LcKviquuU7fL"
+    },
+    {
+      "id": 3607310,
+      "power": "23157089270497280",
+      "pubkey": "oDl8cZSpVwVPnSEfk1pc+SXFj08Hiqfuc9MC+18Gvug/P8u+RYwYAOjIzCTfszjg"
+    },
+    {
+      "id": 3226688,
+      "power": "23144754124423168",
+      "pubkey": "q/6BV/SiS5F5SzWm84HIL9uwTGpcea65zqBlb3v04Xn4URpGAiJaDvGe5Vi7f0qU"
+    },
+    {
+      "id": 144194,
+      "power": "23105893260328960",
+      "pubkey": "t8rKcuOEkZo5hOK76wga2OWuWT9PQA5Hl1d8KdSmmSft68czibRrb4u2u785ZlkN"
+    },
+    {
+      "id": 3614020,
+      "power": "23063184105537536",
+      "pubkey": "jMtpK1LOhrPj0HsO4mb/b587DEExcooAtSR8h7nm1452kC8zuoZbXRHJ6ztBxW0B"
+    },
+    {
+      "id": 3192503,
+      "power": "22967440694575104",
+      "pubkey": "lmeQY+5kPVXYVnEkykFVYFiV1vAT0r/xra8/HRkgY4KhB+VYCPIz+epyMzD9tsT8"
+    },
+    {
+      "id": 3372222,
+      "power": "22705945905725440",
+      "pubkey": "jwTTDZ7VaTH5I8KES8uBxW5J51m2ry0fmCteEXgOGuRyGHVsD/ypv1f3l3Gef4n3"
+    },
+    {
+      "id": 1128206,
+      "power": "22695294386831360",
+      "pubkey": "kQWqFthySqKN6qs4eLCY3CJBtejCtVUDd6PhOtRiQc+rtMAfUgC1dJOJP64FM6cl"
+    },
+    {
+      "id": 3520147,
+      "power": "22680519699333120",
+      "pubkey": "huLjPffaTYXcQJBIlcy3K+J6d/m0Fxh2l4tCaTvv91ebouFmzCp1A0bRB7PiIwS9"
+    },
+    {
+      "id": 3081960,
+      "power": "22661278245847040",
+      "pubkey": "rGlrQwbpSRm9GjyE4Sa37Mc3cyHPjC6olbZbe26N64dIluqVef9GRht81xS5klx8"
+    },
+    {
+      "id": 3378888,
+      "power": "22645816363581440",
+      "pubkey": "ga9ALa+znngS+L+o66BMf/oeKlb0d6X10m9ptFfKTQAPxmJmo23Xs53pygeKS5Ua"
+    },
+    {
+      "id": 3376666,
+      "power": "22632759663001600",
+      "pubkey": "hppj21FdZSN3bieZrM4a1N1AOisdJfjl9O5H6RTj7SVMfCk7TpJI/lBgNxSlrV51"
+    },
+    {
+      "id": 3375555,
+      "power": "22609738638295040",
+      "pubkey": "hOo3MODOJuL777wMgDoN2chzjCGHX1C8x9b6ksWTdSFzIiMVMogm0i6YFyqxV3kj"
+    },
+    {
+      "id": 3373333,
+      "power": "22605752908644352",
+      "pubkey": "jTWgKltV2FiEwSaS08mS9GpIHgiuML3vVlcj17+4OSlMpVeL069Ln1CLLS4gMkYF"
+    },
+    {
+      "id": 3609158,
+      "power": "22589122795274240",
+      "pubkey": "po30HtGrmT2oHFOtsqFfRf6cvVfhFqfRLZ4Xo8PDtar6HPJKCJ8wm0gsbJHZ6Gal"
+    },
+    {
+      "id": 1083919,
+      "power": "22519406886125568",
+      "pubkey": "knwPuHlbQNuvCI1kT92/J7QdSISZdAseiBzVvcZ7hb/mVEauyQ1YjSQcX8IHYV0d"
+    },
+    {
+      "id": 3080038,
+      "power": "22516280149934080",
+      "pubkey": "rSuJfs2mdVctsIGaNArG08/p5FHaDFyqI86LugPfF11dJR4Uw7yToTx7lSbztG4T"
+    },
+    {
+      "id": 3605368,
+      "power": "22490475986419712",
+      "pubkey": "gROGETURp/tuUVcPuNCONLz70Vpiw6uM+MMt7HKbcnC7m2G21KR3vVCzxyTtZFDF"
+    },
+    {
+      "id": 3605367,
+      "power": "22373824674660352",
+      "pubkey": "jmvUWMk+4G2k8fnOmQIg0aOuLt4+Sfkoz2R6ZjxQVeNmpMxMQeZLdhiTA/dtsvf1"
+    },
+    {
+      "id": 3145504,
+      "power": "22284008318566400",
+      "pubkey": "iXLJFEfwkuDJp7nlliPBMRBtWCPLi1daGNofqI2FRGegODtlYx8ASvOBc2YI2u4v"
+    },
+    {
+      "id": 3112580,
+      "power": "22117074214060032",
+      "pubkey": "glsSB+iVJnUNyhMR3sWwPJKHPSZHkqlsBI3wg9i02xypXDkJLa6SXU647+Yl9f+m"
+    },
+    {
+      "id": 3220176,
+      "power": "21883373769195520",
+      "pubkey": "srqv2U1ttRNtY3KQNmpTklPOelqKJpArTXjVhkLJdAkm2D6PF6pekB8lJcliXJuj"
+    },
+    {
+      "id": 2035252,
+      "power": "21324942121369600",
+      "pubkey": "kpQMzKe+zkrHR3MTAfVrGDbwDMDyxNcSFBcUVblYO3dDVi6MZFJd3dbBGgzyjQGm"
+    },
+    {
+      "id": 3232064,
+      "power": "21090694605045760",
+      "pubkey": "gCnk94rURZ/jgULOQf3yXXSz68uClZ6XRWfn4Q0T7l2/+BocUox0LYw9WkWMXw78"
+    },
+    {
+      "id": 3232134,
+      "power": "21047401334702080",
+      "pubkey": "ttZemAha8IHlEeOG1nD/XDn3lbjkHR8gHoD0zgb6g+GW0CxI5rarll6PEaPMRGGN"
+    },
+    {
+      "id": 3612600,
+      "power": "21046851578888192",
+      "pubkey": "skyjTHlKsW5v9KA6iNcHthGfAR8x324i7bPgJVlGvpD8TahrJAB0MiHcjww1BYNc"
+    },
+    {
+      "id": 2057486,
+      "power": "21038399083249664",
+      "pubkey": "latcZTjKDto8NXfRYJrtD3IeJwF2aG6vGA5khvKdCpwroUuv1uoegP06JJszDcT3"
+    },
+    {
+      "id": 2221110,
+      "power": "20685936887070720",
+      "pubkey": "sS8Olu4j3J2X7yq+dmdO35mcfb43myrrDefQq1t6Ff/i+6Y5rPgtpMSoYNmy3I66"
+    },
+    {
+      "id": 3252730,
+      "power": "20625910424141824",
+      "pubkey": "tvJXdfFMiEEPjTTl+Awe0iSIEMZoGBMEFgmlHf8Almm5BWPF4uKEG6EfHQ5X7sQY"
+    },
+    {
+      "id": 3609109,
+      "power": "20401867750113280",
+      "pubkey": "gTE+YbpnJYmZscaS0BlYZbzx+ljkQOPIHtx/6w8xENQrSvMrsSo3t3h4Eh5xmaCA"
+    },
+    {
+      "id": 2984500,
+      "power": "20294579467059200",
+      "pubkey": "rMP0neD0UwVUdrHgDxDhYcoP47snHYfyPXdgdTN5+Eg07wfQAbiTbF2XYzloPtua"
+    },
+    {
+      "id": 3084722,
+      "power": "20271730241044480",
+      "pubkey": "sdECChubS9kmOeqO946HqJI2Qm7c1AUdZLqKDmHVVwaOWtFUCngXGK5jiGZxAk24"
+    },
+    {
+      "id": 1233054,
+      "power": "20066087206912000",
+      "pubkey": "qIqpCKzYm66+vhxUz2sLryMBQeSlIDcKdZ6WMzta4UIE/BU/k8bz6WTHEOqYd4qd"
+    },
+    {
+      "id": 3230401,
+      "power": "20066087206912000",
+      "pubkey": "qB/yraJkiFc33Su8vxnBvz19syafYT02U6DhhbzjXtB8JR5WUsBPQ8nKU41bkWHX"
+    },
+    {
+      "id": 3230392,
+      "power": "19985685419130880",
+      "pubkey": "rwVJl8/LhgUhnixb6qXbqnCr9G7CQ+K0DG/UO8vEV6IdHhMJxHaIPTWqg9D74HNf"
+    },
+    {
+      "id": 3644166,
+      "power": "19799790644625408",
+      "pubkey": "udD8ITVoOsNKdVtpXQjeB5Fv8MFx1PII6aeHTg1jLPWQETdyXcen4eIJaZH2X2iq"
+    },
+    {
+      "id": 3644168,
+      "power": "19786648044699648",
+      "pubkey": "uEYCmILT9ffQHZMRFMrfDLcpfpM5Duka6ydzq8LgvNIRGdgl4i9HmyjUTaZoydXx"
+    },
+    {
+      "id": 3669112,
+      "power": "19740391246921728",
+      "pubkey": "q0cQXCaiJ4kzDCNYqfTtx9J3aoXXcZiXy52smZ88upFTIQ9QLJe3/sI1cd9FuqL9"
+    },
+    {
+      "id": 2915256,
+      "power": "19286980139417600",
+      "pubkey": "lx2Yb1L9ohnTZNKPcxPtPhEYZlx6xEbOmCBH+PNjVughFD0Utx+7iER03nDNJfl3"
+    },
+    {
+      "id": 3232222,
+      "power": "19280967185203200",
+      "pubkey": "gfYa+U/cXkdDX+E99T5CWUcgoyKQ3j5b6kWGTRzEOkISlnY1PHiidhPPXxjR3mep"
+    },
+    {
+      "id": 1923787,
+      "power": "18939774983208960",
+      "pubkey": "qQA2dwDaHIpxPFG492PSH25ZeL3f2yUefXj1gqApIdeXasCad/YjJnPZuRSk/1Ot"
+    },
+    {
+      "id": 1939377,
+      "power": "18820993367670784",
+      "pubkey": "g28K3y/eARAWD5pBCEUWAEgScDtcI/Z8CWFxWEo/Ck2oJJ2tEMLyA3zTHISkHghK"
+    },
+    {
+      "id": 2199412,
+      "power": "18678950209257472",
+      "pubkey": "j4ATZ0r+BrnQfXelKcUQmJtm0l30gpCDjIAZ0/fF5kCQi/3Cnra79NfLrro1jjl6"
+    },
+    {
+      "id": 1708981,
+      "power": "18589614889500672",
+      "pubkey": "mavl011+3yNKZJNBEORdBtrzqZv1i0uQ45cDC/G5Wll7RMsVe31NcY1Cju9ZCjir"
+    },
+    {
+      "id": 3228500,
+      "power": "18468702970183680",
+      "pubkey": "tFQptqS1TSGhalRudz/vhtIQypggcNSRD763u6fyz/bdReJ5eUolpifMbfZkIIgX"
+    },
+    {
+      "id": 1926635,
+      "power": "18174446170800128",
+      "pubkey": "lKdKR/fuWbt42+AeXi833qWWNvOh525kjzl2K/zyviuC5zYLEFT3/bglVECZls4j"
+    },
+    {
+      "id": 3529412,
+      "power": "18119264430981120",
+      "pubkey": "p1+4lycsLto2r5+dQTIXrrw214s1C+DBHLROgRs4gv2j0XF34AtY+8ZRtDEZBx9M"
+    },
+    {
+      "id": 3528948,
+      "power": "17911044416471040",
+      "pubkey": "gKaq36Jiwtmki/8VvH9jLG8FeDAYN9EWGFI0sDDek8Zu5uIdrIV/iR2h+lsnWCo+"
+    },
+    {
+      "id": 3126993,
+      "power": "17819166476075008",
+      "pubkey": "s47/ddkG1P+gTZelgxDz+6nMbV+L/cA39p6prUYa/m8m48K5i8oaPZRCkDLrUR9W"
+    },
+    {
+      "id": 3600714,
+      "power": "17804872824913920",
+      "pubkey": "qToVdM75O0XbhtVmuA1K60OOyaOTPyxGaRmb1jfAgNQug3Ah+FAs5C+TNIZ6siMG"
+    },
+    {
+      "id": 3606153,
+      "power": "17670526247895040",
+      "pubkey": "pv1PQjsWS7b8uSgz+yBXhl3NQ8ihTRl7DNUCNYcaVP1VE9gQHgwca6eeQ2SnLrxU"
+    },
+    {
+      "id": 3641915,
+      "power": "17481891284254720",
+      "pubkey": "ovGzFg1MH+xyFfeHvno45BIdcf105r2R9NyyRDgACot0Havoi9LRqF4rpSle/Eet"
+    },
+    {
+      "id": 3600738,
+      "power": "17443408377282560",
+      "pubkey": "uPgNzwN6HUUOA0dWlW6ATX7YVDwOp4tE65jenzMf/j6YFVvhbo8rQ5NUjU8Qny8C"
+    },
+    {
+      "id": 3528979,
+      "power": "17419012963041280",
+      "pubkey": "hzZFzmfF2gt+A3mdem+wUA+l0DVFSQEOg1j7uSFHNq+ZYFzD0h9Onm7top5c9Fx5"
+    },
+    {
+      "id": 1971675,
+      "power": "17359467536449536",
+      "pubkey": "iMAXtxB0P9qh5BgR9KeZPN6qoHE9gCVdHburKBvG4U00Wkx3DdQHRF/Ig10U4Cx5"
+    },
+    {
+      "id": 3251999,
+      "power": "17331052032819200",
+      "pubkey": "tbsNPSK64bQaCi3K/dho1Gu41pBkwJP3srUncgzLL/CeNY1pdQgZVgUd5czs3Xr6"
+    },
+    {
+      "id": 3083319,
+      "power": "17330021240668160",
+      "pubkey": "g28K3y/eARAWD5pBCEUWAEgScDtcI/Z8CWFxWEo/Ck2oJJ2tEMLyA3zTHISkHghK"
+    },
+    {
+      "id": 109903,
+      "power": "17141867313364992",
+      "pubkey": "gyILGpyepSLjaqtesy4HWyoqhDoL1eiasN/ofhQhZ3ilJQLU5FgtGMk4Wgu46A2R"
+    },
+    {
+      "id": 2211572,
+      "power": "17048752422387712",
+      "pubkey": "hohJJVn37FGfER9MhuiLueREOQKZnBTAIw0925OesHp2elgHtFuwWoOfN1wh+y5u"
+    },
+    {
+      "id": 2934869,
+      "power": "16927325106995200",
+      "pubkey": "mf5cuo5flczA5TEHlcj3BpZCV3VM3Wulk22Qb5bs6HbGdrlp+zgw5jj+IwD3kTj8"
+    },
+    {
+      "id": 2143523,
+      "power": "16925881997983744",
+      "pubkey": "g+IJzf0GtN356eO6ORVd7KxBXVRHbWGlR/W0WHAS5DDqdXgEZETxnbTYm7fmKDXv"
+    },
+    {
+      "id": 1269519,
+      "power": "16773049881722880",
+      "pubkey": "gMqvKxw6Sydr/xZqvtODWXNPEuorv8kN8Y99lZNGUxEAYvihJBHOErviyoCufh5A"
+    },
+    {
+      "id": 3711292,
+      "power": "16773049881722880",
+      "pubkey": "hoMvhXwawxGbQxIaB/L7Th22GY8UWyXmmQRovfChc6hvxVOFVoyAwjBXr/xBgvMO"
+    },
+    {
+      "id": 2363305,
+      "power": "16727351429693440",
+      "pubkey": "kmmR+ZVWcO8/5pxNdk+IcQ97ryWTLsCmiMFpjuCqXTWGz4xI0thEYyhQJz9zGvMf"
+    },
+    {
+      "id": 2934879,
+      "power": "16725977040158720",
+      "pubkey": "mUkg+DDTKiffpMJ70iz2WNQ59uNO3SytMT6WTXN8AdygIQ+vurMgWGiTHK+tXN0Z"
+    },
+    {
+      "id": 2829749,
+      "power": "16703986807603200",
+      "pubkey": "kV5Onpq5tTQ3x/HogZdpHTGrGRcbevhwMswsV2iiteMIguC9AcXs2ZQ+V7rxCWYC"
+    },
+    {
+      "id": 1992032,
+      "power": "16617743864299520",
+      "pubkey": "h2wEYvzKjdnzp6qLZ6Yszj3OEwcyRWiGVDo8e5RTzPp01ruU0/8nK+truKJTZDrJ"
+    },
+    {
+      "id": 142637,
+      "power": "16499202766929920",
+      "pubkey": "gt8oKGNt4OmhkwRBMfruPljIaOzLG3RE/GbWx7ZL8tSpBkYbRqn7HtxEa8OdV1gK"
+    },
+    {
+      "id": 3641984,
+      "power": "16375164111421440",
+      "pubkey": "tFeSBBUFgZSlTNCAc/Cv8LQ1xne5FbRNNt9LMlpPCTSL543vl2sMiGJ437IEG41K"
+    },
+    {
+      "id": 3641955,
+      "power": "16263494961725440",
+      "pubkey": "j7bsr6bz1LRpCCYnkDO0A9MCRqk4VvqPCLZSUDfbLw0DYuP58hhMBnNPAkG0Jbti"
+    },
+    {
+      "id": 3641974,
+      "power": "16232227599810560",
+      "pubkey": "kO15Dvkj4EKilF1j9BclIuXrcqVv0Hqh3v35pzweRDxLWm62ycVJWNDYmo74Lou+"
+    },
+    {
+      "id": 3641951,
+      "power": "16214360535859200",
+      "pubkey": "lQDIQgDbhZ0ZA9yFx5wKNH7j5fvhe/IpKFpQj8C7FsaFEQmXejf8DatX6bI92Wn7"
+    },
+    {
+      "id": 3641964,
+      "power": "16201303835279360",
+      "pubkey": "tMwlZ0kWjVCjT8cx2mPePYti+OKNSd3+kCxGKSScU5xaQZs+OFuVcsB0bzaayITU"
+    },
+    {
+      "id": 1996817,
+      "power": "16168387205922816",
+      "pubkey": "tJdQO7y4cbwkjKdEOTxMOZVICiNIMI+p1BHYMCcb1Km4yyzElCiUjPTqofAQdO7k"
+    },
+    {
+      "id": 1082868,
+      "power": "16028199473381376",
+      "pubkey": "i5E0H7Hj9eyjrTayswlsfW0fGJddAeaHmbpEcICw+wqdDMuNvPu32P85d9ArY7ZN"
+    },
+    {
+      "id": 750779,
+      "power": "15986641369825280",
+      "pubkey": "tbXGUQxvJnQLpHq9tfoTyDuM3odG9DGuNJ/oamjx39ja5t+cSpwCYLvkF2ZLeHcs"
+    },
+    {
+      "id": 3533741,
+      "power": "15955872224116736",
+      "pubkey": "kSJdDH64w3Iyos4IakFbyQQhMwHbpO7G5xEd1+ayP/Mm0/PPyKkcNAMiuoHCggBu"
+    },
+    {
+      "id": 3260592,
+      "power": "15767031102046208",
+      "pubkey": "g28K3y/eARAWD5pBCEUWAEgScDtcI/Z8CWFxWEo/Ck2oJJ2tEMLyA3zTHISkHghK"
+    },
+    {
+      "id": 3179555,
+      "power": "15728874612588544",
+      "pubkey": "tSvVtpvNioa+0oz1ZgqtwSHjZtizJ7xppHnUWtHMQwFmaSqTtGRyzXPFHSDiP0Rf"
+    },
+    {
+      "id": 3380845,
+      "power": "15492187554840576",
+      "pubkey": "g28K3y/eARAWD5pBCEUWAEgScDtcI/Z8CWFxWEo/Ck2oJJ2tEMLyA3zTHISkHghK"
+    },
+    {
+      "id": 2231024,
+      "power": "15385260049039360",
+      "pubkey": "ocEdt4WayQg9frOFNTLR8ZbBrqXfbyltdqQCvSbrynLwKgGGbndqe4CfMcu7jOku"
+    },
+    {
+      "id": 1780352,
+      "power": "15317021608640512",
+      "pubkey": "o61Ny5nxzg6JcCRfJDYMRq8wnvFRQaOzbP7tdnXRb2XBF1Bslc/7MgOZlR8jaeKz"
+    },
+    {
+      "id": 2231025,
+      "power": "15219989707489280",
+      "pubkey": "k9j9x3HsupVUWkZNhRTB0OSCHSeKo9kiXE3V3SEXPuzL4yIm8IbbiyZ+xw/SvTVv"
+    },
+    {
+      "id": 1992563,
+      "power": "14584953022971904",
+      "pubkey": "oREGg+Q1LcagYQFdEwnQHBBT9rbk/pPlMDwyQV9VcgDDYi7E2v8ifpoJzBrJIvvU"
+    },
+    {
+      "id": 1936456,
+      "power": "14578081075298304",
+      "pubkey": "tHz/8FOU8k/wAA4/4RjNoQlnSC4Hltx3Dj8elvUO6yDv48JfVT5tBxC4g7G7gb9c"
+    },
+    {
+      "id": 3468521,
+      "power": "14505539791749120",
+      "pubkey": "rGdSmwNwAsXkhaqsZNv3srF4pEcdvoso2UqtDz1ZqiOSWSD/KV6o+w9jQy5U7vA5"
+    },
+    {
+      "id": 3526491,
+      "power": "14348523663261696",
+      "pubkey": "oLuBu2j+IJJh0t2QJYpDxB8J52SvgY4W9fQIq9S5RAv3f28vpw0jkeMRwYw4MT+o"
+    },
+    {
+      "id": 3234222,
+      "power": "14111304029569024",
+      "pubkey": "oKBMLhRKS7LnWw221yR0qcKgMC1MovqLMLXda81ihCD9qHXoZJFpUns+g4kq9s8I"
+    },
+    {
+      "id": 1084868,
+      "power": "14012657220714496",
+      "pubkey": "pnCf7yQQfzym+EnK0+2xYOAeHH9tIJ4egWpe9RPU4xhMHbZQH8PYYo8i5FfzuhiJ"
+    },
+    {
+      "id": 3513182,
+      "power": "13802994097192960",
+      "pubkey": "qHrL1lUZnrcMUWCQv6ExccEMltawsyLhMufrRvpVx+1E/x6XJQDQnoDEi4mzrTfw"
+    },
+    {
+      "id": 3673681,
+      "power": "13769424632807424",
+      "pubkey": "hdAt2aysjI+kMrKn3eXdKS+ZFskXc5QR9xQWjaF6Eki7D24/q7GnF8egOjY9KiuA"
+    },
+    {
+      "id": 3512458,
+      "power": "13753172476559360",
+      "pubkey": "k6FxEDSiWsmxy5hXUwEbO/l+q+NVU3q0FX4F0qZ5JUrt/JK3s1iMUIVH//QJTHTZ"
+    },
+    {
+      "id": 3513151,
+      "power": "13719499932958720",
+      "pubkey": "uPJ/xBcc2/brk7ig1xZh8XhsDZfs+Gxz1uhB8HM/OxmxOZLBP50fbQ9M/0KxUy6s"
+    },
+    {
+      "id": 3512720,
+      "power": "13716751153889280",
+      "pubkey": "loDAteauvvLO8pGKWkZgykUbh7TqKJ+Sb1IQHC+EL6mvn59XufNYeXE0h9PWjNiU"
+    },
+    {
+      "id": 3619143,
+      "power": "13713761856651264",
+      "pubkey": "sV1M3e3yG2spOQUZDdwyCVvu1PgipFyLhqFTqIYZnXaLyPSwnR1usu6gwUmA1OyS"
+    },
+    {
+      "id": 3619150,
+      "power": "13700808235286528",
+      "pubkey": "lpnnmXwm6J9ABnwrLpkiDrhH4mfeUITQtafRIZByeWtadFSJZop19r+L0UPMufR+"
+    },
+    {
+      "id": 3511111,
+      "power": "12749421439614976",
+      "pubkey": "sskWiu1HjKZdbTUfZ/vl4JUaaY7CAmH7IFP86a1N8OmkB4Dr0aF8mMEzctaqKsq/"
+    },
+    {
+      "id": 3499325,
+      "power": "12635450187448320",
+      "pubkey": "mIhn7RyDTgl6F7AqPrbvOfmnuJPh76qV5ttBfahlhelowKqlAkB9hMQSWPDO6rPP"
+    },
+    {
+      "id": 3552222,
+      "power": "12440974068285440",
+      "pubkey": "ijsApNs/qwXAGOBs7sa9xCM0Bc025Vn4AvdLOcRici/4zn3tAdcZxkfc4e5Eu+cS"
+    },
+    {
+      "id": 3142258,
+      "power": "12424824991252480",
+      "pubkey": "oDUBtuEdNNovo5c9P3O39JSRromodcD+VBI8shhYD90P6qnZpFJkyY0ZmRupiRIf"
+    },
+    {
+      "id": 3162991,
+      "power": "12395687933116416",
+      "pubkey": "kbc/fbC3ix0WW2pAoPhRJgAHNAolvgAD/aN1IKSGC3vX2/aNdrMwgZXdA3+/IHU7"
+    },
+    {
+      "id": 3515608,
+      "power": "11907023734046720",
+      "pubkey": "ifkyCViHKjjVgAGjfxzTwgzALMZsOVTusNb6+SVYIybaLrIZadOTQAR/tTBzStFe"
+    },
+    {
+      "id": 2236033,
+      "power": "11883128415059968",
+      "pubkey": "oE1FrbinGk4TwQ5C5Q1K7SLo0tpt9dYG/PrwC6fU4Tn9hNyGATKeQW2p1zVTP7RO"
+    },
+    {
+      "id": 2238701,
+      "power": "11866551451910144",
+      "pubkey": "pVASwfZwO2hbmNvT1wZqy+J4AdTZ/EfEJPBrKbz+o5Z2oScBXrrtUy9z+EdJfmle"
+    },
+    {
+      "id": 2046115,
+      "power": "11818719206440960",
+      "pubkey": "h8Ptmff5gTIXCGBUL3fZugoObfZA3Zhy1TsAWb3VzTOwqp/D0JwLepOQPDtUJDbF"
+    },
+    {
+      "id": 2309036,
+      "power": "11770615572725760",
+      "pubkey": "tXtgPSCsU9fg6u9ggpcW5Bj4US0Tw7GQ/4xDIdogeGe607Z35oFrDNXpJ1IniMbS"
+    },
+    {
+      "id": 2237709,
+      "power": "11498702535393280",
+      "pubkey": "lCf5BchzRgg8VvrNKgtQJjEsotgKns98aN9GGCLZHI71zqT6vinlYe8Dp92mf42j"
+    },
+    {
+      "id": 3493287,
+      "power": "11450726408519680",
+      "pubkey": "rIchWcg8lsUY75dHuqu1Yp/Mux6gBr6gPNaX3DVW5eNS1EAL7J6qyGGoLp4vMj8b"
+    },
+    {
+      "id": 1431043,
+      "power": "11442342632357888",
+      "pubkey": "t1ZWVSoyO5cw1xnr2vqRjRcs7cGrCKzMGZ5F8Uwaw1nuVluhOhp4jfD0kLpJVDXo"
+    },
+    {
+      "id": 2966277,
+      "power": "11417397462302720",
+      "pubkey": "rVR5kVeUujLjCIiUnHo0ZNEFt1iz+j7HNpSES6/KyLXx4UADzmy+gEx4W/9w2RQP"
+    },
+    {
+      "id": 1989866,
+      "power": "11355910710493184",
+      "pubkey": "ow/JzLGEg05q6RFRVLAxfdwUB6bhetq5C44R/BIt83FCArqdoVNeh9P5SioOzixN"
+    },
+    {
+      "id": 567188,
+      "power": "11349846216671232",
+      "pubkey": "tnosmKeCfJfEO8cejiEHhSs0xe1cpjxKmIKJg2/EgIvs4IZJxJN6TduFaAj/WxKC"
+    },
+    {
+      "id": 678845,
+      "power": "11339469575684096",
+      "pubkey": "jadmAcv5+T2iNJ+yOOXqZemp4ccFEDkbRY+X7WgoTrja5i8Cb0PPw48OGFquDOij"
+    },
+    {
+      "id": 3068297,
+      "power": "11258311873658880",
+      "pubkey": "ucrci5Vl1QBTHqrSCFaDE+i4K1o/J3t/rQwfJuf3l+QXZb+86JfQtV05tWIIPDIF"
+    },
+    {
+      "id": 3066567,
+      "power": "11257624678891520",
+      "pubkey": "iNMmDZkZecY9EwMliQrc01ixluKu0hzIlDLMJhJ/EAs7C57QvkIx6MLZ9mchIfUu"
+    },
+    {
+      "id": 3632480,
+      "power": "11254875899822080",
+      "pubkey": "ucaJLWiAawxqyM+FMie/WLaVDQvkt0C4mMFkUY25KgYkWXr29BNPETEe5KHXiGaT"
+    },
+    {
+      "id": 2207593,
+      "power": "11254291784269824",
+      "pubkey": "qDOqG/QvSpP1CT4NbbVWFsf4m9sIKoX6d/lDdxTuhu0SAjUlYKCZyUlVb4lErQIe"
+    },
+    {
+      "id": 3093957,
+      "power": "11229655851859968",
+      "pubkey": "jMouJ1h+7eAAg6wu4eP7BuDLAUDRpjzFFmOe5eIfgLmV09Knk2NI0gTXKMSEgrLv"
+    },
+    {
+      "id": 3066382,
+      "power": "11164853385297920",
+      "pubkey": "kTYo85kPD9tl+I/HS8Dp6I0wfZ3MpGNtBFSMZchMkK2EtIi7Fm6hLx0+h3dD9rEE"
+    },
+    {
+      "id": 1999672,
+      "power": "10681068269076480",
+      "pubkey": "hMF5IX+DnFCT4VKkRepmwsrbwQVfoeCiUvmDr/oAH9TQ4ldT5Tofb7O+kgDvKRQL"
+    },
+    {
+      "id": 1912298,
+      "power": "10553993071689728",
+      "pubkey": "pc6WeALfeb3MIQx0K3mH9DHYvigywHVK4EFlAbObJdEc2lvD3A+8Jb2ZN1bSwL+H"
+    },
+    {
+      "id": 3223,
+      "power": "10551239997652992",
+      "pubkey": "sAI72quBtSqOST3QPCdFtEJGwI5q7aOjqJK53tU7FvnOOVwywaGneNVHp+QRR/9x"
+    },
+    {
+      "id": 866468,
+      "power": "10530224722673664",
+      "pubkey": "pc6WeALfeb3MIQx0K3mH9DHYvigywHVK4EFlAbObJdEc2lvD3A+8Jb2ZN1bSwL+H"
+    },
+    {
+      "id": 811822,
+      "power": "10492557859487744",
+      "pubkey": "pc6WeALfeb3MIQx0K3mH9DHYvigywHVK4EFlAbObJdEc2lvD3A+8Jb2ZN1bSwL+H"
+    },
+    {
+      "id": 832944,
+      "power": "10482232758108160",
+      "pubkey": "pc6WeALfeb3MIQx0K3mH9DHYvigywHVK4EFlAbObJdEc2lvD3A+8Jb2ZN1bSwL+H"
+    },
+    {
+      "id": 861595,
+      "power": "10472328563523584",
+      "pubkey": "pc6WeALfeb3MIQx0K3mH9DHYvigywHVK4EFlAbObJdEc2lvD3A+8Jb2ZN1bSwL+H"
+    },
+    {
+      "id": 2639429,
+      "power": "10224786051432448",
+      "pubkey": "rKUqi+CPsU8v9Ts0O/v9R1gr92TgfYL0hO339lHe9FmZi3RHtI+l7sGn9IOtiQEM"
+    },
+    {
+      "id": 3300709,
+      "power": "10220991372328960",
+      "pubkey": "g28K3y/eARAWD5pBCEUWAEgScDtcI/Z8CWFxWEo/Ck2oJJ2tEMLyA3zTHISkHghK"
+    },
+    {
+      "id": 872282,
+      "power": "10030844580200448",
+      "pubkey": "gb3cSifEd1ibN2ktSr0SZ7nRvNUOkSQDVvE8s3R7Df3no64y3PP0kHJaPfDi3iYj"
+    },
+    {
+      "id": 3644528,
+      "power": "9945598069309440",
+      "pubkey": "kbddPkgfInJYOMWtdS6lnjB+IbhyUKqcgpEPYgVwQ8UtRI7DKod2sFCXjehBiF0t"
+    },
+    {
+      "id": 2947459,
+      "power": "9895982607106048",
+      "pubkey": "t7OcqQl8vA+9t3EGJC2IycWe814CvoMgV04Y0hzXDyEXjuRwXli0z3B+XdvaYnUU"
+    },
+    {
+      "id": 2826371,
+      "power": "9862103905075200",
+      "pubkey": "tNnpAIMk59K4eLvtd6O4rLjuyQe/3mDv4Hsyx5KDAewQzJk7YswXmcTzYnisBJcp"
+    },
+    {
+      "id": 2827493,
+      "power": "9832279652171776",
+      "pubkey": "rBI8/gQ6F/iddp50PU9AQaZBa7KUpXvZbeYmUc7P34PgRm2dSwTiQuvYTZp0SPDf"
+    },
+    {
+      "id": 2827667,
+      "power": "9825716942143488",
+      "pubkey": "tyRZA4MIqrNRY6hD5iIfbCRWFdqwcA/7OUksetA27ebeR9j6h78xU2/calhj0L06"
+    },
+    {
+      "id": 2825740,
+      "power": "9783523183427584",
+      "pubkey": "o5qEmNpNLKuHsP1L0reYeYny/9MjYtUGR3LPLkTJ6orFhGMoXguIFYkN/Vd5E1os"
+    },
+    {
+      "id": 2827711,
+      "power": "9772459347673088",
+      "pubkey": "k9ArpyTJy/x4cXCea6edCUWCWTh4YdK5UVquq0GujtewAVZC/wqJ9aH2UApLv20B"
+    },
+    {
+      "id": 3139960,
+      "power": "9761498591133696",
+      "pubkey": "sO0UeXZXhr3fc+OqKYu/jhGnsV1U+RSOARVFz9hmmTcftakk4pzvmU06JKrlUL3w"
+    },
+    {
+      "id": 1619524,
+      "power": "9725731311452160",
+      "pubkey": "t5AUUMSjf9odzvDm7dQDnLm/11LDxzwx0m0Umi5dbJel6e+VftEbXAwjQuCwNcWR"
+    },
+    {
+      "id": 3074163,
+      "power": "9526855937818624",
+      "pubkey": "hjyUSPkVo78SF0+WXe7Si68EZ/U1NMuYLQ+IiCpb1oFOVIJ9VY3q7Nx+fNzgAw5K"
+    },
+    {
+      "id": 1882035,
+      "power": "9274586738720768",
+      "pubkey": "g28K3y/eARAWD5pBCEUWAEgScDtcI/Z8CWFxWEo/Ck2oJJ2tEMLyA3zTHISkHghK"
+    },
+    {
+      "id": 1907578,
+      "power": "9243864837652480",
+      "pubkey": "sWgGzT+ViIREzoG0lTwzW+s7VSE5w0ugNjf7HxLzk+YjKe18y6UG0upXPWCuB8wN"
+    },
+    {
+      "id": 3161638,
+      "power": "9243456815759360",
+      "pubkey": "mGAce/gOdOZHx1oe8ojPoT8i0F0Y/RwZhNbt1IgCWkmLN3oiFtQvm8dc4D2XHec3"
+    },
+    {
+      "id": 1225783,
+      "power": "9127801936412672",
+      "pubkey": "kbuvbiZv0LzWq034fZUO2HFminQuWINk04Kkx3V7zEuKHb/ZxZhwxmOjE7t53fFL"
+    },
+    {
+      "id": 1487740,
+      "power": "8828872212611072",
+      "pubkey": "jfvudM7uxvpm0M2GEALBTmVA4WN8xnjeZZNFD1+Zo1fUnaJBPljvF7GbDhZB4fNf"
+    },
+    {
+      "id": 2182802,
+      "power": "8785338424098816",
+      "pubkey": "tNCw85X0b/zgDBmAi71ScVThNLLIOmsTagLh6nd9grmW56G8MVTEjRihLt7Dquew"
+    },
+    {
+      "id": 2182743,
+      "power": "8748436065091584",
+      "pubkey": "tVo7k8vlD7eNpu/OIZFq7HRZSj+DB+bOeSmxSBP8qiBciBCmU0QsCF1Ox5MW3e8f"
+    },
+    {
+      "id": 702034,
+      "power": "8403189413969920",
+      "pubkey": "rSsb8CSu06MF4jb70T5zsHWP3cgQf6IMbXqvFswxgXu5apejErY7X/Zu+8J8xTw9"
+    },
+    {
+      "id": 2035545,
+      "power": "8401471427051520",
+      "pubkey": "jt5eY62mxc0geBtsQLUUB5n36XBrBv/MRM2tAZsxWnsZpRizgpFYeklQU815k7qF"
+    },
+    {
+      "id": 3166688,
+      "power": "8396832862371840",
+      "pubkey": "qS87FxXLzvxYGbp8ydVVKhCv2XaliUXX00kSpZB1IHuHipAMDQsjmAEAhQ+vxaxt"
+    },
+    {
+      "id": 2182798,
+      "power": "8335363290431488",
+      "pubkey": "idd8F5XFaXw4oSAEgUGbylJjzYg6g21JqFPQ9J3dpZQtYxH4l/yTrQj/Kps5HBD6"
+    },
+    {
+      "id": 763337,
+      "power": "8276103285112832",
+      "pubkey": "hOpSUnLfhUNAYLdOC56/P36GWIOwa3cs6xh+a1uqOEb2gHWI/niaP8EWivhyhlp3"
+    },
+    {
+      "id": 3231117,
+      "power": "8221082800619520",
+      "pubkey": "k+nJLg1nuex/OH/NqVb2MNk2hWrgLJSEWIRDCd1gNSGIOqhrTpO50Z/FGPdYPE0Y"
+    },
+    {
+      "id": 3231121,
+      "power": "8209056892190720",
+      "pubkey": "lSmIx04HibsL4PheAntDbbW1idaoVpYOY3jaHxGVCpgTF1hD04Q3ZRYN8/i9t2PQ"
+    },
+    {
+      "id": 3166677,
+      "power": "8128139708334080",
+      "pubkey": "oYfKbMkabgbs+YUt7UV0AfzirQr8iQ2awCjtIR38j4TP5J6s+WMGekGdvQlWeveK"
+    },
+    {
+      "id": 1021773,
+      "power": "8118725140021248",
+      "pubkey": "jHFfXZ9tJp/Jpsrrh+D8YYy3AV7WJLai5h8yMPDbETn0Ivq5CqTEZMdRd06zXMW8"
+    },
+    {
+      "id": 861591,
+      "power": "8010530465611776",
+      "pubkey": "pc6WeALfeb3MIQx0K3mH9DHYvigywHVK4EFlAbObJdEc2lvD3A+8Jb2ZN1bSwL+H"
+    },
+    {
+      "id": 1061547,
+      "power": "7992942727790592",
+      "pubkey": "rpOY/GGIhTNzrE6xGBUTBWnaBp6eqsxij5VxNdM1DlpHJdQYpqXBUEqXkqSbk8bo"
+    },
+    {
+      "id": 3231154,
+      "power": "7957715406028800",
+      "pubkey": "pQxLZYKcPdb+8VolVwLQwqbBRivZZFUWuFY7J5qCN4/nMkHCbQq47gJFg+MiSdkq"
+    },
+    {
+      "id": 861589,
+      "power": "7907541174910976",
+      "pubkey": "pc6WeALfeb3MIQx0K3mH9DHYvigywHVK4EFlAbObJdEc2lvD3A+8Jb2ZN1bSwL+H"
+    },
+    {
+      "id": 3226691,
+      "power": "7885628674932736",
+      "pubkey": "s8Tcez0cxiNkGduUGspM7BVgft9d5jptguNoWuqU/qxzsKCjONYSLIkER/iTAItH"
+    },
+    {
+      "id": 3242023,
+      "power": "7792479424217088",
+      "pubkey": "tV6IAtktve7E+37qeL4PTdBW+CpDHw9i9hNwFOD0HAPTBDVjE1+ITaz6/I31HTpt"
+    },
+    {
+      "id": 861590,
+      "power": "7779962012008448",
+      "pubkey": "pc6WeALfeb3MIQx0K3mH9DHYvigywHVK4EFlAbObJdEc2lvD3A+8Jb2ZN1bSwL+H"
+    },
+    {
+      "id": 3066836,
+      "power": "7764270079016960",
+      "pubkey": "qeIpfnw84cLIwVDtY/nA8lRU2y3kQ09wRw84ycdPPFo8tJ5lJ1xzhWkEph+g2JCS"
+    },
+    {
+      "id": 861588,
+      "power": "7575183227846656",
+      "pubkey": "pc6WeALfeb3MIQx0K3mH9DHYvigywHVK4EFlAbObJdEc2lvD3A+8Jb2ZN1bSwL+H"
+    },
+    {
+      "id": 3493414,
+      "power": "7526025156100096",
+      "pubkey": "qQIQMpc+WBS9dcYwvmmrJcVfGTzBRfc5w++X/JOca9+bOm3XN94A680wsD7XuJSY"
+    },
+    {
+      "id": 9693,
+      "power": "7282512187359232",
+      "pubkey": "kJ1mA5IVCd4BNzOkIDohtE/yAfHY+25fztKhNylEzn1oyzAMou+MpVzc3B3Zt50p"
+    },
+    {
+      "id": 2029115,
+      "power": "7073296948396032",
+      "pubkey": "pV8Pu91FQW8nEz5bmG3DkvdKchoR98cXruPSFHjgiRX4b+XwlKDAMfgSchObFBNP"
+    },
+    {
+      "id": 1769576,
+      "power": "6859853045694464",
+      "pubkey": "lz7SqFSBiOI4PIqUXQ+gsfWhAzaP3QwcsTwqYVuKtRYUVtKa3excSrbqhL5SsTP8"
+    },
+    {
+      "id": 3286667,
+      "power": "6819789590757376",
+      "pubkey": "oTl8ZPecvq1Nu/xV8OJErO2xH0OsAwOJKdnyl58R3EYqwYfp6FruAzHo+yCMhfRZ"
+    },
+    {
+      "id": 2237106,
+      "power": "6678859365744640",
+      "pubkey": "qKDXGifMgU8bakvxup/m1f3fpPpqGljzHggZl3TrOXOIEhlR6l3SQpjN1iUpeBwS"
+    },
+    {
+      "id": 2243688,
+      "power": "6597379004301312",
+      "pubkey": "hYFwzc81TNoMEUH7yXfpeNaVpG/eSQQ0tbzRgQ0NniupMoRMiypNAbfgHoFk7+f3"
+    },
+    {
+      "id": 1912253,
+      "power": "6592199273742336",
+      "pubkey": "jopuEinTbOZt7XwCfbCsRH9AuS+NRXhwaRaEJL2HifvnOy4rT8ZZqZR+FKH2JRIa"
+    },
+    {
+      "id": 1832584,
+      "power": "6583892807450624",
+      "pubkey": "jopuEinTbOZt7XwCfbCsRH9AuS+NRXhwaRaEJL2HifvnOy4rT8ZZqZR+FKH2JRIa"
+    },
+    {
+      "id": 1019009,
+      "power": "6567507506757632",
+      "pubkey": "jopuEinTbOZt7XwCfbCsRH9AuS+NRXhwaRaEJL2HifvnOy4rT8ZZqZR+FKH2JRIa"
+    },
+    {
+      "id": 866680,
+      "power": "6500609096155136",
+      "pubkey": "jopuEinTbOZt7XwCfbCsRH9AuS+NRXhwaRaEJL2HifvnOy4rT8ZZqZR+FKH2JRIa"
+    },
+    {
+      "id": 433690,
+      "power": "6372185279037440",
+      "pubkey": "g1E3X24a1UDkjmOSV+qjf03DjOXMgVKLwMT497S3rjawjfiECe216zqydDmj8JUb"
+    },
+    {
+      "id": 1016847,
+      "power": "6338444015960064",
+      "pubkey": "jopuEinTbOZt7XwCfbCsRH9AuS+NRXhwaRaEJL2HifvnOy4rT8ZZqZR+FKH2JRIa"
+    },
+    {
+      "id": 3328971,
+      "power": "6274809780502528",
+      "pubkey": "mS54cn+K3gc+klhfjOag5Cr971LZhJhKTOWs17mSj4krjCpCZkrfHTlObAD3qDsh"
+    },
+    {
+      "id": 1081439,
+      "power": "6028759694049280",
+      "pubkey": "jMdj0O9XIasMa0Mk37nFaUh9PliLvxx7ZSzHJcfF9ue5i8ugR6I//rZMjwctn1i0"
+    },
+    {
+      "id": 2088691,
+      "power": "5892128194428928",
+      "pubkey": "uLKq2/0NcVbVJBvxQU3HWx9doO3wxwI9zjZy3QlNI0a04aH0ot+Vqi+ludwvzH8U"
+    },
+    {
+      "id": 2092901,
+      "power": "5661110493511680",
+      "pubkey": "sncv9tA3xL+Wal9RPq2dJ26d7QlGz189VbbgLMfX7afWCgT0LT6XnTuP9A73AvC/"
+    },
+    {
+      "id": 3270850,
+      "power": "5635134531305472",
+      "pubkey": "jPVIPJCIr+3OYenvL94iuYk1TeoqMjKKUXaJtuCArT8pAN3ne6AlznrpTTgQ4TX7"
+    },
+    {
+      "id": 1755999,
+      "power": "5624043301765120",
+      "pubkey": "iSMHSZPtsPIZ0jxkzrKOg7J5DptVFM2IF+k93AxokYvcp5Mgeo0skkYG2lLq+Jus"
+    },
+    {
+      "id": 3066866,
+      "power": "5594109003694080",
+      "pubkey": "qqHxA9WVgZGFjV0WhoF/Km6I/pJvDsN+WNnKHfCET80/KzCofyN7Ra7nUNACfCIW"
+    },
+    {
+      "id": 3659323,
+      "power": "5575898342359040",
+      "pubkey": "qbOt0MiSxWL7sKOqhd0kLcJpJd8uh7CahU5H9CRP3T9C2gs29/epjn9/1ThTZZj7"
+    },
+    {
+      "id": 3224283,
+      "power": "5498932528414720",
+      "pubkey": "gYp5rCTXmOwQI2pr90fr+2KWsU9mwaadnMGV6qaxkcRCUQBwmg/Nj9gUjt0yNAmu"
+    },
+    {
+      "id": 3224551,
+      "power": "5498245333647360",
+      "pubkey": "s0MY2aNT7W1Ru/sLmwytSM6hRdGcLKv80ao4gdjCggJIKBQRDdp9uoMYp/ZqPvtu"
+    },
+    {
+      "id": 3602120,
+      "power": "5465637941936128",
+      "pubkey": "hv19e5fk59JnWRS0+q/J8ph2mvuK8ce/YlJOsmUWR2a5KhLhRfLKSjM/OJtsrt+2"
+    },
+    {
+      "id": 3498626,
+      "power": "5461274255163392",
+      "pubkey": "ldHZMVZQS5vfXrwDJIVCnAtvTKibucWYDH2sa+bNcmB/s1Rjgx9Yh+uB4joI+f4r"
+    },
+    {
+      "id": 3537164,
+      "power": "5436741401968640",
+      "pubkey": "rRsT3YNlDQtsgm+KK4DgY9OTa+I1e/MUDeNqL09tCvLvWgVpezGNfLxHA9xzabvN"
+    },
+    {
+      "id": 717969,
+      "power": "5401694468833280",
+      "pubkey": "txDtGodo1uEl0xtxe7yuRM6NRJ23HUpoDHUT74Pv51y5ywNKguAhqvw9Nj+1KwNC"
+    },
+    {
+      "id": 3509518,
+      "power": "5398945689763840",
+      "pubkey": "uB5fLafNycCBlla47U2ZqDRg0yUyjD4I/fBAzATtT1u1MgOalMOOmapYacUA335y"
+    },
+    {
+      "id": 1999119,
+      "power": "5317341311139840",
+      "pubkey": "rOTn9K8M9iFbfv0L/9kfMzY/93odddeST6Tfi9N7qYKDOJL4uife8FUuuxFrzRHl"
+    },
+    {
+      "id": 2301,
+      "power": "5303210868736000",
+      "pubkey": "gerzdDiuurEMR9Z9pi/pfuN2vn1xjdTNyk2r+HpQtkeichbUoH6qp/tRNpEnA7wR"
+    },
+    {
+      "id": 1222595,
+      "power": "5269937757093888",
+      "pubkey": "qJlaIN8uKgQ/x41KBzGoX4S3DVJuixs5bqMD6s8eoefazR/IE82Foi+8nrOqD5AS"
+    },
+    {
+      "id": 2131865,
+      "power": "5097816942706688",
+      "pubkey": "kHVbxUox9O5zphcBRs6CrWRPNbGmuwsq1ZLBPpZINcDIpZc+JzzyQCvKwBUax8ob"
+    },
+    {
+      "id": 2011071,
+      "power": "4801486348353536",
+      "pubkey": "ieut4W7iIqCtaAMUFYjZpR3vsAhIYyN5+rU4sE/V+Qr6ULvGp5QVQKVui9D5BmLC"
+    },
+    {
+      "id": 39940,
+      "power": "4775969273413632",
+      "pubkey": "obtSLP1oyagmLigsu4L/D+YWk7FO11L82Neb3WEs/ii5gEPYsJoKW7fWavn3ZEwh"
+    },
+    {
+      "id": 112781,
+      "power": "4751894102671360",
+      "pubkey": "uJuAFSIfIrgS+WxOPMOg/Gf65hP1fL4JKIoMlw8C8517mQJk+4y/GFJZ3lpO0M7t"
+    },
+    {
+      "id": 101021,
+      "power": "4750554072875008",
+      "pubkey": "hukLcPmTFdka8JjfY7cSJGrM8zlU4sip33+5KCLwNxbx6CHUft4FO7eVAqHPc+rM"
+    },
+    {
+      "id": 1164500,
+      "power": "4749282762555392",
+      "pubkey": "ryjFzQmwyEGmlZvez8gOWxmcOukoi/GUwy0kEMxhkzNknsOMLGm5eiHDZUnYy1qx"
+    },
+    {
+      "id": 861594,
+      "power": "4726897393008640",
+      "pubkey": "pc6WeALfeb3MIQx0K3mH9DHYvigywHVK4EFlAbObJdEc2lvD3A+8Jb2ZN1bSwL+H"
+    },
+    {
+      "id": 101020,
+      "power": "4673158762201088",
+      "pubkey": "jUWEEo9hStfF/47R5PoqjufGHtBm2fzDG06Zr68OgCHAr3sFSWd4RMl9XgB31erS"
+    },
+    {
+      "id": 2182251,
+      "power": "4666246951862272",
+      "pubkey": "gH5jA452yEnfw0qqWPXh4qCm/yBW9R3xpUbflUZHFVoJXQLuIGhE96MIVYUxUWBO"
+    },
+    {
+      "id": 1404908,
+      "power": "4496624600481792",
+      "pubkey": "l+zxtpM0GRloG4dpOQB6DYPgflwlVzFICwx8w6FPsRM6nBE3MFO3RIyKdjCImOdR"
+    },
+    {
+      "id": 1082688,
+      "power": "4412821198602240",
+      "pubkey": "gTn5d3qy9kBAewoYMT9Ktuf3wlV0cJ6xlzgYyL4Cm4EwpoSQyXdBdy0mhoPABfc5"
+    },
+    {
+      "id": 3132919,
+      "power": "4317198046724096",
+      "pubkey": "j0yCsxdEcwC/uRJiIKgH32bDd/mH1YmDuNhyE7byQexyaGVdBPFA7eDkYpIaioHK"
+    },
+    {
+      "id": 1053413,
+      "power": "4266448713154560",
+      "pubkey": "hP7Oh6arggXi2iBq/umzLZ3772RzWjaegWSmYURcrOjVe/sWkqE6Ps5VAmbGVuwT"
+    },
+    {
+      "id": 2146033,
+      "power": "4207934078713856",
+      "pubkey": "hPtMyEc4PiF0nwKEaMQmlzlJnWYXnRzsO0RhbOU0Y8DQ7kuRzJZcGfmSfUoSZwoa"
+    },
+    {
+      "id": 1690363,
+      "power": "4146430147035136",
+      "pubkey": "sjW6TLiffsJ4wSyrweDoK1l52gxjVvX5oik6T7l9f8rta35EjL9HeZeSUMZwHb9a"
+    },
+    {
+      "id": 3282101,
+      "power": "4124542993694720",
+      "pubkey": "tk/i6ptiR7uVK8dwna0Tedwd2SlMo0Vx8+axscJ7TQS++zB7z888ekRcUYqtZdU7"
+    },
+    {
+      "id": 1270096,
+      "power": "3926630900695040",
+      "pubkey": "qQjYk0RVr+gpoZKOEEnFuf83rCtCGqnSp8Ur3RrSVJ7ojYSuTJl+7DsPtC3mqcZI"
+    },
+    {
+      "id": 861587,
+      "power": "3728067731030016",
+      "pubkey": "pc6WeALfeb3MIQx0K3mH9DHYvigywHVK4EFlAbObJdEc2lvD3A+8Jb2ZN1bSwL+H"
+    },
+    {
+      "id": 1757717,
+      "power": "3712467762937856",
+      "pubkey": "jTD2nrecp2aOSgHtnuPKdMwVM4bOKY4pvkCoSbEzj4Pq8ttCJlkiKywc0Zg1la/t"
+    },
+    {
+      "id": 1104909,
+      "power": "3605470426169344",
+      "pubkey": "rgY0j4I86Saaq3/cPFhxsnLfVQMc00VcaUY9l5cip1LtyE6QW9Zaa4vOu3Oxf6qA"
+    },
+    {
+      "id": 1912211,
+      "power": "3529432325160960",
+      "pubkey": "hb2h+j0taeZj8bLhp3e9b5RjV77jGWjtxnlK7/7uowAdTuBgfOJIsOxIwaOERVvw"
+    },
+    {
+      "id": 3322378,
+      "power": "3487857041735680",
+      "pubkey": "uP+hyHhsqdqFZd4gbrqpgZnNsB/GBJznBDRfUOitJSKPQt3B9SXx0CxTMBzy8EIu"
+    },
+    {
+      "id": 2192588,
+      "power": "3438379018485760",
+      "pubkey": "jIeqHWsBiKAHhJA/Qmf9Vy7IhpEvXNV5ExMI1+Jqdmh34jK/jfHWRgM30cK5Urph"
+    },
+    {
+      "id": 1920887,
+      "power": "3379245908754432",
+      "pubkey": "g5hIzKmF2tZ8K33lclc++tT2QEB2qwdgJazZ4Z6oClX2hHwLZSky5QWFihXk1Qca"
+    },
+    {
+      "id": 1699999,
+      "power": "3377699720527872",
+      "pubkey": "o9Q3iR0y+8CILG5gEHHAdtjBaQugg1afiu5MzLbyHiAe/l1R8UmLq4tMeq8iW27g"
+    },
+    {
+      "id": 2899169,
+      "power": "3312021080637440",
+      "pubkey": "i6jOdOTy7Jo/kGKUW5S6piQ5ktm2Co0f9r9Tf7qg/v0s6MAY6B7F2Jtdadq84/yq"
+    },
+    {
+      "id": 1770778,
+      "power": "3181200671768576",
+      "pubkey": "tP5Dy0QLF5eBKZEyRUE5em2K5FKBZNNBuiGKSNvrwHcPNYg1UPB0RDsUabJfWRn0"
+    },
+    {
+      "id": 1074953,
+      "power": "3110655833931776",
+      "pubkey": "ho59drS72SVB/t3418Q+R69HMZBgS71ZwcMkNih3WZmvJoPXbDXDj/c/W3hNXhtA"
+    },
+    {
+      "id": 3126600,
+      "power": "3030528924057600",
+      "pubkey": "ilwk2iYbjJvLe4Q1FYZ7IMmVr2j5bk7qlMjUQIt41ZCSwPMOuxqUuNAfR1YAXNi9"
+    },
+    {
+      "id": 1115949,
+      "power": "3025138740101120",
+      "pubkey": "ljlgn5GV+bm86xfHuyRwv9fm+ntkopuqHNRPpDnpANZoHqdcb9+1LYF+Av0IuSVQ"
+    },
+    {
+      "id": 984905,
+      "power": "3023416458215424",
+      "pubkey": "lBc1ceIXhQkOCY+oVuexYuk7MFETOaOBOLejT6YXnrQisHqOc5H2+DocNPJIc6/4"
+    },
+    {
+      "id": 3623218,
+      "power": "2994107601387520",
+      "pubkey": "pqKCnHimG3MmbNNM0In03W4xdoATvAiyvRzq5UDM7m96JoX7XQrwriFuVXDE3HDI"
+    },
+    {
+      "id": 3143698,
+      "power": "2750428336881664",
+      "pubkey": "rgbmZS8lo2E37lgp1lAozYQieDWLSwdws/JNPmnhMZkkagStGEayqn0OoACGYwvt"
+    },
+    {
+      "id": 3066557,
+      "power": "2747748277288960",
+      "pubkey": "qfkzzpGirZ2mdud5KVsqa5piV4HUo/HmukT8Y9WjtbXoUGNcT6Bp6f/nJsXPOkU4"
+    },
+    {
+      "id": 1924824,
+      "power": "2736065966243840",
+      "pubkey": "s6qTDX7VtLdGnOw5jqAO4HG0gtl4iWd0S6Pjx5DMB1BxdZ8Aacsr7R3I8V/cwZc2"
+    },
+    {
+      "id": 1900525,
+      "power": "2714835942899712",
+      "pubkey": "ljlgn5GV+bm86xfHuyRwv9fm+ntkopuqHNRPpDnpANZoHqdcb9+1LYF+Av0IuSVQ"
+    },
+    {
+      "id": 1852545,
+      "power": "2703561653747712",
+      "pubkey": "uGANzxxFtnZunKF0VkQcsT2qe0GLKDSlSdpnKZzevc3XLGluwFA0CljjJx6QsC6F"
+    },
+    {
+      "id": 1927163,
+      "power": "2696281684180992",
+      "pubkey": "sZGnZPQrazxwMmK0bnJFFfVBdOOQ36s++XXV7kNJR2SbBRI7GUpdVgU+FSXOKKd7"
+    },
+    {
+      "id": 1924891,
+      "power": "2684942970519552",
+      "pubkey": "pMaLLSH8yOFJ3Ux9mo9l+KQSSu0GyHkj62BRmE7QMzkiEFsarl4hSK9sPJLrOmAC"
+    },
+    {
+      "id": 3066878,
+      "power": "2527158756966400",
+      "pubkey": "mT9RrT+KIPmGBoJs6GOL06i5g5tJYGMnrpMbYA1PoMj7ygkHKIpLk/5rXWA1v6OT"
+    },
+    {
+      "id": 3623017,
+      "power": "2486442467000320",
+      "pubkey": "mFWb9Fg6zJfr3iw4dq2K4FEa+7pONj6pW/DdT6dFXGwYpURIowncrTeY57YA1XAG"
+    },
+    {
+      "id": 1969746,
+      "power": "2344502387802112",
+      "pubkey": "sx4XqBka0cA2m4Ac91fvEbB2t0ZUPRTr2fafi/lq62Kvyk5w5UkSicRxqrnFAc3h"
+    },
+    {
+      "id": 1985540,
+      "power": "2274374161793024",
+      "pubkey": "lHWl2QntRSmTJYfohQWM6BFRBFb9P0gqr6+oNHP7um0w8I+VMtGq5D3Jqx46b4GB"
+    },
+    {
+      "id": 2128661,
+      "power": "2196360375828480",
+      "pubkey": "g28K3y/eARAWD5pBCEUWAEgScDtcI/Z8CWFxWEo/Ck2oJJ2tEMLyA3zTHISkHghK"
+    },
+    {
+      "id": 240185,
+      "power": "2028049197432832",
+      "pubkey": "goUhZ3AIR6taqJde0URs+R81ksDHR5QB1H4FOL0o51raaRFgm9jry9zzlZtpit7/"
+    },
+    {
+      "id": 8403,
+      "power": "1931511829889024",
+      "pubkey": "j+2X6+WL+HocUVaVo5aMtBghLsw+c+QQ2kMTLoKeSbBeP6px4Ov9tiyS+zvYqhZr"
+    },
+    {
+      "id": 3601035,
+      "power": "1919914805821440",
+      "pubkey": "rKUqi+CPsU8v9Ts0O/v9R1gr92TgfYL0hO339lHe9FmZi3RHtI+l7sGn9IOtiQEM"
+    },
+    {
+      "id": 143858,
+      "power": "1853020690186240",
+      "pubkey": "gI24Ovnx6Oq5ErG46A21IQX0OMUqILpLYX++1Pyvuu9VyZT0S8CU4mnrkWMgeop+"
+    },
+    {
+      "id": 3703682,
+      "power": "1852333495418880",
+      "pubkey": "jpftis5HuXQQTNC0v8E5wehAii2Vv8CJe8wjtWjTX6cAci4AvGIVkAyGFAXjSXIe"
+    },
+    {
+      "id": 419414,
+      "power": "1808146871877632",
+      "pubkey": "jsilsimJX1jyOEMhRysXCtoYj9vPqeSZ3IwC2Bx11cn2T4bNMfGJHNR3aDpglNNe"
+    },
+    {
+      "id": 101087,
+      "power": "1790657807187968",
+      "pubkey": "hF7hxpq9419tbGxIgHToXampX+tGpUXCqohZz1/TCWqzQDIzAH6ul9LjdrmTng+b"
+    },
+    {
+      "id": 1045957,
+      "power": "1746230623338496",
+      "pubkey": "otnBLg2zhUPqqKjtB+912qkYHHZ/aRLEfH8zD/wfz3oFweo+s8xrKPQLukT7HHlr"
+    },
+    {
+      "id": 1675393,
+      "power": "1706407686569984",
+      "pubkey": "qde4bYI8SYfbisJnE0DLY2N5JiuUSWBro9ijBHd9X9+9DzQ/VLXG9qucPdVQ2X70"
+    },
+    {
+      "id": 2860783,
+      "power": "1625232804675584",
+      "pubkey": "p82h/3+KM3s78OoFlk9kj6mTffUgScxRDIR9oScR8AuT0mR4c9VkuHilqil5LLdM"
+    },
+    {
+      "id": 2035256,
+      "power": "1625052416049152",
+      "pubkey": "gwXNy8RQdMBhA1IK9fbXnNPYLba2T04CdNX0u5B2G2ILrooZ3Y+GDjwfvMlPreaI"
+    },
+    {
+      "id": 3706409,
+      "power": "1621444643520512",
+      "pubkey": "lPFFB5AxMlHYBQLwZU4WIfGWK6x5oCkOCvfwR1Jex2VEoWtaAcRhoe/4ChTLouhB"
+    },
+    {
+      "id": 693793,
+      "power": "1573633067581440",
+      "pubkey": "jUzyaUza0ycsx8BiDfxQb2ksyYcr1HSfbM7bMmiAxPsxzYUO9mCOwgGaIoDNbk7a"
+    },
+    {
+      "id": 3228923,
+      "power": "1514233669877760",
+      "pubkey": "syxvVfXcc27F4atNQSshDAMqycMMW8QF0wElqAg/EL75gWgULgxr852IBdT8xj7g"
+    },
+    {
+      "id": 2860778,
+      "power": "1507129793970176",
+      "pubkey": "qCQ6nUJk4YF7TbyyvqXmyM71uuGpKJSOZh3LFPlf7AY6VkQnLS9IVREqR2ye7eTQ"
+    },
+    {
+      "id": 3084393,
+      "power": "1492810373005312",
+      "pubkey": "sk7qjAzdUw1iS4fEtRyJEv5QBdowlAsi5Wz30ZH3aBoFDwnNtCy8yt07i9D20evf"
+    },
+    {
+      "id": 97777,
+      "power": "1444483400990720",
+      "pubkey": "gzt54UpienZPNpsKQPK7oAf8mJRQOyAExkDO22rKPNBFDlKytyBkBbC6DmFUSzQY"
+    },
+    {
+      "id": 3091958,
+      "power": "1431119610249216",
+      "pubkey": "g0m1OxAIchjKDY8uqEcdTDqmyGm+SVKJyg0rioy6IG9d/lQizvl4AADhbJLW1Nbx"
+    },
+    {
+      "id": 700207,
+      "power": "1426341459132416",
+      "pubkey": "hmsO4mDOkhjdb1hjinBpUJN35FTl+tUl++FBxLZhgSkS1HUzfmZyfIMNYolENO9C"
+    },
+    {
+      "id": 3143705,
+      "power": "1402220922798080",
+      "pubkey": "r9IdgIYODSirrZKNgQ80DUhCHJdZ+DypYpDZehsQY/sBClRUQL++ivhyhiqPmxV0"
+    },
+    {
+      "id": 3228920,
+      "power": "1400159338496000",
+      "pubkey": "sqk5+2AbS/TyTeecwcggLUrSXBICWXPMlCknMe2BDx2V8AuyGrmolDtde6yFiOrh"
+    },
+    {
+      "id": 187709,
+      "power": "1393598804262912",
+      "pubkey": "hMc+J8YC/rbOgn+mP+tJAcX/OOirBkYm6lccHXoAFu5FNldSYxyrNt6oRxcTVJll"
+    },
+    {
+      "id": 3134685,
+      "power": "1357576885239808",
+      "pubkey": "qvWS9jPwSjbhodVh63mORA8SVa1tZZbg4TsE7Wvb4O+H1LaDeJRA6Yv2qFfAAXZK"
+    },
+    {
+      "id": 3291373,
+      "power": "1277838669905920",
+      "pubkey": "g28K3y/eARAWD5pBCEUWAEgScDtcI/Z8CWFxWEo/Ck2oJJ2tEMLyA3zTHISkHghK"
+    },
+    {
+      "id": 3303347,
+      "power": "1269248735313920",
+      "pubkey": "iDB6VMT8DbsqwV0NFL6VE4w3vftQKVBI82Y7qowkddzi7Y1k/HT/YnEE1lAE24aH"
+    },
+    {
+      "id": 1866860,
+      "power": "1259181331972096",
+      "pubkey": "lv2YGFLw53zEmzUpLTOyUKTQQ/TzzK0Z74pTMS/n50upJqdxEFS+s25Y3HSkSHAs"
+    },
+    {
+      "id": 3383926,
+      "power": "1255539199705088",
+      "pubkey": "kQ6FFGyeKUPfCjs5P6STC7yH0A/2EoLcD2ncuCt4u6PWKq0unS+5cK/zsgnTwX+b"
+    },
+    {
+      "id": 2620,
+      "power": "1210426265370624",
+      "pubkey": "s1mT06hbfyPQFnTUwICJL5wAv+NE5cnx/s1tcjmQMSyXsfw7uOxS9DA0bNifJTTW"
+    },
+    {
+      "id": 1795896,
+      "power": "1174896893755392",
+      "pubkey": "k6aJKyb3JoD6wIEhmc8d8FEmGeN4szJt8kmG0WEPfP6LAy5OS7u/G3SnTVr9RgH9"
+    },
+    {
+      "id": 2814100,
+      "power": "1169725753131008",
+      "pubkey": "qdpgWY5oMzQo/dKdWzLmffsR6g7aw86WuzkCKNurkozQSh4tf0TbBF65p36QsNPz"
+    },
+    {
+      "id": 1715238,
+      "power": "1166100800733184",
+      "pubkey": "qfunSvkog1tyjdjgtFlgW5xccSH5YD677q0sH2ZHa2W5ryh65N4VzHoV66tvIPVZ"
+    },
+    {
+      "id": 3234631,
+      "power": "1155174403932160",
+      "pubkey": "pC12WM/LCXJ4K8Qas7gGMELHJbuqYYdn1BCaTjZEJfZxrUnN7Y++rm/oEYsalmY2"
+    },
+    {
+      "id": 1546926,
+      "power": "1134639437479936",
+      "pubkey": "uEKFDDE98pGzpLcv/ZwRmfrbEMfvJrDT/3ZKWzabR6lAGRiDnIe9uBhwednsqF6X"
+    },
+    {
+      "id": 2006108,
+      "power": "1129061002772480",
+      "pubkey": "pdJ+Zfyib8J+Dg7BX2G1uiJ76IV90AURD1j/XRgB3FpLPCQL2+NwL9g8YoNfYHRE"
+    },
+    {
+      "id": 1935333,
+      "power": "1127652253499392",
+      "pubkey": "j0kIVrAz48zLRWKMsHoRIvfFNKtTvyr1Hhz/X3Lv/cq7XxRnaT2rqsZ5mLojhxLw"
+    },
+    {
+      "id": 1106820,
+      "power": "1127377375592448",
+      "pubkey": "i11bIYPyMxIw1GgBeRBzis5Uqe9+qIC7wriZzLqjzs0J1XZ+G7sdkCvBySifrAX7"
+    },
+    {
+      "id": 2006333,
+      "power": "1126312223703040",
+      "pubkey": "pQZ51aU63NngRU5hpMe6VIwPm/77R4qFznnCQB4L+3fRRmRqto97Sqetijt3TT57"
+    },
+    {
+      "id": 861592,
+      "power": "1125899906842624",
+      "pubkey": "pc6WeALfeb3MIQx0K3mH9DHYvigywHVK4EFlAbObJdEc2lvD3A+8Jb2ZN1bSwL+H"
+    },
+    {
+      "id": 1472022,
+      "power": "1102779977334784",
+      "pubkey": "pViCYjU4Z0KE1OGWZhpOkEF6tYa1o/IwxH5rCbnVXiY/XKFtlKbWu1kZcFIx0Tjz"
+    },
+    {
+      "id": 1690631,
+      "power": "1100473700450304",
+      "pubkey": "o03YKU4MbTSYv5Wmqi8Qt6bzhzuSno+mc72DSoYuA8IUIvYIHov8Rreu1GJCMq23"
+    },
+    {
+      "id": 1656166,
+      "power": "1100095743328256",
+      "pubkey": "mIdr2jDXLnuj0iZdUTdwvpuDUV7IjeG3ZPAvP89UqtiyVuaLrxtnAPNBCIj6KJnU"
+    },
+    {
+      "id": 1654220,
+      "power": "1099961894502400",
+      "pubkey": "gupeiIW5poV3JlOYStiqte2mq01YCxSE74f2ZARbABmVSCaOrDNKMLj7mAijxNMb"
+    },
+    {
+      "id": 1852200,
+      "power": "1099820865421312",
+      "pubkey": "ltLUwpXReQqffSE7H7sEViyKm5JNm1bMkLOv4zc2jISR3rkl9aoYhVcAvZ2Sm1BX"
+    },
+    {
+      "id": 1820459,
+      "power": "1099717786206208",
+      "pubkey": "kRBl1h6OnciUGmwWFG2v8+VC+zd/0sJlcoDaBOfSdvlBVnrhj67/vl4v0kOwkszh"
+    },
+    {
+      "id": 1654478,
+      "power": "1099676116975616",
+      "pubkey": "pOoB2Dy7zNHdxMJzn4GyshKA1hM/iNS/f5AFn8+zo57yh31AtJ0KWihSk4Kxz7Z8"
+    },
+    {
+      "id": 1729333,
+      "power": "1099614706991104",
+      "pubkey": "o5QoSvvRa1R8fPg41yeM41tpFhPa4DLMNDCROCvqR//GudIoe5ZuurdL9ak+AkkG"
+    },
+    {
+      "id": 3083270,
+      "power": "1071336642314240",
+      "pubkey": "qb+AS08anxzkd1kCSdWx8yZ9TqmIRUMdbLqz2nVaEXc/RX7ClMI6ysI3Edva+ch1"
+    },
+    {
+      "id": 1657051,
+      "power": "1014093318193152",
+      "pubkey": "sQ65RTeaELYvyNnXEPQUxu5WoXHbFo1gYcS+gcO3eN2mgJd2+13TDrMK3VPHhQjz"
+    },
+    {
+      "id": 2500,
+      "power": "1010485545664512",
+      "pubkey": "laAu5r1hIwViIO5Lpv2A4GqV8R01K0dRIC0B1Mhxy55Ah8eO6g2NviXfCGRpeYU6"
+    },
+    {
+      "id": 1249,
+      "power": "958700051234816",
+      "pubkey": "s1mT06hbfyPQFnTUwICJL5wAv+NE5cnx/s1tcjmQMSyXsfw7uOxS9DA0bNifJTTW"
+    },
+    {
+      "id": 1125913,
+      "power": "941937867620352",
+      "pubkey": "sSAvJqiqdQMWEAckwBAv8lrwhnynhyiNnt6QG9n+RxXJUeGb/VDG3kpCh2BJHaff"
+    },
+    {
+      "id": 2027141,
+      "power": "934619243347968",
+      "pubkey": "gIivSzou3/+cRBRH5TrRyWQyg+oj5qjGD6ZeuQH1e/xtB7DBKIAB0u7RllOUrXpQ"
+    },
+    {
+      "id": 3678816,
+      "power": "927678576197632",
+      "pubkey": "gocARRwDWNFA4hDJZdHoTtBSL1A9uggaFqlLhhjfCOCETks0nui4lnHefy0jTn9x"
+    },
+    {
+      "id": 2006081,
+      "power": "886343810940928",
+      "pubkey": "sS8Q348cf2nhgj/MntcrmC9np2x4xq+Obc1Kv6HFxwPOBIgKzW7WY1znuYizHmrX"
+    },
+    {
+      "id": 1291138,
+      "power": "831608747720704",
+      "pubkey": "oDpfjNdPo8kDmEs7KgPMdPmWuC5AKJJzV70YLKCyrBAO1TKW36LQ/9dQibtx9CZE"
+    },
+    {
+      "id": 1627966,
+      "power": "824771159785472",
+      "pubkey": "s/8QsgT1z7mVvTsJh2Zy2TgscY1MOiFeRhCmEhG2OuvCy7Pcuw/tvelDqG4UGiBF"
+    },
+    {
+      "id": 1881191,
+      "power": "811989337112576",
+      "pubkey": "i48t9XET+ztJIMxvIzWTCEULwwRMUeKsDqFV9rRUE80CtjQNx96FISmdhTCjHGkY"
+    },
+    {
+      "id": 1179972,
+      "power": "788418556592128",
+      "pubkey": "opuCuxK/UqgK4kNV/Zxk41nlv9l4zYOQHhlqmhUgEujoz7hpWpJQCxXA4xPZ93cS"
+    },
+    {
+      "id": 723722,
+      "power": "765225733193728",
+      "pubkey": "o5OL2OGxrmoRRu1Lk3B6WStsXAI51mZqV+nI0Sgw3ClLXzlz6WXnhk47VYE81Kis"
+    },
+    {
+      "id": 1894522,
+      "power": "750176167788544",
+      "pubkey": "hrcjhsJ0662dMGu/+UPbvBlO8LH/izg/aAGuMSM1w+XGi7KUKg2dGO/U+UyvFXGs"
+    },
+    {
+      "id": 692371,
+      "power": "730075720843264",
+      "pubkey": "tH4ckuPegGGuBAhXOU9rRWjkundkQI4mhj0V9wC4SVwIr6UISUVOwNTkyiH17CzB"
+    },
+    {
+      "id": 1152332,
+      "power": "724200205582336",
+      "pubkey": "if3XlwSJxUodA5fXm0mIssgghXpPxGeNaOK5dpoSjULKpuzJZgc5IP6rGT/GEdIU"
+    },
+    {
+      "id": 687206,
+      "power": "702106893811712",
+      "pubkey": "t2LpXXxCg9DiydaIFaCB+ylEi53wNYXJxf1mFz3HtDrerelsAZfUYItywWGDIKgo"
+    },
+    {
+      "id": 131611,
+      "power": "692554886545408",
+      "pubkey": "grYCcbzpjwf+buT/l9ytAdyqRwytiUdLOn3EnW6HSG7O6RS88PgvsTK80dlpQcJr"
+    },
+    {
+      "id": 1128468,
+      "power": "676234010820608",
+      "pubkey": "hJHhudRznJqg9artOja/RDmz3ITrIiANLcBgbbyzAR/E7Ps0ML141TV4WkoJmiJp"
+    },
+    {
+      "id": 1475317,
+      "power": "658641824776192",
+      "pubkey": "t13TjEhKGJ1pZaGPMOENCDR9/IJJG1CEX13iWX4cwJXd41JaOKCyc8pqt1waA570"
+    },
+    {
+      "id": 1746106,
+      "power": "657233075503104",
+      "pubkey": "pD8aodgK2vWRV0dv8JqiOOk0SESkiG5ymwQ50a53UzNLk9G+VQ9ZnKE7pswxujcG"
+    },
+    {
+      "id": 1721556,
+      "power": "638678816784384",
+      "pubkey": "l6L3nwXA+dtUZCeLAGGZiOizQUkKhPEEWou7XqnTpdf6C5hwcuaHmLs53Fvq2Xmr"
+    },
+    {
+      "id": 172300,
+      "power": "615932669984768",
+      "pubkey": "k+TTz6OLYK5clzler+SBQ61fMh4F1NcnYP2EKZNM37aQiPDbNF7gsF1X+ZyYbQH9"
+    },
+    {
+      "id": 717254,
+      "power": "614661359665152",
+      "pubkey": "rnLd88knnsoD6HX2QtvFq9TC2EP1bMMjGliQgSkKzfDMVakmf0XWjTbmtgJGUIvl"
+    },
+    {
+      "id": 396607,
+      "power": "556352883654656",
+      "pubkey": "pqenRdV895sVhimYIvnqot6yB6qfqMcxyOx+VBYAw9ZNJAjP9FPf5g/UeeG/WGr/"
+    },
+    {
+      "id": 1265268,
+      "power": "542984529543168",
+      "pubkey": "kZzd1S0fbko4qSA1JTb49AVKW/3CW7RF3TJWrW5j7TLVWSnm52BQtranr1/3erjx"
+    },
+    {
+      "id": 861593,
+      "power": "515396075520000",
+      "pubkey": "pc6WeALfeb3MIQx0K3mH9DHYvigywHVK4EFlAbObJdEc2lvD3A+8Jb2ZN1bSwL+H"
+    },
+    {
+      "id": 1117775,
+      "power": "508730286276608",
+      "pubkey": "q5oo4NJtVMDhilpvwzRWIsjgC1y1ctZH0wLF5n3CbZnpnjJidujbd0UuWHUBbN7v"
+    },
+    {
+      "id": 1516894,
+      "power": "497906968723456",
+      "pubkey": "qPPnQnv4xmp9DRT5BtoD+pEESEf00KCfkQ4Nmt/FI7o2uqm8UwXnJSU+8rBP6Pe1"
+    },
+    {
+      "id": 10479,
+      "power": "486392161370112",
+      "pubkey": "k7meE4QgbIUnnveIN07q3Onxu2u8RRjyriD0n2bR4Dp2WU61xsnIt/0Blcbh7+Ul"
+    },
+    {
+      "id": 1864509,
+      "power": "475023382937600",
+      "pubkey": "l5/5+bxD0vegsseNW8lx23B0cB+Ed3Bt9BVGhNSlJrzYSOUdiYnG9eLe0pTveW8Y"
+    },
+    {
+      "id": 1754415,
+      "power": "472858719420416",
+      "pubkey": "ga6fUXfRea4/BuBgC1fCgaE3Oqf4o/2nzHO8YgR7ouOJEnpXXhE4u2hjCYSfjG/b"
+    },
+    {
+      "id": 1254435,
+      "power": "461382566805504",
+      "pubkey": "hpfkbPXulyyl3zxl+GAfQUyLb0P5K/+u1Fkd6V/4QU2cDAU2rlw899VUAzDCRjkN"
+    },
+    {
+      "id": 524539,
+      "power": "448050988318720",
+      "pubkey": "kPuZEXvkb84i1ETK3tuvYuGz3fCXBaEM97w6HEM8nqBkrIjQCDlx8bNrRQOiaN3i"
+    },
+    {
+      "id": 1390523,
+      "power": "440251327709184",
+      "pubkey": "sVquhjiICnYtX52ZX12BGnm3cmZB1k20HmMkCUA8wPts+cl4v7C0wM8Ve3S2gDP3"
+    },
+    {
+      "id": 1700436,
+      "power": "440010809540608",
+      "pubkey": "p0y9Dxs4PVIl2LOUsG8DF4RzeXfbOWX/QGRA4j/yjiZ9Kzz0F3oXUPvWp0dcy9fz"
+    },
+    {
+      "id": 1622243,
+      "power": "439186175819776",
+      "pubkey": "o1FINHGjy/ufFwFoPcFbrLxuXwENaqpMaI6dOI/Na3Y+YdINOZJ2Wtkqj8Yfh6re"
+    },
+    {
+      "id": 137489,
+      "power": "378747396030464",
+      "pubkey": "gC/UBt3cbqjgCqtM1z7tIoK4wamb7UBYW4lxVofCXgcgfxn3CITuOGLkuIOe7clW"
+    },
+    {
+      "id": 2362344,
+      "power": "377166848065536",
+      "pubkey": "r938gBEeWQX0J4sU0Cvcb8gW+qT2Qp7cgOUihl+k4/BC7YrKdbJ8nN92wNAdvInf"
+    },
+    {
+      "id": 1002224,
+      "power": "373593435275264",
+      "pubkey": "ihLu0cPIhQs4P+Am9WudYEFkRs2snAUCtLcYMIS7vyPR2uH1CqAi9WbRkqp3phk8"
+    },
+    {
+      "id": 130912,
+      "power": "335454125686784",
+      "pubkey": "uNF5Dn+q0HlTCVckJg2fHFRC+ILRhkK3lpONbbdJ7h2RGsJX+cvcpmnebJ7MPlTp"
+    },
+    {
+      "id": 1694476,
+      "power": "329406811734016",
+      "pubkey": "rVpX3qv3mp4NSMwgbcnOv7SgQee8SsJWMNdGFvIz7VMyklmhdnCymeucBOJvlWta"
+    },
+    {
+      "id": 84879,
+      "power": "328066781937664",
+      "pubkey": "gysebJ2Q6RuqQfgwoIMmUxWboBQJG0RxzE5wTBzIyaPVTX1Tehk1gOst8prOSkSw"
+    },
+    {
+      "id": 1205535,
+      "power": "323462576996352",
+      "pubkey": "raLVK/h509het5sChvXCX1vBzuz6MFV5bjU5M+E+mlp54F1rDAa8uWzIeRc2yDIs"
+    },
+    {
+      "id": 448660,
+      "power": "318514774671360",
+      "pubkey": "siXSHE7jmTvmmznTei/sh4Na+xc2qKqGegYGysarw6OGjfdw7F9IDngnR+Dbghtd"
+    },
+    {
+      "id": 2941916,
+      "power": "293466525401088",
+      "pubkey": "oZf5xmrtu6jq8vlREBcgABN7tefQqyZLYRo3aJpXVuoY7LdF/8yuZlT4J9mFEKy4"
+    },
+    {
+      "id": 1706080,
+      "power": "290408508686336",
+      "pubkey": "qdKmq8EHP6mbMFLhnDIH98JRCUiYGT4zb+KqYrDJ53lF40GUJXAAjAFI4ZeJYT78"
+    },
+    {
+      "id": 1350631,
+      "power": "273434797932544",
+      "pubkey": "qTWJYbY8ZKZryjLeO9pvNYnJqGlSDo4HuayV5UCFqw5VQ0nwQFJrhTuSx4j/sdgw"
+    },
+    {
+      "id": 513351,
+      "power": "251891241975808",
+      "pubkey": "rZgFSIJNOP1GLHIR5e9xHwy8PmmJBJTDE5Ov9+Q58OZrqTCtdqELox36DRlCM0Z0"
+    },
+    {
+      "id": 1407260,
+      "power": "232615428751360",
+      "pubkey": "mGp0wO+pgix4IVGMjk4L7h1bmFQCKbiAgRyPc1I5qgoAC7QeML8YkOMf5ZscxwAS"
+    },
+    {
+      "id": 1697265,
+      "power": "219971045031936",
+      "pubkey": "jflbDHckiGbHc1PSgowNVKtNbFOpM/H8+dSqe8gekVuxuMnX/dSYQYGkLVsTxIKZ"
+    },
+    {
+      "id": 1306222,
+      "power": "208288733986816",
+      "pubkey": "jV28Il+zfZsznI15VxCTixSMwKZaIucXNEd9NUSx7L6gGS/ZEK/R7pW96GcaO7zl"
+    },
+    {
+      "id": 2199533,
+      "power": "185302069018624",
+      "pubkey": "o0etVRCaEzi88JlnjqMfvjHymS67ns5d9upyC4NzdiI/XNaYQIQqtFUZHvCn3hA7"
+    },
+    {
+      "id": 2201621,
+      "power": "183790240530432",
+      "pubkey": "kfxLY96maMM2UNimcbsvyeQ+60Axu0VcUh9Huz1gphrx+UlmXvScvqXLMA3Bcs8B"
+    },
+    {
+      "id": 3780816,
+      "power": "183481002885120",
+      "pubkey": "kIEcLc5AVZ0o2pm/zhmdQF/QNVa99sW1OXMQnWfvn7QIuyiuyS1T1RjQ/3smTxGE"
+    },
+    {
+      "id": 1119890,
+      "power": "174994147508224",
+      "pubkey": "i3kkJSzEboAGUZwie9lLivQJvNHPBvXwc2xNv9hbgD1UDAXFqz5iqUcQYyKlNWaP"
+    },
+    {
+      "id": 686111,
+      "power": "169565308846080",
+      "pubkey": "ocSMzDgV9UjVxalR/MlBDolEJ9TBdihry6OM0J+m6NUUBzX880IL7eeeJa6Xa1ht"
+    },
+    {
+      "id": 145784,
+      "power": "167606803759104",
+      "pubkey": "hQjEloGZVNEhUfpYBL7REh+tMC8WFm/HD31NEEDCCI3Wuys6qMn7B9FcCn5RqtmC"
+    },
+    {
+      "id": 1660052,
+      "power": "158322034278400",
+      "pubkey": "lnuxqkDj3gZ72NP9vTKjW8dD7eKmY/DLSaSnGBeKLBD3KCaHD5fic3AXEWdaP/pQ"
+    },
+    {
+      "id": 3629397,
+      "power": "153897268150272",
+      "pubkey": "tDKHloaUJVeWEsKL5Yyn1o3Z61C8E9NUI91BmC1+2x9mP0MMwQTwQml1UjTN1u9w"
+    },
+    {
+      "id": 2259776,
+      "power": "145702470549504",
+      "pubkey": "iF1cA/hCIUMVturj0AUzSHE2l608Xm/QjlRjLEO/bxbauPXCQiujnq6fTXwJX6df"
+    },
+    {
+      "id": 490173,
+      "power": "140050293587968",
+      "pubkey": "kfyyEIARNG11Ut11iuLN2ElECKWkd56IEmVduC9IjSq4EjxOKX6BJRA6cBFi+mjA"
+    },
+    {
+      "id": 364982,
+      "power": "133521943298048",
+      "pubkey": "iTx4zLjVo1KmPlsAcQXDl3cuvA/ic7nAQVmeNGtEQ0GjVieYR59+xLLMc8iDO945"
+    },
+    {
+      "id": 32934,
+      "power": "124897648967680",
+      "pubkey": "uYOnyhzCZhJOk01dsuP9emkjg/mpAtG+fe1JqK8yJ7saJJ5SDzsDeXiCj+FgfyjK"
+    },
+    {
+      "id": 3024648,
+      "power": "119365731090432",
+      "pubkey": "rtdTvdSP89av9UcPdHDx8tdVHZkWTOHaulGWaldbsGb0pGu+EzgksjfI2OQN9Xqm"
+    },
+    {
+      "id": 22130,
+      "power": "116170275422208",
+      "pubkey": "gBk/sYipE4MyxsNEuHcKDXnqwkgrkfrKUXilvUzwtA4+HwteENySk6IhgvXO/L/l"
+    },
+    {
+      "id": 3237572,
+      "power": "114589727457280",
+      "pubkey": "puhT2fb2knB4XBDB4fYfEO6M2E+fGimAGdbeykWbd8hjCBEep+INipjZZ1g5rFrB"
+    },
+    {
+      "id": 3602430,
+      "power": "113902532689920",
+      "pubkey": "gmSugtxhDSZRS5BFFF1f4pNpwpvy20BKfxk7UH9brSaPiypkFdV1s+iILHGcROJ9"
+    },
+    {
+      "id": 8240,
+      "power": "110296917082112",
+      "pubkey": "kJ3mjIZbm/LnsuL+xcLLM6OloNb2qPDx9QoIIGsewlGqndm90nrHEsvu+0lhNey4"
+    },
+    {
+      "id": 694843,
+      "power": "98440650424320",
+      "pubkey": "i7RZOHga4TjxxEUtEI+IAV7I1rFR2KppvlbI+gXImmvIarC13ZSJnRcptTjwFeQk"
+    },
+    {
+      "id": 421061,
+      "power": "97409858273280",
+      "pubkey": "t7CB2I8nAtoKSS9gZWvc190MjuaKxiLAceLFAEhJYUnXrri9odmiKWBkwy+sFLjn"
+    },
+    {
+      "id": 1176154,
+      "power": "96963181674496",
+      "pubkey": "kGLmdFGpR1QxLl5SWxnVIS7jvhiHfL3pJSJ9DR5Ju9cyyyEU/tqm5bgdEj1Bouln"
+    },
+    {
+      "id": 508988,
+      "power": "95107755802624",
+      "pubkey": "pbHrFzARMVpbujfe7pd4eW0RSzuM/UuBtUW4je9ehJn/yB4Aq0mRP8+YyyuNPHj9"
+    },
+    {
+      "id": 715235,
+      "power": "94867237634048",
+      "pubkey": "l3M51Q7YLOSQbvO8z7J9KU8DexJcdS6XV2tm2z2kBoww1dBTG6pRx+wOw5u27K4U"
+    },
+    {
+      "id": 1051152,
+      "power": "81844896792576",
+      "pubkey": "ltDxqwfKnDwWVAbyjxyoYZF5Nf7sq2lMaVet5NoGw3VeNLLHaLFnXralw0p8Y0m4"
+    },
+    {
+      "id": 1075514,
+      "power": "77859167141888",
+      "pubkey": "jZHRA+emnHmOcAD8l76Z1JphJME+YThpHgN5Xn9DF6J0RtwBlbB11PoibWazkcnZ"
+    },
+    {
+      "id": 1089898,
+      "power": "77206332112896",
+      "pubkey": "qIgCSKftL7Kg8K211hJfgd+GStWBglbPioIoQESQ7a6IYiD/mmBFCj55Kij/LoUp"
+    },
+    {
+      "id": 813083,
+      "power": "76175539961856",
+      "pubkey": "rNUddyRTxdZI8fpxYdI4cK43VuRFYhnIlnG5zp+pzJi4VkLkHTo1gd+b4bcojHmg"
+    },
+    {
+      "id": 1122448,
+      "power": "76072460746752",
+      "pubkey": "pn18mH4zTumFLtm3NXiaoNe59SVUjJjAnp0OxLDWHPSV3MIKvFYqJ0AL/jGGJl94"
+    },
+    {
+      "id": 816782,
+      "power": "75969381531648",
+      "pubkey": "tvM/zmHEQ0bUUKNQtl0QbY4YlEJGozxSiC8mv7tg+9uaO1rCJL14JMXNvjX4AV99"
+    },
+    {
+      "id": 107133,
+      "power": "74835510165504",
+      "pubkey": "qV8oTdPiiUoW6621iCVQvYbfxm+CszDhmONoC1FD2s0MLPZP75EE88vBt/Nw7YfQ"
+    },
+    {
+      "id": 1051151,
+      "power": "71365176590336",
+      "pubkey": "qLr02c6JuMUO74NnbMJWVhHFpYZ/EGOXU5VI/2K/YZvyNKBa842usfh4dM0Y7ZnH"
+    },
+    {
+      "id": 3680497,
+      "power": "69853348102144",
+      "pubkey": "qc85tmiXTo/+eqgxqVQ15vWKU2GFKPm5D5OY4pWGc8p61m4LFJxHuwHG6zmhlRAt"
+    },
+    {
+      "id": 1878411,
+      "power": "67173288509440",
+      "pubkey": "kJ8MLR8Imqk1Qazszl2RJ4O0StdrQdFWzS3ax4b2CnAYlUGosMrdeD63SGabFPJS"
+    },
+    {
+      "id": 709325,
+      "power": "66692252172288",
+      "pubkey": "tg/II5IP9kootnqU6qhQla+NhIuK7D5+zW0gzJD8SojaosbIKVlq2ybmaRAMPNuh"
+    },
+    {
+      "id": 127352,
+      "power": "60026462928896",
+      "pubkey": "lQ6oNOStFuJOGvVQR7u/FoRXpJzJClRxE0c7iCXqmtxhW6igCzzCA9mfpzuDj3Ov"
+    },
+    {
+      "id": 816783,
+      "power": "59957743452160",
+      "pubkey": "hxLlFqyh0hx+je+UTn0qrgkJZze/GoxHFCKGnNAmZGPDKAibgJh4XIEj7g8l0WrZ"
+    },
+    {
+      "id": 449072,
+      "power": "54941221650432",
+      "pubkey": "rn7ePDuHvynt8FXUTKMgAjZ98uQx9mj6fA9wEiHJ0oqJZnIlTVIcGxTsznM5ekXX"
+    },
+    {
+      "id": 1461725,
+      "power": "50302656970752",
+      "pubkey": "r/Y3Vk1+Kov79QIVh5/PwpZkW6stOMNMUMv5ZVixluTsv9DOSrcVl1naViGu4GYT"
+    },
+    {
+      "id": 423381,
+      "power": "48344151883776",
+      "pubkey": "twgSKBfuAHV2E00vxufEw0M/V/dQQhyppdGuQgikylo0tdRYHxZewCBKGNW9CRto"
+    },
+    {
+      "id": 164126,
+      "power": "46626164965376",
+      "pubkey": "lG84SwA5GPUakq+EZ5FpM8b0H/vBG3vsjRu1TQPK6PZZQij7HQCER0Qq+YhO66kB"
+    },
+    {
+      "id": 1443744,
+      "power": "43396349558784",
+      "pubkey": "pOouoUEmvaRUs0EON6499GyRH85Rgc9FbLqDF2ZJXchsHPPHZiOnZsZ6XbmTt5Pr"
+    },
+    {
+      "id": 423371,
+      "power": "41059887349760",
+      "pubkey": "oSYSfXmWSSS2bEQIv55g4tQW//GR4C79rVyQbikoY8HYAkFLZpHSjO+CMAY+nSW8"
+    },
+    {
+      "id": 122398,
+      "power": "40853728919552",
+      "pubkey": "uRLzde0oEqx3zHfdCUc6KekosEicsT2wMpVVB1+TmrmXKZmQ8qOTt5UlbnW1e2Eh"
+    },
+    {
+      "id": 1204055,
+      "power": "40785009442816",
+      "pubkey": "s3Qhco9s2Fdc8DTHYzbWgCILYWt7rtWoA2eOvZmcL7OBHnMlGl4NcHVXU01ItBs4"
+    },
+    {
+      "id": 151629,
+      "power": "40647570489344",
+      "pubkey": "sbTP4fwH91cN5Y7FzFh0Ff6IHAMT9ppB1lX4O+Mk1Ir7kOzk9CcN0aMosIa9OkAt"
+    },
+    {
+      "id": 1110276,
+      "power": "39238821216256",
+      "pubkey": "oDwS93Opa63I5su98FHemX07EB5RcyYI+8FSbPhdlxa2bUzXrqG7JhJkxd1dEfwl"
+    },
+    {
+      "id": 1484864,
+      "power": "32985348833280",
+      "pubkey": "oJt4lnL1Fl8qMG389/7QMgEeMUxcQ8aL8CVIz8NKEjcN76iASdOoGeu393eHA6zH"
+    },
+    {
+      "id": 126037,
+      "power": "22368189677568",
+      "pubkey": "glbSfZXL+oB0DJG5/RIru5od8pLoW6gikaP5CGA1y73XzIpmuTY0N9hMY745QReK"
+    },
+    {
+      "id": 112075,
+      "power": "19310172962816",
+      "pubkey": "py4uQb1SO6pgVCS/Tkp98ddQyPxlPh2eiZSqo7pjdSZWF2s52y3AeKtMqPtpNaom"
+    },
+    {
+      "id": 118837,
+      "power": "17145509445632",
+      "pubkey": "ptM+DzVV5CCsZKbNKK1I5/puOa8aydK5qRaZR+ktLp2cKAL2LCgFBYPr+MQXMmQI"
+    },
+    {
+      "id": 112679,
+      "power": "15118284881920",
+      "pubkey": "gPbrYn9ao09aiAFHUTC2Xch/utvMbpWsh4l6E2bzEOCLWA4S0t7wVZZAtXwyq2IQ"
+    }
+  ],
+  "sourceBlock": "head=6035664",
+  "capturedAt": "2026-05-21T15:12:23Z"
+}
