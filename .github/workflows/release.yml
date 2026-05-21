@@ -1,0 +1,151 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.25.7'
+
+jobs:
+  build:
+    name: build ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: darwin
+            arch: arm64
+            runner: macos-14   # Apple silicon
+          - os: darwin
+            arch: amd64
+            runner: macos-13
+          - os: linux
+            arch: amd64
+            runner: ubuntu-22.04
+          - os: linux
+            arch: arm64
+            runner: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: false
+
+      - name: Build pure-Go (CGO_ENABLED=0)
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+          mkdir -p dist
+          OUT="dist/lantern-${{ matrix.os }}-${{ matrix.arch }}"
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.versionTag=${VERSION}" \
+            -o "${OUT}" \
+            ./cmd/lantern
+          # SHA-256 manifest
+          if command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 "${OUT}" > "${OUT}.sha256"
+          else
+            sha256sum "${OUT}" > "${OUT}.sha256"
+          fi
+          # Show the manifest so it's in the workflow log too
+          cat "${OUT}.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lantern-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            dist/lantern-${{ matrix.os }}-${{ matrix.arch }}
+            dist/lantern-${{ matrix.os }}-${{ matrix.arch }}.sha256
+
+  source-tarball:
+    name: source tarball
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create reproducible source tarball
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+          PREFIX="lantern-${VERSION#v}"
+          mkdir -p dist
+          # Use git archive for byte-deterministic source bundling.
+          git archive --format=tar.gz --prefix="${PREFIX}/" \
+            -o "dist/lantern-${VERSION}-source.tar.gz" HEAD
+          (cd dist && sha256sum "lantern-${VERSION}-source.tar.gz" > "lantern-${VERSION}-source.tar.gz.sha256")
+          cat "dist/lantern-${VERSION}-source.tar.gz.sha256"
+
+      - name: Upload source tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-tarball
+          path: |
+            dist/lantern-*.tar.gz
+            dist/lantern-*.tar.gz.sha256
+
+  release:
+    name: GitHub release
+    needs: [build, source-tarball]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten and inspect
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find artifacts -type f \( -name 'lantern-*' \) -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*
+          generate_release_notes: true
+          body: |
+            # Lantern ${{ github.ref_name }}
+
+            Pure-Go Filecoin light node. No CGo, no snapshot, no third-party trust.
+
+            ## Install (macOS / Linux)
+
+            ```sh
+            curl -fsSL https://get.lantern.reiers.io | bash
+            ```
+
+            ## Binaries
+
+            All binaries are built `CGO_ENABLED=0` with `-trimpath`. SHA-256
+            manifests are published alongside each binary; see also
+            `docs/REPRODUCIBLE-BUILDS.md` for how to reproduce these bytes
+            from source.
+
+            ## Source tarball
+
+            `lantern-${{ github.ref_name }}-source.tar.gz` is the
+            byte-deterministic source archive produced by `git archive` at
+            this tag, suitable for reproducible-build verification.
