@@ -35,6 +35,7 @@ import (
 	"github.com/Reiers/lantern/api"
 	lbeacon "github.com/Reiers/lantern/chain/beacon"
 	hstore "github.com/Reiers/lantern/chain/header/store"
+	headnotify "github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/msgsearch"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/chain/types"
@@ -92,6 +93,12 @@ type ChainAPI struct {
 	mu          sync.Mutex
 	sessionUUID string
 	notifySubs  []chan []api.HeadChange
+
+	// HeadNotify, when non-nil, takes over from the legacy notifySubs
+	// slice. ChainNotify subscribers route through the Distributor
+	// which honours bounded per-subscriber buffers and drop-slow
+	// semantics. The daemon wires this in Phase 9.
+	HeadNotify *headnotify.Distributor
 }
 
 // AuthIssuer abstracts the rpc/server Auth type.
@@ -201,6 +208,14 @@ func (c *ChainAPI) Session(_ context.Context) (string, error) {
 // single synthetic header that carries enough metadata for downstream
 // readers.
 func (c *ChainAPI) ChainHead(_ context.Context) (*types.TipSet, error) {
+	// Phase 9: prefer the persistent header store's head when wired —
+	// it carries real blocks (not the synthetic placeholder) and
+	// advances as the sync agent observes new tipsets.
+	if c.HeaderStore != nil {
+		if ts := c.HeaderStore.Head(); ts != nil {
+			return ts, nil
+		}
+	}
 	if c.Trusted == nil {
 		return nil, errors.New("trusted root not initialised")
 	}
@@ -304,8 +319,13 @@ func (c *ChainAPI) ChainGetTipSetAfterHeight(ctx context.Context, h abi.ChainEpo
 //
 // V1: we don't persist block headers other than the synthetic current
 // head. Phase 5 wires the header store lookup.
-func (c *ChainAPI) ChainGetBlock(_ context.Context, _ cid.Cid) (*types.BlockHeader, error) {
-	return nil, ErrNotImpl("ChainGetBlock", "header-by-CID lookup deferred to Phase 5 (header store)")
+func (c *ChainAPI) ChainGetBlock(_ context.Context, k cid.Cid) (*types.BlockHeader, error) {
+	if c.HeaderStore != nil {
+		if bh, err := c.HeaderStore.Get(k); err == nil {
+			return bh, nil
+		}
+	}
+	return nil, ErrNotImpl("ChainGetBlock", "header-by-CID not in header store; configure a sync source or backfill")
 }
 
 // ChainGetMessage decodes an on-chain message. Tier 1 (#47).
@@ -372,6 +392,13 @@ func (c *ChainAPI) ChainTipSetWeight(_ context.Context, _ types.TipSetKey) (big.
 func (c *ChainAPI) ChainNotify(ctx context.Context) (<-chan []api.HeadChange, error) {
 	if c.Trusted == nil {
 		return nil, errors.New("trusted root not initialised")
+	}
+	// Phase 9: route through the head-change distributor when wired.
+	// Falls back to the legacy single-event channel when the daemon
+	// hasn't initialised a distributor (e.g. in unit tests that do not
+	// configure a header store).
+	if c.HeadNotify != nil {
+		return c.HeadNotify.Subscribe(ctx), nil
 	}
 	ch := make(chan []api.HeadChange, 16)
 	c.mu.Lock()

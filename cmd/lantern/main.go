@@ -39,6 +39,8 @@ import (
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/ipfs/go-cid"
 
+	hstore "github.com/Reiers/lantern/chain/header/store"
+	headnotify "github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/chain/types"
 	"github.com/Reiers/lantern/net/combined"
@@ -251,6 +253,10 @@ func cmdDaemon(args []string) error {
 	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
 	gw := fs.String("gateway", defaultGateway, "Lantern gateway base URL")
 	listen := fs.String("listen", defaultListen, "RPC listen address")
+	noHS := fs.Bool("no-header-store", false, "Disable the persistent header store (legacy synthetic-head mode)")
+	hsPath := fs.String("header-store", filepath.Join(dataDir(), "headerstore"), "Header store BadgerDB path")
+	syncInterval := fs.Duration("sync-interval", 6*time.Second, "Header-store sync poll interval")
+	notifyBufSize := fs.Int("notify-buf", headnotify.DefaultBufferSize, "ChainNotify per-subscriber buffer size")
 	fs.Parse(args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -272,6 +278,44 @@ func cmdDaemon(args []string) error {
 
 	chainAPI := handlers.New(tr, bg, w, nil, "mainnet")
 
+	// Phase 9: wire the persistent header store + sync agent + head-change
+	// distributor so ChainNotify, ChainGetTipSetByHeight, ChainGetBlock,
+	// StateGetBeaconEntry et al. become live.
+	var store *hstore.Store
+	var sync *hstore.Sync
+	var dist *headnotify.Distributor
+	if !*noHS {
+		if err := os.MkdirAll(*hsPath, 0o700); err != nil {
+			return fmt.Errorf("create header store dir: %w", err)
+		}
+		store, err = hstore.Open(*hsPath, hstore.Options{})
+		if err != nil {
+			return fmt.Errorf("open header store: %w", err)
+		}
+		defer store.Close()
+		chainAPI.HeaderStore = store
+
+		dist = headnotify.New(store, *notifyBufSize)
+		dist.Start()
+		chainAPI.HeadNotify = dist
+
+		// Sync source: a Glif client. The combined fetcher in gatewayClient
+		// is hamt-shaped (only Get), but Sync needs RPC-shaped
+		// HeadEpoch/TipsetCIDsByHeight/FetchBlock — that's exactly what
+		// glif.Client exposes.
+		src := glif.New("", 20*time.Second)
+		sync = hstore.NewSync(store, src, hstore.SyncOptions{
+			Interval:     *syncInterval,
+			MaxBacktrack: 60,
+		})
+		if err := sync.Start(ctx); err != nil {
+			return fmt.Errorf("start header sync: %w", err)
+		}
+		defer sync.Stop()
+		fmt.Printf("  header store: %s (sync every %s, buf=%d)\n",
+			*hsPath, syncInterval.String(), *notifyBufSize)
+	}
+
 	srv, err := server.New(server.Config{
 		ListenAddress: *listen,
 		DataDir:       dataDir(),
@@ -287,6 +331,9 @@ func cmdDaemon(args []string) error {
 	apiInfo, _ := srv.FullNodeAPIInfo()
 	fmt.Printf("\nRPC ready at http://%s/rpc/v1\n", srv.Addr())
 	fmt.Printf("FULLNODE_API_INFO=%s\n", apiInfo)
+	if dist != nil {
+		go logSyncStats(ctx, sync, dist)
+	}
 	fmt.Println("\nReady. Ctrl-C to stop.")
 
 	sig := make(chan os.Signal, 1)
@@ -296,6 +343,25 @@ func cmdDaemon(args []string) error {
 	sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer scancel()
 	return srv.Stop(sctx)
+}
+
+// logSyncStats periodically prints sync + notify counters so operators can
+// confirm the head store is advancing without spelunking through Badger.
+func logSyncStats(ctx context.Context, s *hstore.Sync, d *headnotify.Distributor) {
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			st := s.Stats()
+			fmt.Fprintf(os.Stderr,
+				"  [sync] polls=%d advances=%d reorgs=%d headers=%d head=%d subs=%d lastErr=%q\n",
+				st.Polls, st.HeadAdvances, st.Reorgs, st.HeadersAdded,
+				st.LastHeadEpoch, d.SubscriberCount(), st.LastError)
+		}
+	}
 }
 
 // --- wallet subcommands ---
