@@ -17,10 +17,13 @@ import (
 
 // Client fetches IPLD blocks from one or more Lantern gateways. Multiple
 // gateways are tried sequentially; the first successful CID-matching
-// response wins.
+// response wins. Each endpoint is retried up to `retries` times with
+// exponential backoff on transient errors (DNS, TLS handshake, connection
+// reset, 5xx, 429).
 type Client struct {
 	endpoints []string
 	hc        *http.Client
+	retries   int
 }
 
 // HTTPClient lets callers swap in a custom *http.Client (e.g. with a custom
@@ -40,7 +43,43 @@ func NewClient(endpoints []string, timeout time.Duration) *Client {
 	return &Client{
 		endpoints: endpoints,
 		hc:        &http.Client{Timeout: timeout},
+		retries:   2, // 1 initial + 2 retries per endpoint = 3 attempts
 	}
+}
+
+// SetRetries overrides the per-endpoint retry budget.
+func (c *Client) SetRetries(n int) {
+	if n < 0 {
+		n = 0
+	}
+	c.retries = n
+}
+
+// isTransient returns true for errors worth retrying with backoff.
+// TLS handshake errors, DNS resolution flakes, connection resets, and
+// context-cancellation-via-deadline-timeout are all transient. 4xx is not.
+func isTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	for _, needle := range []string{
+		"tls: handshake failure",
+		"tls: client requested unsupported",
+		"connection reset",
+		"connection refused",
+		"no such host",
+		"i/o timeout",
+		"EOF",
+		"broken pipe",
+		"unexpected EOF",
+		"network is unreachable",
+	} {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // Get fetches the block bytes for `c` from the first gateway that returns
@@ -58,14 +97,44 @@ func (c *Client) Get(ctx context.Context, k cid.Cid) ([]byte, error) {
 			continue
 		}
 		req.Header.Set("Accept", "application/vnd.ipld.raw")
-		resp, err := c.hc.Do(req)
-		if err != nil {
+
+		// Per-endpoint retry loop with exponential backoff on transient errors.
+		var resp *http.Response
+		var body []byte
+		var attemptErr error
+		backoff := 100 * time.Millisecond
+		for attempt := 0; attempt <= c.retries; attempt++ {
+			if attempt > 0 {
+				select {
+				case <-time.After(backoff):
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				backoff *= 2
+				// Clone request because Body is single-use (nil here but cheap to clone).
+				req2, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+				req2.Header = req.Header.Clone()
+				req = req2
+			}
+			resp, attemptErr = c.hc.Do(req)
+			if attemptErr == nil && resp.StatusCode < 500 && resp.StatusCode != 429 {
+				break // success or definitive 4xx, no retry
+			}
+			if attemptErr != nil && !isTransient(attemptErr) {
+				break // permanent error, give up on this endpoint
+			}
+			if resp != nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+			}
+		}
+		if attemptErr != nil {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("%s: %w", ep, err)
+				firstErr = fmt.Errorf("%s: %w", ep, attemptErr)
 			}
 			continue
 		}
-		body, _ := io.ReadAll(resp.Body)
+		body, _ = io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode == http.StatusNotFound {
 			if firstErr == nil {
