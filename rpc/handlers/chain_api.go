@@ -41,6 +41,7 @@ import (
 	"github.com/Reiers/lantern/state/accessor"
 	"github.com/Reiers/lantern/state/hamt"
 	"github.com/Reiers/lantern/vm"
+	"github.com/Reiers/lantern/vm/bridge"
 	"github.com/Reiers/lantern/wallet"
 )
 
@@ -77,6 +78,13 @@ type ChainAPI struct {
 	// ErrNotImpl. Operators set this true only when they explicitly want
 	// their daemon to publish blocks to the gossipsub /fil/blocks topic.
 	AllowBlockSubmit bool
+
+	// Bridge is the optional VM bridge (Phase 8 Part B). When wired, the
+	// handler routes StateCall for non-Send messages and the
+	// post-execution stateRoot for MinerCreateBlock through this Bridge
+	// rather than the native vm shell. See vm/bridge/doc.go and
+	// TRUST-MODEL.md for the trust implications.
+	Bridge bridge.Bridge
 
 	// optional: shutdown hook
 	OnShutdown func() error
@@ -131,6 +139,13 @@ func New(tr *trustedroot.TrustedRoot, bg hamt.BlockGetter, w *wallet.Wallet, mp 
 // unlocks ChainGetTipSetByHeight, randomness queries, and StateSearchMsg.
 func (c *ChainAPI) WithHeaderStore(s *hstore.Store) *ChainAPI {
 	c.HeaderStore = s
+	return c
+}
+
+// WithBridge attaches a VM bridge to the handler. See vm/bridge for the
+// trust model.
+func (c *ChainAPI) WithBridge(b bridge.Bridge) *ChainAPI {
+	c.Bridge = b
 	return c
 }
 
@@ -688,6 +703,39 @@ func (c *ChainAPI) StateWaitMsg(ctx context.Context, msgCID cid.Cid, confidence 
 func (c *ChainAPI) StateCall(ctx context.Context, msg *types.Message, _ types.TipSetKey) (*api.InvocResult, error) {
 	if msg == nil {
 		return nil, errors.New("StateCall: nil message")
+	}
+	// Bridge routing: for non-Send messages, when a bridge is wired,
+	// delegate to the bridge to get a real receipt with proper Return
+	// bytes. The native vm shell otherwise returns SysErrInvalidReceiver
+	// for builtin actor methods (PHASE7-BLOCKERS.md B1).
+	if c.Bridge != nil && msg.Method != 0 && c.Trusted != nil {
+		root, recs, err := c.Bridge.ComputeStateRoot(ctx, c.Trusted.StateRoot, int64(c.Trusted.Epoch), []*types.Message{msg})
+		if err == nil && len(recs) >= 1 && recs[0] != nil {
+			mcid := msg.Cid()
+			_ = root
+			return &api.InvocResult{
+				MsgCid:   mcid,
+				Msg:      msg,
+				MsgRct:   recs[0],
+				Duration: 0,
+				GasCost: api.MessageGasCost{
+					Message: mcid,
+					GasUsed: big.NewIntUnsigned(uint64(recs[0].GasUsed)),
+				},
+				ExecutionTrace: api.ExecutionTrace{
+					Msg:    msg,
+					MsgRct: recs[0],
+					Error:  "",
+				},
+			}, nil
+		}
+		// On bridge error, fall through to the native vm shell. The
+		// shell will surface SysErrInvalidReceiver for non-Send, which
+		// is the documented behaviour without a bridge — but we log the
+		// upstream error so operators can see why the bridge declined.
+		if err != nil {
+			fmt.Printf("lantern: StateCall bridge route failed (%s): %v — falling back to native vm shell\n", c.Bridge.Provenance(), err)
+		}
 	}
 	r, err := vm.StateCall(ctx, c.Accessor, msg, vm.ApplyOptions{})
 	if err != nil {

@@ -284,6 +284,21 @@ func (c *ChainAPI) MinerCreateBlock(ctx context.Context, bt *api.BlockTemplate) 
 		}
 	}
 
+	// Compute post-execution state root. Without a bridge, we copy the
+	// parent stateRoot verbatim (PHASE7-BLOCKERS.md B2: the resulting
+	// block will be rejected by the network because the stateRoot won't
+	// match what other nodes compute). With a bridge configured AND
+	// AllowBlockSubmit=true, we delegate state-root computation to the
+	// upstream Forest/Lotus node.
+	stateRoot := parentBlock.ParentStateRoot
+	if c.Bridge != nil && c.AllowBlockSubmit {
+		root, _, berr := c.Bridge.ComputeStateRoot(ctx, parentBlock.ParentStateRoot, int64(bt.Epoch-1), unsignedMessagesForBridge(bt.Messages))
+		if berr != nil {
+			return nil, fmt.Errorf("MinerCreateBlock: bridge ComputeStateRoot failed: %w", berr)
+		}
+		stateRoot = root
+	}
+
 	header := &types.BlockHeader{
 		Miner:                 bt.Miner,
 		Ticket:                bt.Ticket,
@@ -292,7 +307,7 @@ func (c *ChainAPI) MinerCreateBlock(ctx context.Context, bt *api.BlockTemplate) 
 		Height:                bt.Epoch,
 		Parents:               parentCids,
 		ParentWeight:          parentBlock.ParentWeight, // recomputed by network if accepted
-		ParentStateRoot:       parentBlock.ParentStateRoot,
+		ParentStateRoot:       stateRoot,
 		ParentMessageReceipts: parentBlock.ParentMessageReceipts,
 		ParentBaseFee:         parentBlock.ParentBaseFee,
 		Timestamp:             bt.Timestamp,
@@ -342,6 +357,20 @@ func secpMessageCIDs(msgs []*types.SignedMessage) []cid.Cid {
 			continue
 		}
 		out = append(out, sm.Cid())
+	}
+	return out
+}
+
+// unsignedMessagesForBridge unwraps a slice of SignedMessage into the
+// underlying *types.Message slice that vm/bridge.Bridge takes. Phase 8.
+func unsignedMessagesForBridge(sms []*types.SignedMessage) []*types.Message {
+	out := make([]*types.Message, 0, len(sms))
+	for _, sm := range sms {
+		if sm == nil {
+			continue
+		}
+		m := sm.Message
+		out = append(out, &m)
 	}
 	return out
 }
