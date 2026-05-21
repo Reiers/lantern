@@ -1,0 +1,50 @@
+
+  🪔  Lantern setup
+      Pure-Go Filecoin light node
+
+  Data directory: /tmp/lantern-evidence
+
+▸ Bootstrap quorum — establishing chain head from independent sources
+    Required agreement: 5 sources, timeout 1m30s
+    libp2p host: starting...
+    libp2p host: peer=12D3KooWL4f2Xiyf... (3 connections)
+    10 sources assembled (libp2p=7, forest=2, user=0, gateway=1)
+  ✓ [libp2p] libp2p:12D3KooWHQRSDFv4FvAjtU32shQ7znz7oRbLBryXzZ9NMK2feyyH — instance=466453 epoch=5824156 tsk=[bafy2bzace...hbc,...×1] state=bafy2bzace...ciy (97ms)
+  ✗ [lantern-gateway] lantern-gateway:https://gateway.lantern.reiers.io — rpc https://gateway.lantern.reiers.io: HTTP 404: 404 page not found
+ (150ms)
+  ✓ [libp2p] libp2p:12D3KooWGnkd9GQKo3apkShQDaq1d6cKJJmsVe6KiQkacUk1T8oZ — instance=466453 epoch=5824156 tsk=[bafy2bzace...hbc,...×1] state=bafy2bzace...ciy (265ms)
+  ✗ [libp2p] libp2p:12D3KooWKKkCZbcigsWTEu1cgNetNbZJqeNtysRtFpq7DTqw3eqH — certexch query head: connection failed (441ms)
+  ✓ [libp2p] libp2p:12D3KooWBF8cpp65hp2u9LK5mh19x67ftAam84z9LsfaquTDSBpt — instance=466453 epoch=5824156 tsk=[bafy2bzace...hbc,...×1] state=bafy2bzace...ciy (749ms)
+  ✓ [forest] forest:https://api.chain.love/rpc/v1 — instance=466453 epoch=5824156 tsk=[bafy2bzace...hbc,...×1] state=bafy2bzace...ciy (1.102s)
+  ✓ [forest] forest:https://api.node.glif.io/rpc/v1 — instance=466453 epoch=5824156 tsk=[bafy2bzace...hbc,...×1] state=bafy2bzace...ciy (1.12s)
+  ✗ [libp2p] libp2p:QmQu8C6deXwKvJP2D8B6QGyhngc3ZiDnFzEHBDx8yeBXST — certexch query head: failed to dial: context canceled (1.12s)
+  ✗ [libp2p] libp2p:12D3KooWAke3M2ji7tGNKx3BQkTHCyxVhtV1CN68z6Fkrpmfr37F — certexch query head: failed to dial: context canceled (1.12s)
+  ✗ [libp2p] libp2p:12D3KooWAke3M2ji7tGNKx3BQkTHCyxVhtV1CN68z6Fkrpmfr37F — certexch query head: failed to dial: context canceled (1.12s)
+
+✓ Quorum reached (5/5 agree): instance=466453 epoch=5824156 tsk=[bafy2bzace...hbc,...×1] state=bafy2bzace...ciy
+  Elapsed: 1.120583625s, sources counted: 5/10
+  Per-source:
+    ✓ [libp2p] libp2p:12D3KooWHQRSDFv4FvAjtU32shQ7znz7oRbLBryXzZ9NMK2feyyH — instance=466453 epoch=5824156 tsk=[bafy2bzace...hbc,...×1] state=bafy2bzace...ciy (97ms)
+    ✗ [lantern-gateway] lantern-gateway:https://gateway.lantern.reiers.io — rpc https://gateway.lantern.reiers.io: HTTP 404: 404 page not found
+ (150ms)
+    ✓ [libp2p] libp2p:12D3KooWGnkd9GQKo3apkShQDaq1d6cKJJmsVe6KiQkacUk1T8oZ — instance=466453 epoch=5824156 tsk=[bafy2bzace...hbc,...×1] state=bafy2bzace...ciy (265ms)
+    ✗ [libp2p] libp2p:12D3KooWKKkCZbcigsWTEu1cgNetNbZJqeNtysRtFpq7DTqw3eqH — certexch query head: connection failed (441ms)
+    ✓ [libp2p] libp2p:12D3KooWBF8cpp65hp2u9LK5mh19x67ftAam84z9LsfaquTDSBpt — instance=466453 epoch=5824156 tsk=[bafy2bzace...hbc,...×1] state=bafy2bzace...ciy (749ms)
+    ✓ [forest] forest:https://api.chain.love/rpc/v1 — instance=466453 epoch=5824156 tsk=[bafy2bzace...hbc,...×1] state=bafy2bzace...ciy (1.102s)
+    ✓ [forest] forest:https://api.node.glif.io/rpc/v1 — instance=466453 epoch=5824156 tsk=[bafy2bzace...hbc,...×1] state=bafy2bzace...ciy (1.12s)
+    ✗ [libp2p] libp2p:QmQu8C6deXwKvJP2D8B6QGyhngc3ZiDnFzEHBDx8yeBXST — certexch query head: failed to dial: context canceled (1.12s)
+    ✗ [libp2p] libp2p:12D3KooWAke3M2ji7tGNKx3BQkTHCyxVhtV1CN68z6Fkrpmfr37F — certexch query head: failed to dial: context canceled (1.12s)
+    ✗ [libp2p] libp2p:12D3KooWAke3M2ji7tGNKx3BQkTHCyxVhtV1CN68z6Fkrpmfr37F — certexch query head: failed to dial: context canceled (1.12s)
+    ✓ Trust anchor written: /tmp/lantern-evidence/bootstrap-anchor.json
+
+▸ Wallet + JWT setup
+    ✓ JWT secret + auth tokens minted under /tmp/lantern-evidence
+      (admin: ./token, sign: ./token-sign, write: ./token-write, read: ./token-read)
+    · Skipping wallet creation (--no-wallet).
+
+✓ Lantern initialised.
+
+Next steps:
+  lantern daemon                          # start RPC server
+  lantern info                            # FULLNODE_API_INFO
+  lantern doctor                          # re-run quorum probe

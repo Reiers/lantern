@@ -1,5 +1,7 @@
 # Lantern installer + setup spec
 
+> **Status (Phase 11):** Implementation **shipped** in v0.5.0 / V1.2-rc.1. The bootstrap quorum, `install.sh`, `lantern doctor`, `lantern repair`, `lantern service`, native Mac menu-bar app, and tag-triggered release pipeline are all in main. See `PHASE11-BLOCKERS.md` for the delivery report and `docs/phase11-install-evidence.md` for an end-to-end transcript proving 5 independent sources agreed on the same finalized tipset on real mainnet.
+
 The promise: one command on a fresh Mac, three minutes later you have a working Filecoin light node that cryptographically agrees with the canonical mainnet chain, with **no dependency on Glif or any single provider**.
 
 ```sh
@@ -223,13 +225,13 @@ The current `v0.1.0-rc.1` tag is what's running on sp.reiers.io. It works, but i
 
 **V1.1** ships the Phase 10 swarm work — real libp2p peer count + bandwidth in the RPC surface, Bitswap as primary fetch path, `lantern beacon` subcommand. Still has the embedded anchor as sole trust foundation; the live-quorum bootstrap is V1.2.
 
-**V1.2** ships the install story:
+**V1.2** ships the install story. Phase 11 delivery status:
 
-1. `install.sh` + `lantern init --bootstrap-quorum=5` multi-source quorum bootstrap
-2. `lantern doctor` + `lantern repair` subcommands
-3. `lantern service install/uninstall/start/stop` (launchd + systemd)
-4. SwiftUI menu-bar app at `apps/mac/`
-5. Reproducible builds + GitHub-Actions-signed release artifacts
-6. `get.lantern.reiers.io` (or `lantern.reiers.io/install`) serving install.sh
+1. ✅ `install.sh` + `lantern init --bootstrap-quorum=5` multi-source quorum bootstrap
+2. ✅ `lantern doctor` + `lantern repair` subcommands
+3. ✅ `lantern service install/uninstall/start/stop` (launchd + systemd)
+4. ✅ SwiftUI menu-bar app at `apps/mac/` (MVP — settings pane is V1.2.1)
+5. ✅ Reproducible builds + GitHub Actions release workflow; first signed-and-notarised macOS release is a separate step (B-11-03)
+6. 🟡 `get.lantern.reiers.io` serving `install.sh` — trivial DNS/worker setup (B-11-06), pending Cloudflare config
 
 That's the GA story: **download, ≤ 3 minutes, fully verified, fully independent of any single provider, optional Mac app for non-CLI users**.
