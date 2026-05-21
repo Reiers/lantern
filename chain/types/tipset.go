@@ -144,6 +144,27 @@ func (ts *TipSet) Cids() []cid.Cid {
 	return ts.cids
 }
 
+// NewStubTipSet constructs a TipSet from a (cids, height) tuple without
+// requiring the full BlockHeader contents. It exists for the narrow
+// case where Lantern needs to return a TipSet whose .Cids and .Height
+// shape is the only thing the caller inspects (e.g. ChainGetGenesis,
+// where we have the canonical genesis CID but not the genesis block
+// bytes).
+//
+// This is NOT a substitute for NewTipSet for normal chain operations:
+// the returned TipSet has an empty Blocks() slice and its Parents,
+// MinTicket, MinTimestamp etc. accessors panic / return zero. Callers
+// must only inspect Cids() / Key() / Height() on the result.
+//
+// Phase 8 addition.
+func NewStubTipSet(cids []cid.Cid, height abi.ChainEpoch) *TipSet {
+	return &TipSet{
+		cids:   append([]cid.Cid(nil), cids...),
+		blks:   nil,
+		height: height,
+	}
+}
+
 func (ts *TipSet) Key() TipSetKey {
 	if ts == nil {
 		return EmptyTSK
