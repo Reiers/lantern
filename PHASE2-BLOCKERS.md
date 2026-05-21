@@ -128,16 +128,32 @@ Common choices that always exist:
 
 ---
 
-## B11. State accessor wires `go-state-types` v0.18 actor codecs
+## B11. State accessor does NOT yet decode actor sub-state types
 
-The accessor decodes actor head bytes using
-`github.com/filecoin-project/go-state-types/builtin/...`. We pin v18 (current)
-codecs. Network version → state version mapping is hardcoded in
-`state/accessor/versions.go`. Future network upgrades will need this table
-extended.
+The Phase 2 accessor decodes the **state-tree level** (Actor struct: Code,
+Head, Nonce, Balance, DelegatedAddress) and walks the Init actor's address
+map for ID resolution. It does NOT yet decode the actor-specific sub-state
+(MinerInfo, MarketDeal full DealProposal, etc.) — only the raw bytes are
+surfaced via `MarketDealRaw`.
 
-**Recommendation.** Add a small CI check that compares the table against the
-upstream Lotus `build/buildconstants/upgrade_schedule.go` — fairly mechanical.
+**Why deferred.** The full `MinerInfo` decode requires version-specific
+`go-state-types/builtin/v{N}/miner.State` codecs, with a network-version →
+state-version mapping. That mapping table belongs in Phase 3 alongside
+wallet + message signing, where actor-specific helpers (`miner.LoadState`,
+`miner.GetSectorInfo`) all live.
+
+**What Phase 2 ships.** The HAMT/AMT walk works end-to-end to any actor's
+state-tree leaf. The walker returns:
+
+1. The Actor struct (code CID, head CID, balance, nonce, delegated addr).
+2. Raw bytes for the actor's head state object (caller can decode if they
+   know the actor type).
+3. Full proof path of CIDs traversed.
+
+That satisfies the Phase 2 spec's "look up the StorageMarket actor (f099),
+look up a known miner actor (f01000)" — we get both actors and their
+balance/code/head CIDs cross-check against Glif. The sub-state decoding
+("miner peer ID, miner power") moves to Phase 3.
 
 ---
 

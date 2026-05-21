@@ -23,6 +23,10 @@ type Client struct {
 	hc        *http.Client
 }
 
+// HTTPClient lets callers swap in a custom *http.Client (e.g. with a custom
+// dialer for DNS workarounds). Optional; default is set in NewClient.
+func (c *Client) SetHTTPClient(hc *http.Client) { c.hc = hc }
+
 // NewClient configures a Client. `endpoints` is a list of gateway base URLs
 // (no trailing slash); the canonical Lantern endpoint is
 // `https://gateway.lantern.reiers.io`. `timeout` is per-request.
