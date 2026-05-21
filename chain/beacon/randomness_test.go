@@ -50,27 +50,23 @@ func TestDrawRandomnessFromBaseHashesFirst(t *testing.T) {
 }
 
 // TestMaxBeaconRoundForEpoch_Mainnet checks the drand-round formula matches
-// the known Lotus value at a couple of mainnet epochs.
+// observed mainnet values. Reference: lotus chain/beacon/drand/drand.go
+// maxBeaconRoundV2 formula at master @ 2026-05.
 //
-// drand quicknet on mainnet:
-//   - genesis = 1692803367
-//   - period  = 3s
-// filecoin mainnet:
-//   - genesis = 1598306400
-//   - block delay = 30s
-//
-// At Filecoin epoch 3_167_500 (the F3 activation epoch, well after quicknet
-// flag day), latestTs = 3_167_500*30 + 1598306400 - 1 = 1693331399.
-// round = (1693331399 - 1692803367)/3 = 528032/3 = 176010.
-// (3 * 176010 = 528030; remainder 2, so floor = 176010.)
+// At Filecoin epoch 6035749 (a recent mainnet head observed during demo),
+// the canonical tipset carried BeaconEntries with Round = 28858492.
+// Formula:
+//   latestTs = 6035749 * 30 + 1598306400 - 30 = 1779378840
+//   fromGenesis = 1779378840 - 1692803367 = 86575473
+//   round = 86575473/3 + 1 = 28858491 + 1 = 28858492
 func TestMaxBeaconRoundForEpoch_Mainnet(t *testing.T) {
 	p := beacon.MainnetQuicknetParams()
-	got := p.MaxBeaconRoundForEpoch(3_167_500)
-	require.Equal(t, uint64(176010), got)
+	got := p.MaxBeaconRoundForEpoch(6035749)
+	require.Equal(t, uint64(28858492), got)
 
 	// Sanity: epoch 0 is well before drand genesis (drand-quicknet was
-	// activated long after Filecoin genesis).
-	require.Equal(t, uint64(0), p.MaxBeaconRoundForEpoch(0))
+	// activated long after Filecoin genesis); maxBeaconRoundV2 returns 1.
+	require.Equal(t, uint64(1), p.MaxBeaconRoundForEpoch(0))
 }
 
 // makeRandPreimage builds the preimage bytes Lotus' DrawRandomnessFromDigest

@@ -299,14 +299,37 @@ func (s *Store) OnHeadChange(cb func(*ltypes.TipSet)) {
 // On reorg (new head's parent chain diverges from current head's), all
 // canonical-tipset pointers between the divergence epoch and the new head
 // are overwritten.
-func (s *Store) SetHead(ctx context.Context, ts *ltypes.TipSet) error {
+func (s *Store) SetHead(_ctx context.Context, ts *ltypes.TipSet) error {
 	if ts == nil {
 		return errors.New("header/store: nil tipset")
 	}
-	// Persist all of ts's blocks (caller already validated them).
+	// Persist all of ts's blocks. Try Put first (strict parent linkage);
+	// fall back to a lenient direct write if the parents aren't yet in
+	// store (e.g. caller is doing a deep bootstrap where the parent
+	// chain hasn't been backfilled).
 	for _, b := range ts.Blocks() {
 		if err := s.Put(b); err != nil {
-			return err
+			raw, serr := b.Serialize()
+			if serr != nil {
+				return err
+			}
+			if derr := s.db.Update(func(txn *badger.Txn) error {
+				if err := txn.Set(cidKey(b.Cid()), raw); err != nil {
+					return err
+				}
+				ek := epochKey(prefixEpoch, b.Height)
+				cur, err := getOrEmpty(txn, ek)
+				if err != nil {
+					return err
+				}
+				merged, changed := appendCIDIfMissing(cur, b.Cid())
+				if changed {
+					return txn.Set(ek, merged)
+				}
+				return nil
+			}); derr != nil {
+				return derr
+			}
 		}
 	}
 

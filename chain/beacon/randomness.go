@@ -151,20 +151,24 @@ func MainnetQuicknetParams() QuicknetParams {
 // MaxBeaconRoundForEpoch returns the highest drand round whose seal time
 // happens no later than the start of the given Filecoin epoch.
 //
-// Lotus implementation (chain/beacon/drand/drand.go) for unchained drand:
+// Lotus implementation (chain/beacon/drand/drand.go @ master 2026-05):
 //
-//	latestTs := uint64(filecoinEpoch*BlockDelaySecs) + filecoinGenesisTime - 1
-//	return (latestTs - genesisTime) / period
+//	latestTs := (uint64(filEpoch) * filRoundTime) + filGenTime - filRoundTime
 //
-// We match that. The returned round is the round that should appear as the
-// final BeaconEntry on a Filecoin block at `filecoinEpoch`.
+//	maxBeaconRoundV2 (nv >= 16 / current mainnet):
+//	    if latestTs < drandGenTime { return 1 }
+//	    return (latestTs - drandGenTime) / period + 1
+//
+// We match maxBeaconRoundV2 byte-for-byte; mainnet has been past nv16 for
+// years, so we don't bother with the V1 branch.
 func (p QuicknetParams) MaxBeaconRoundForEpoch(filecoinEpoch abi.ChainEpoch) uint64 {
 	if filecoinEpoch < 0 {
-		return 0
+		return 1
 	}
-	latestTs := int64(filecoinEpoch)*p.BlockDelaySecs + p.FilecoinGenesisTime - 1
-	if latestTs < p.DrandGenesisTime {
-		return 0
+	latestTs := uint64(filecoinEpoch)*uint64(p.BlockDelaySecs) + uint64(p.FilecoinGenesisTime) - uint64(p.BlockDelaySecs)
+	if latestTs < uint64(p.DrandGenesisTime) {
+		return 1
 	}
-	return uint64((latestTs - p.DrandGenesisTime) / p.DrandPeriodSecs)
+	fromGenesis := latestTs - uint64(p.DrandGenesisTime)
+	return fromGenesis/uint64(p.DrandPeriodSecs) + 1
 }
