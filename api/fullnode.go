@@ -157,6 +157,17 @@ type FullNode interface {
 	PaychVoucherCheckValid(ctx context.Context, ch address.Address, sv *PaychSignedVoucher) error
 	PaychVoucherCheckSpendable(ctx context.Context, ch address.Address, sv *PaychSignedVoucher, secret []byte, proof []byte) (bool, error)
 	PaychVoucherList(ctx context.Context, ch address.Address) ([]*PaychSignedVoucher, error)
+
+	// Net + Eth health probes (Curio polls these for status display).
+	// V1 returns stubs; Phase 10 wires them to the live libp2p host.
+	NetPeers(ctx context.Context) ([]struct {
+		ID    string
+		Addrs []string
+	}, error)
+	NetAgentVersion(ctx context.Context, peerID string) (string, error)
+	NetConnectedness(ctx context.Context, peerID string) (int, error)
+	NetListening(ctx context.Context) (bool, error)
+	EthBlockNumber(ctx context.Context) (string, error)
 }
 
 // KeyType is wallet.KeyType, re-exported so callers don't pull wallet into

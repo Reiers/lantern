@@ -147,3 +147,57 @@ func networkVersionToActorVersion(nv network.Version) int {
 		return 0
 	}
 }
+
+// --- Net* and Eth* health probes (Phase 9 ops follow-up) -----------------
+//
+// Curio probes these endpoints periodically for status display in its
+// GUI. Phase 9 Part B (live curio bind) surfaced them as "method not found"
+// warnings. None of them are state-critical; they're shape-of-the-node info.
+
+// NetPeers returns a stub empty peer list. Lantern V1 does not yet expose
+// libp2p peer state through the RPC layer (the libp2p host runs but its
+// peer set isn't part of the trust surface). Returning an empty list is
+// the safe answer Curio's NetSummary handles gracefully.
+//
+// Phase 10 wiring: populate from the live libp2p host's peerstore.
+func (c *ChainAPI) NetPeers(_ context.Context) ([]struct {
+	ID    string
+	Addrs []string
+}, error) {
+	return []struct {
+		ID    string
+		Addrs []string
+	}{}, nil
+}
+
+// NetAgentVersion returns the libp2p agent string of a remote peer. Lantern
+// doesn't actively track peer agent versions yet; return a sentinel that
+// Curio's UI can render as "unknown".
+func (c *ChainAPI) NetAgentVersion(_ context.Context, _ string) (string, error) {
+	return "lantern/unknown", nil
+}
+
+// NetConnectedness returns the connectedness state of a peer. Always
+// reports NotConnected from Lantern's perspective (we don't expose peer
+// state to RPC callers in V1).
+func (c *ChainAPI) NetConnectedness(_ context.Context, _ string) (int, error) {
+	// 0 = NotConnected in libp2p's connmgr semantics.
+	return 0, nil
+}
+
+// NetListening returns whether the node is accepting connections. Lantern's
+// libp2p host listens but we don't expose it as a public service; report
+// true so Curio's health checks don't warn.
+func (c *ChainAPI) NetListening(_ context.Context) (bool, error) {
+	return true, nil
+}
+
+// EthBlockNumber returns "0x0" — Lantern V1 does not run an FEVM index.
+// Curio's GUI probes this on startup; returning the hex string for zero
+// keeps the call from erroring.
+//
+// Phase 10 wiring: derive from current trusted head's epoch when an
+// Ethereum-compatible block-number mapping is needed.
+func (c *ChainAPI) EthBlockNumber(_ context.Context) (string, error) {
+	return "0x0", nil
+}
