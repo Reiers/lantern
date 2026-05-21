@@ -22,6 +22,7 @@ import (
 	"time"
 
 	libp2p "github.com/libp2p/go-libp2p"
+	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -46,6 +47,12 @@ type Host struct {
 	mu       sync.Mutex
 	closed   bool
 	cancelCb []func()
+
+	// Phase 8 Part D: optional Kademlia DHT (client mode). Nil until
+	// EnableDHT is called. peerHWM tracks the last observed peer
+	// count via the refresh loop.
+	kdht    *dht.IpfsDHT
+	peerHWM int64
 }
 
 // New constructs and starts a libp2p Host and a GossipSub PubSub on it.
