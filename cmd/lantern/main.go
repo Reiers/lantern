@@ -75,6 +75,16 @@ func main() {
 		err = cmdDaemon(rest)
 	case "beacon":
 		err = cmdBeacon(rest)
+	case "doctor":
+		err = cmdDoctor(rest)
+	case "repair":
+		err = cmdRepair(rest)
+	case "service":
+		err = cmdService(rest)
+	case "stop":
+		err = serviceStop(rest)
+	case "restart":
+		err = serviceRestart(rest)
 	case "wallet":
 		err = cmdWallet(rest)
 	case "chain":
@@ -84,7 +94,7 @@ func main() {
 	case "info":
 		err = cmdInfo(rest)
 	case "version", "--version", "-v":
-		fmt.Println("lantern 0.4.0 (Phase 4 — Lotus-compat RPC)")
+		fmt.Println("lantern 0.5.0 (Phase 11 — installer + quorum bootstrap)")
 	case "help", "--help", "-h":
 		usage()
 	default:
@@ -105,16 +115,21 @@ USAGE
   lantern <command> [args...]
 
 COMMANDS
-  init                                Interactive setup wizard
-  daemon [--gateway <url>]            Run RPC server (default 127.0.0.1:1234)
-  beacon [--cache-dir <p>]            Run a Lantern beacon (Bitswap-only, no RPC)
+  init [--bootstrap-quorum N] [--peer URL]...   Setup wizard with multi-source quorum bootstrap
+  daemon [--gateway <url>]                      Run RPC server (default 127.0.0.1:1234)
+  beacon [--cache-dir <p>]                      Run a Lantern beacon (Bitswap-only, no RPC)
+  doctor [--bootstrap-quorum N]                 Re-run the quorum probe (read-only)
+  repair [--bootstrap-quorum N]                 Re-anchor from a fresh quorum (overwrites bootstrap-anchor.json)
+  service {install|uninstall|start|stop|restart|status}
+                                                Manage the OS service (launchd / systemd user)
+  stop / restart                                Aliases for 'service stop' / 'service restart'
   wallet new --type={bls|secp|delegated}
   wallet list
   wallet balance <addr>
-  wallet send <to> <amount-FIL>       (DRY-RUN — message preview)
+  wallet send <to> <amount-FIL>                 (DRY-RUN — message preview)
   chain head
   state get-actor <addr>
-  info                                Show daemon status + FULLNODE_API_INFO
+  info                                          Show daemon status + FULLNODE_API_INFO
   version
   help
 
@@ -208,61 +223,6 @@ func fetchTrustedHead(ctx context.Context, gw string) (*trustedroot.TrustedRoot,
 		ParentWeight: gh.ParentWeight,
 		ParentMessageReceipts: gh.ParentMessageReceipts,
 	}, nil
-}
-
-// --- init ---
-
-func cmdInit(args []string) error {
-	fs := flag.NewFlagSet("init", flag.ExitOnError)
-	noWallet := fs.Bool("no-wallet", false, "Skip creating a wallet")
-	fs.Parse(args)
-
-	dir := dataDir()
-	fmt.Printf("Lantern setup\n=============\nData directory: %s\n\n", dir)
-
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-
-	fmt.Println("Creating directories under", dir)
-	if err := os.MkdirAll(filepath.Join(dir, "keystore"), 0o700); err != nil {
-		return err
-	}
-
-	// Initialise the RPC server so tokens get minted.
-	tr := &trustedroot.TrustedRoot{Epoch: 0}
-	dummy := handlers.New(tr, nil, nil, nil, "mainnet")
-	srv, err := server.New(server.Config{ListenAddress: "127.0.0.1:0", DataDir: dir}, dummy)
-	if err != nil {
-		return fmt.Errorf("init rpc server: %w", err)
-	}
-	_ = srv // we only needed the side-effect (token files persisted)
-
-	fmt.Println("  ✓ JWT secret + auth tokens minted under", dir)
-	fmt.Println("    (admin: ./token, sign: ./token-sign, write: ./token-write, read: ./token-read)")
-	fmt.Println()
-
-	if *noWallet {
-		fmt.Println("Skipping wallet creation (--no-wallet).")
-	} else {
-		fmt.Println("Creating initial BLS wallet...")
-		w, err := openWallet()
-		if err != nil {
-			return err
-		}
-		a, err := w.NewAddress(context.Background(), wallet.KTBLS)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("  ✓ wallet created: %s (default)\n", a)
-	}
-
-	fmt.Println()
-	fmt.Println("Setup complete. Next steps:")
-	fmt.Println("  lantern daemon                          # start RPC server")
-	fmt.Println("  lantern info                            # show FULLNODE_API_INFO")
-	fmt.Println("  lantern wallet list")
-	return nil
 }
 
 // --- daemon ---
