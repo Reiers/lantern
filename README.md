@@ -115,17 +115,41 @@ For everything else - wallet, balance queries, miner info, market deals, deal st
 
 ## Quick start
 
+**One-line install** (macOS or Linux):
+
 ```sh
-# Build (Go 1.25+, no CGo, no filecoin-ffi)
+curl -fsSL https://get.lantern.reiers.io | bash
+```
+
+Three minutes later you have a working light node whose trust anchor was established by **five independent F3 sources cryptographically agreeing on the same finalized tipset** — see [`INSTALLER-SPEC.md`](INSTALLER-SPEC.md) for the trust foundation, and [`docs/phase11-install-evidence.md`](docs/phase11-install-evidence.md) for an end-to-end transcript on real mainnet.
+
+**Build from source** (Go 1.25+, no CGo, no filecoin-ffi):
+
+```sh
 git clone https://github.com/Reiers/lantern.git
 cd lantern
 CGO_ENABLED=0 go build -o lantern ./cmd/lantern
 
-# First-run wizard
-./lantern init
+# First-run wizard — includes the multi-source bootstrap quorum.
+./lantern init --bootstrap-quorum=5
 
 # Run the daemon (Lotus-compatible RPC on 127.0.0.1:1234)
 ./lantern daemon
+```
+
+**Health-check the trust anchor anytime:**
+
+```sh
+lantern doctor             # read-only quorum probe
+lantern repair             # re-anchor from a fresh successful quorum
+```
+
+**Run as a background service** (launchd on macOS / systemd user on Linux):
+
+```sh
+lantern service install
+lantern service status
+lantern service stop
 ```
 
 Talk to it like Lotus:
@@ -169,6 +193,7 @@ Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on m
 | 8     | Live Curio binding test, FVM bridge, block publisher, DHT, paych byte-exact, TRUST-MODEL.md | ✅ Shipped  |
 | 9     | `ChainNotify` end-to-end + daemon header-store wiring + real Curio bind on lex — the V1.1 unlock | ✅ Shipped  |
 | 10    | Live libp2p stats wired to Curio webui (Net*), Bitswap as primary fetch path, `lantern beacon` subcommand — V1.2 swarm-native delivery | ✅ Shipped  |
+| 11    | One-line installer + multi-source bootstrap quorum + `lantern doctor` / `repair` / `service` + native Mac menu-bar app + tag-triggered release pipeline — V1.2 GA delivery | ✅ Shipped  |
 
 **71 of 71** methods in the Curio FULLNODE_API surface are implemented after Phase 9; Phase 10 turned the Net*/Eth probe stubs (`NetPeers`, `NetBandwidthStats`, `NetAutoNatStatus`, etc.) into **live data** sourced from the running libp2p host. The V1.1 unlock landed in Phase 9: `ChainNotify` is wired through a head-change distributor (Lotus-style apply/revert events, bounded per-subscriber buffer with drop-slow semantics) and `StateAccountKey` decodes the account actor state. Live-validated against `lotus v1.36` CLI for 6 minutes and against a real Curio 1.28.1 binary on lex for 10 minutes — see [`docs/phase9-part-b-curio-bind.md`](docs/phase9-part-b-curio-bind.md) and [`docs/phase10-part-d-live-bind.md`](docs/phase10-part-d-live-bind.md). The 1 remaining hard-gated stub:
 - `SyncSubmitBlock` is never lit without explicit `AllowBlockSubmit=true` plus a configured bridge. See [`docs/SAFETY-CHECKLIST.md`](docs/SAFETY-CHECKLIST.md) §1.
