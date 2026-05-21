@@ -1,7 +1,10 @@
-# Hypersync — Scope
+# Lantern — Scope
 
 A Filecoin light node that boots in minutes with ~1 GB instead of 76 GB,
 verifying the chain cryptographically end-to-end with no remote RPC trust.
+
+The name fits Filecoin's natural-element family (Lotus, Forest, Aurora, Spark).
+A lantern is portable light — exactly what a light client is.
 
 Targets three user classes: wallet users, deal clients, storage providers.
 
@@ -193,16 +196,17 @@ focused weeks.
   haven't implemented, SPs can't switch over. Mitigation: instrument a real
   Curio cluster (sp.reiers.io) to log every RPC call, then implement that
   list.
-- **Brand confusion:** "Hypersync" name might collide with Envio's
-  hypersync.xyz (Ethereum indexing). Check trademark / naming before public.
+- **Brand confusion:** Old working name "Hypersync" collided with Envio's
+  HyperSync (Ethereum multichain indexer). Renamed to Lantern, clean check
+  against Filecoin/IPFS/major crypto namespaces.
 
 ## Deliverables for V1
 
-- Single static Go binary `hypersync` (no CGo, runs anywhere)
-- `hypersync init` interactive wizard
-- `hypersync wallet [new|import|list|balance|send]`
-- `hypersync rpc` (Lotus-compat RPC server on 127.0.0.1:1234)
-- `hypersync gateway` mode (run-your-own-gateway for SPs / power users)
-- One curl-able boot bundle at `https://bootstrap.hypersync.io/mainnet/latest.bundle`
-- Docs at `https://hypersync.io` (or `hypersync.reiers.io` for V1)
+- Single static Go binary `lantern` (no CGo, runs anywhere)
+- `lantern init` interactive wizard
+- `lantern wallet [new|import|list|balance|send]`
+- `lantern rpc` (Lotus-compat RPC server on 127.0.0.1:1234)
+- `lantern gateway` mode (run-your-own-gateway for SPs / power users)
+- One curl-able boot bundle at `https://bootstrap.lantern.reiers.io/mainnet/latest.bundle`
+- Docs at `https://lantern.reiers.io`
 - Curio integration tested on calibration first, then mainnet
