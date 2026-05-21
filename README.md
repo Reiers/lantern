@@ -121,6 +121,8 @@ For everything else - wallet, balance queries, miner info, market deals, deal st
 curl -fsSL https://get.lantern.reiers.io | bash
 ```
 
+> The installer endpoint is live (served from `157.180.16.39` via nginx + Let's Encrypt). Repo binaries are not yet public; until `v1.2.0` GA ships the official release binaries, `install.sh` falls back to building from source. Set `LANTERN_BUILD_FROM_SOURCE=1` to force that path explicitly.
+
 Three minutes later you have a working light node whose trust anchor was established by **five independent F3 sources cryptographically agreeing on the same finalized tipset** — see [`INSTALLER-SPEC.md`](INSTALLER-SPEC.md) for the trust foundation, and [`docs/phase11-install-evidence.md`](docs/phase11-install-evidence.md) for an end-to-end transcript on real mainnet.
 
 **Build from source** (Go 1.25+, no CGo, no filecoin-ffi):
