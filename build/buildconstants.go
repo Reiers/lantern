@@ -30,6 +30,19 @@ const FilecoinPrecision = uint64(1_000_000_000_000_000_000)
 // Upstream: build/buildconstants/params_shared_vals.go
 const BlockGasLimit = int64(10_000_000_000)
 
+// BlockDelaySecs is the target seconds between epochs.
+// Upstream: build/buildconstants/params_shared_vals.go
+const BlockDelaySecs = uint64(30)
+
+// MinimumBaseFee is the floor base fee in attoFIL.
+// Upstream: build/buildconstants/params_shared_vals.go (== 100 attoFIL).
+const MinimumBaseFee = int64(100)
+
+// MaxBlockGas is the per-block gas budget (alias for BlockGasLimit), kept
+// separate so callers reading `vm/gas.go` semantics don't have to know
+// the Lotus build constant.
+const MaxBlockGas = BlockGasLimit
+
 // ZeroAddress is the Filecoin BLS zero address.
 // Upstream: build/buildconstants/params_shared_vals.go
 var ZeroAddress = mustParseAddress("f3yaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaby2smx7a")

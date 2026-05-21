@@ -40,6 +40,7 @@ import (
 	"github.com/Reiers/lantern/chain/types"
 	"github.com/Reiers/lantern/state/accessor"
 	"github.com/Reiers/lantern/state/hamt"
+	"github.com/Reiers/lantern/vm"
 	"github.com/Reiers/lantern/wallet"
 )
 
@@ -65,6 +66,17 @@ type ChainAPI struct {
 	// AuthIssuer satisfies AuthNew / AuthVerify by delegating to the RPC
 	// server's Auth state.
 	AuthIssuer AuthIssuer
+
+	// VMShell is the optional pure-Go VM shell used for StateCall and
+	// gas estimation. When nil, those methods fall back to the Phase 4
+	// heuristics (fixed default gas).
+	VMShell *vm.GasEstimator
+
+	// AllowBlockSubmit gates Phase 7's SyncSubmitBlock publish path. The
+	// default (false) makes SyncSubmitBlock a no-op that returns
+	// ErrNotImpl. Operators set this true only when they explicitly want
+	// their daemon to publish blocks to the gossipsub /fil/blocks topic.
+	AllowBlockSubmit bool
 
 	// optional: shutdown hook
 	OnShutdown func() error
@@ -670,33 +682,89 @@ func (c *ChainAPI) StateWaitMsg(ctx context.Context, msgCID cid.Cid, confidence 
 		}
 	}
 }
-func (c *ChainAPI) StateCall(_ context.Context, _ *types.Message, _ types.TipSetKey) (*api.InvocResult, error) {
-	return nil, ErrNotImpl("StateCall", "requires VM, see Phase 5")
+// StateCall runs `msg` in dry-run mode against the trusted tipset's
+// state. Tier 4 (#69). Phase 7 implementation: pure-Go VM shell from
+// `vm.StateCall`.
+func (c *ChainAPI) StateCall(ctx context.Context, msg *types.Message, _ types.TipSetKey) (*api.InvocResult, error) {
+	if msg == nil {
+		return nil, errors.New("StateCall: nil message")
+	}
+	r, err := vm.StateCall(ctx, c.Accessor, msg, vm.ApplyOptions{})
+	if err != nil {
+		return nil, err
+	}
+	mcid := msg.Cid()
+	inv := &api.InvocResult{
+		MsgCid:   mcid,
+		Msg:      msg,
+		MsgRct:   &r.Receipt,
+		Duration: r.Duration.Nanoseconds(),
+		Error:    r.Error,
+		GasCost: api.MessageGasCost{
+			Message: mcid,
+			GasUsed: big.NewIntUnsigned(uint64(r.GasCost.GasUsed)),
+		},
+		ExecutionTrace: api.ExecutionTrace{
+			Msg:    msg,
+			MsgRct: &r.Receipt,
+			Error:  r.Error,
+		},
+	}
+	return inv, nil
 }
 
 // ----------------- Gas -----------------
 
-func (c *ChainAPI) GasEstimateMessageGas(_ context.Context, msg *types.Message, _ *api.MessageSendSpec, _ types.TipSetKey) (*types.Message, error) {
-	// Heuristic defaults. Phase 5 wires real estimation.
+// GasEstimateMessageGas fills in nonce, premium, fee cap, and gas limit
+// based on the chain's recent base fee and mempool premium distribution.
+// Tier 2 (#13). Phase 7 implementation: vm.GasEstimator.
+func (c *ChainAPI) GasEstimateMessageGas(ctx context.Context, msg *types.Message, spec *api.MessageSendSpec, _ types.TipSetKey) (*types.Message, error) {
 	if msg == nil {
 		return nil, errors.New("nil message")
 	}
-	if msg.GasLimit == 0 {
-		msg.GasLimit = 10_000_000
+	e := c.gasEstimator()
+	maxFee := big.Zero()
+	if spec != nil {
+		maxFee = spec.MaxFee
 	}
-	if msg.GasFeeCap.NilOrZero() {
-		msg.GasFeeCap = big.NewInt(100_000_000)
+	out, err := e.EstimateMessageGas(ctx, msg, maxFee)
+	if err != nil {
+		return nil, err
 	}
-	if msg.GasPremium.NilOrZero() {
-		msg.GasPremium = big.NewInt(100_000)
-	}
-	return msg, nil
+	return out, nil
 }
-func (c *ChainAPI) GasEstimateFeeCap(_ context.Context, _ *types.Message, _ int64, _ types.TipSetKey) (abi.TokenAmount, error) {
-	return big.NewInt(100_000_000), nil
+
+func (c *ChainAPI) GasEstimateFeeCap(ctx context.Context, msg *types.Message, maxqueueblocks int64, _ types.TipSetKey) (abi.TokenAmount, error) {
+	e := c.gasEstimator()
+	var prem big.Int
+	if msg != nil {
+		prem = msg.GasPremium
+	}
+	return e.EstimateFeeCap(ctx, prem, maxqueueblocks)
 }
-func (c *ChainAPI) GasEstimateGasPremium(_ context.Context, _ uint64, _ address.Address, _ int64, _ types.TipSetKey) (abi.TokenAmount, error) {
-	return big.NewInt(100_000), nil
+
+func (c *ChainAPI) GasEstimateGasPremium(ctx context.Context, nblocksincl uint64, _ address.Address, _ int64, _ types.TipSetKey) (abi.TokenAmount, error) {
+	e := c.gasEstimator()
+	return e.EstimateGasPremium(ctx, nblocksincl)
+}
+
+// gasEstimator returns the configured VM gas estimator, building a
+// best-effort default if the field is nil. The default wires whatever
+// header store and mempool are already attached to the ChainAPI; if
+// neither is present, the estimator returns Lotus-compatible fallback
+// numbers (100 attoFIL base fee, 100k attoFIL premium).
+func (c *ChainAPI) gasEstimator() *vm.GasEstimator {
+	if c.VMShell != nil {
+		return c.VMShell
+	}
+	e := &vm.GasEstimator{Acc: c.Accessor}
+	if c.HeaderStore != nil {
+		e.BaseFee = &vm.HeaderStoreFeeSource{Store: c.HeaderStore}
+	}
+	if pl, ok := c.Mpool.(MpoolPendingLister); ok && pl != nil {
+		e.Premium = &vm.MempoolPremiumSource{Pending: pl.Pending}
+	}
+	return e
 }
 
 // ----------------- Wallet -----------------
