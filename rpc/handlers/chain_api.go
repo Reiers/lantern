@@ -35,6 +35,7 @@ import (
 	"github.com/Reiers/lantern/api"
 	lbeacon "github.com/Reiers/lantern/chain/beacon"
 	hstore "github.com/Reiers/lantern/chain/header/store"
+	"github.com/Reiers/lantern/chain/msgsearch"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/chain/types"
 	"github.com/Reiers/lantern/state/accessor"
@@ -583,11 +584,84 @@ func (c *ChainAPI) StateListMessages(_ context.Context, _ *api.MessageMatch, _ t
 
 // ----------------- Wait / search / call -----------------
 
-func (c *ChainAPI) StateWaitMsg(_ context.Context, _ cid.Cid, _ uint64, _ abi.ChainEpoch, _ bool) (*api.MsgLookup, error) {
-	return nil, ErrNotImpl("StateWaitMsg", "message-receipt AMT walk deferred to Phase 5")
+// StateSearchMsg walks backward from `from` (or current head if empty) up
+// to `lookbackLimit` epochs, looking for `msgCID` in any block's message
+// AMTs. Returns the receipt + tipset of inclusion, or nil when not found.
+// Tier 1 (#46), Phase 6 Part E.
+func (c *ChainAPI) StateSearchMsg(ctx context.Context, from types.TipSetKey, msgCID cid.Cid, lookbackLimit abi.ChainEpoch, _ bool) (*api.MsgLookup, error) {
+	if c.HeaderStore == nil {
+		return nil, ErrNotImpl("StateSearchMsg", "header store not configured")
+	}
+	if lookbackLimit <= 0 {
+		lookbackLimit = 7200 // mirror lotus default ~30h
+	}
+	fromEpoch := abi.ChainEpoch(-1)
+	if !from.IsEmpty() {
+		// Best-effort: walk the header store for from's height by
+		// loading any of its block CIDs. Cheap fallback: ignore and
+		// start at head.
+		for _, k := range from.Cids() {
+			if bh, err := c.HeaderStore.Get(k); err == nil {
+				fromEpoch = bh.Height
+				break
+			}
+		}
+	}
+	s := msgsearch.New(c.HeaderStore, c.BlockGetter)
+	res, err := s.Find(ctx, fromEpoch, msgCID, lookbackLimit)
+	if err != nil {
+		if errors.Is(err, msgsearch.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &api.MsgLookup{
+		Message: msgCID,
+		Receipt: res.Receipt,
+		TipSet:  res.TipSet.Key(),
+		Height:  res.Height,
+	}, nil
 }
-func (c *ChainAPI) StateSearchMsg(_ context.Context, _ types.TipSetKey, _ cid.Cid, _ abi.ChainEpoch, _ bool) (*api.MsgLookup, error) {
-	return nil, ErrNotImpl("StateSearchMsg", "message-receipt AMT walk deferred to Phase 5")
+
+// StateWaitMsg behaves like StateSearchMsg but blocks waiting for inclusion
+// and `confidence` additional epochs. The wait loop is bounded by
+// `lookbackLimit` epochs (default 7200 ~ 30h).
+// Tier 1 (#9), Phase 6 Part E.
+func (c *ChainAPI) StateWaitMsg(ctx context.Context, msgCID cid.Cid, confidence uint64, lookbackLimit abi.ChainEpoch, allowReplaced bool) (*api.MsgLookup, error) {
+	if c.HeaderStore == nil {
+		return nil, ErrNotImpl("StateWaitMsg", "header store not configured")
+	}
+	deadline := time.Now().Add(30 * time.Hour)
+	poll := time.NewTicker(3 * time.Second)
+	defer poll.Stop()
+	for {
+		lookup, err := c.StateSearchMsg(ctx, types.TipSetKey{}, msgCID, lookbackLimit, allowReplaced)
+		if err != nil {
+			return nil, err
+		}
+		if lookup != nil {
+			// Wait for the chain to reach lookup.Height + confidence.
+			for c.HeaderStore.HeadEpoch() < lookup.Height+abi.ChainEpoch(confidence) {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-poll.C:
+				}
+				if time.Now().After(deadline) {
+					return nil, errors.New("StateWaitMsg: confidence timeout")
+				}
+			}
+			return lookup, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-poll.C:
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("StateWaitMsg: lookback exhausted")
+		}
+	}
 }
 func (c *ChainAPI) StateCall(_ context.Context, _ *types.Message, _ types.TipSetKey) (*api.InvocResult, error) {
 	return nil, ErrNotImpl("StateCall", "requires VM, see Phase 5")
