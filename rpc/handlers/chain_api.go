@@ -478,33 +478,19 @@ func (c *ChainAPI) StateSectorPartition(_ context.Context, _ address.Address, _ 
 }
 
 // ----------------- Market / verifreg -----------------
+//
+// Real impls live in state_market.go (Part C) and state_verifreg.go
+// (Part D). The handlers below are typed stubs for methods not yet
+// implemented.
 
-func (c *ChainAPI) StateMarketBalance(_ context.Context, _ address.Address, _ types.TipSetKey) (api.MarketBalance, error) {
-	return api.MarketBalance{}, ErrNotImpl("StateMarketBalance", "market HAMT decode deferred to Phase 5")
-}
-func (c *ChainAPI) StateMarketStorageDeal(_ context.Context, _ abi.DealID, _ types.TipSetKey) (*api.MarketDeal, error) {
-	return nil, ErrNotImpl("StateMarketStorageDeal", "market AMT decode deferred to Phase 5")
-}
-func (c *ChainAPI) StateGetAllocation(_ context.Context, _ address.Address, _ verifreg.AllocationId, _ types.TipSetKey) (*verifreg.Allocation, error) {
-	return nil, ErrNotImpl("StateGetAllocation", "verifreg HAMT decode deferred to Phase 5")
-}
 func (c *ChainAPI) StateGetAllocationIdForPendingDeal(_ context.Context, _ abi.DealID, _ types.TipSetKey) (verifreg.AllocationId, error) {
 	return 0, ErrNotImpl("StateGetAllocationIdForPendingDeal", "market HAMT decode deferred")
 }
 func (c *ChainAPI) StateGetAllocationForPendingDeal(_ context.Context, _ abi.DealID, _ types.TipSetKey) (*verifreg.Allocation, error) {
 	return nil, ErrNotImpl("StateGetAllocationForPendingDeal", "combo lookup deferred to Phase 5")
 }
-func (c *ChainAPI) StateVerifiedClientStatus(_ context.Context, _ address.Address, _ types.TipSetKey) (*big.Int, error) {
-	return nil, ErrNotImpl("StateVerifiedClientStatus", "verifreg HAMT decode deferred")
-}
-func (c *ChainAPI) StateDealProviderCollateralBounds(_ context.Context, _ abi.PaddedPieceSize, _ bool, _ types.TipSetKey) (api.DealCollateralBounds, error) {
-	return api.DealCollateralBounds{}, ErrNotImpl("StateDealProviderCollateralBounds", "needs power+reward decode")
-}
 func (c *ChainAPI) StateListMessages(_ context.Context, _ *api.MessageMatch, _ types.TipSetKey, _ abi.ChainEpoch) ([]cid.Cid, error) {
 	return nil, ErrNotImpl("StateListMessages", "heavy scan deferred to Phase 5")
-}
-func (c *ChainAPI) StateListMiners(_ context.Context, _ types.TipSetKey) ([]address.Address, error) {
-	return nil, ErrNotImpl("StateListMiners", "power-actor HAMT walk deferred to Phase 5")
 }
 func (c *ChainAPI) StateCirculatingSupply(_ context.Context, _ types.TipSetKey) (abi.TokenAmount, error) {
 	return big.Zero(), ErrNotImpl("StateCirculatingSupply", "vesting math deferred to Phase 5")
