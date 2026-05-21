@@ -26,6 +26,7 @@ import (
 	blockformat "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	cbornode "github.com/ipfs/go-ipld-cbor"
+	libp2ppeer "github.com/libp2p/go-libp2p/core/peer"
 
 	miner17 "github.com/filecoin-project/go-state-types/builtin/v17/miner"
 	adt17 "github.com/filecoin-project/go-state-types/builtin/v17/util/adt"
@@ -34,6 +35,26 @@ import (
 
 	"github.com/Reiers/lantern/state/hamt"
 )
+
+// decodePeerID converts the on-chain miner Info.PeerId bytes (the raw
+// libp2p peer.ID encoding) into the base58-multihash string that Lotus
+// returns over JSON-RPC. The on-chain value is what `peer.ID.MarshalBinary`
+// produces; Lotus's `peer.ID.String()` is its base58-encoded multihash.
+//
+// Returns nil if the bytes are empty or not a valid peer.ID, so callers
+// can fall back to a nil PeerId field consistent with Lotus's behaviour
+// for miners that have never declared one.
+func decodePeerID(b []byte) *string {
+	if len(b) == 0 {
+		return nil
+	}
+	pid, err := libp2ppeer.IDFromBytes(b)
+	if err != nil {
+		return nil
+	}
+	s := pid.String()
+	return &s
+}
 
 // MinerInfo is a network-version-agnostic view of MinerInfo. It mirrors the
 // shape of api.MinerInfo (Lotus-compatible).
@@ -312,11 +333,7 @@ func (m *minerV18) AllSectors(ctx context.Context, filter *bitfield.BitField, cb
 }
 
 func convertMinerV18Info(in *miner18.MinerInfo) *MinerInfo {
-	var peer *string
-	if len(in.PeerId) > 0 {
-		s := string(in.PeerId)
-		peer = &s
-	}
+	peer := decodePeerID(in.PeerId)
 	mas := make([][]byte, 0, len(in.Multiaddrs))
 	for _, m := range in.Multiaddrs {
 		mas = append(mas, []byte(m))
@@ -545,11 +562,7 @@ func (m *minerV17) AllSectors(ctx context.Context, filter *bitfield.BitField, cb
 }
 
 func convertMinerV17Info(in *miner17.MinerInfo) *MinerInfo {
-	var peer *string
-	if len(in.PeerId) > 0 {
-		s := string(in.PeerId)
-		peer = &s
-	}
+	peer := decodePeerID(in.PeerId)
 	mas := make([][]byte, 0, len(in.Multiaddrs))
 	for _, m := range in.Multiaddrs {
 		mas = append(mas, []byte(m))
