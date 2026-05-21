@@ -44,6 +44,7 @@ import (
 	headnotify "github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/chain/types"
+	lbitswap "github.com/Reiers/lantern/net/bitswap"
 	"github.com/Reiers/lantern/net/combined"
 	"github.com/Reiers/lantern/net/glif"
 	"github.com/Reiers/lantern/net/hsync"
@@ -273,6 +274,11 @@ func cmdDaemon(args []string) error {
 	notifyBufSize := fs.Int("notify-buf", headnotify.DefaultBufferSize, "ChainNotify per-subscriber buffer size")
 	p2pListen := fs.String("p2p-listen", "/ip4/0.0.0.0/tcp/0,/ip4/0.0.0.0/udp/0/quic-v1", "libp2p listen multiaddrs (comma-separated). Empty disables the libp2p host.")
 	noLibp2p := fs.Bool("no-libp2p", false, "Skip starting the libp2p host (RPC stays up; Net* stats return zero).")
+	bitswapEnabled := fs.Bool("bitswap", true, "Use Bitswap as primary fetch source (HTTP gateway falls to last resort).")
+	bitswapFastDL := fs.Duration("bitswap-fast", 1500*time.Millisecond, "Bitswap fast-stage deadline for preferred peers.")
+	bitswapFullDL := fs.Duration("bitswap-full", 5*time.Second, "Bitswap full-stage deadline for swarm broadcast.")
+	preferredPeersStr := fs.String("bitswap-peers", "", "Comma-separated multiaddrs to use as preferred Bitswap peers (e.g. lantern beacon nodes).")
+	metricsListen := fs.String("metrics", "", "Optional listen address for /metrics (Prometheus text exposition). Empty disables.")
 	fs.Parse(args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -286,13 +292,20 @@ func cmdDaemon(args []string) error {
 	}
 	fmt.Printf("  head epoch:  %d\n  state root:  %s\n", tr.Epoch, tr.StateRoot)
 
-	bg, _ := gatewayClient(*gw)
 	w, err := openWallet()
 	if err != nil {
 		return fmt.Errorf("open wallet: %w", err)
 	}
 
-	chainAPI := handlers.New(tr, bg, w, nil, "mainnet")
+	// gatewayBG + fetcher is the cache+http chain. Bitswap, when enabled,
+	// is inserted between cache and HTTP gateway later in this function
+	// once the libp2p host is up.
+	cache := hamt.NewMemBlockStore()
+	fetcher := combined.New(cache,
+		combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second},
+		combined.Source{Name: "glif", Getter: glif.New("", 20*time.Second), Timeout: 20 * time.Second},
+	)
+	chainAPI := handlers.New(tr, fetcher, w, nil, "mainnet")
 
 	// Phase 9: wire the persistent header store + sync agent + head-change
 	// distributor so ChainNotify, ChainGetTipSetByHeight, ChainGetBlock,
@@ -352,6 +365,43 @@ func cmdDaemon(args []string) error {
 		defer p2pHost.Close()
 		chainAPI.NetInfoSource = p2pHost.NetInfo()
 		fmt.Printf("  libp2p: id=%s listen=%v\n", p2pHost.ID(), p2pHost.ListenAddrs())
+	}
+
+	// Phase 10 Part B: real Bitswap as primary fetch path. We rebuild
+	// the combined fetcher with Bitswap inserted between cache and HTTP
+	// gateway, so the order is: cache → bitswap (fast deadline) →
+	// gateway → glif.
+	var bsClient *lbitswap.Client
+	if *bitswapEnabled && p2pHost != nil {
+		preferred, perr := parsePreferredPeers(*preferredPeersStr)
+		if perr != nil {
+			return fmt.Errorf("parse --bitswap-peers: %w", perr)
+		}
+		bsClient, err = lbitswap.New(ctx, lbitswap.Config{
+			Host:           p2pHost.H,
+			PreferredPeers: preferred,
+			FastDeadline:   *bitswapFastDL,
+			FullDeadline:   *bitswapFullDL,
+		})
+		if err != nil {
+			return fmt.Errorf("start bitswap: %w", err)
+		}
+		defer bsClient.Close()
+		fetcher = combined.New(cache,
+			combined.Source{Name: "bitswap", Getter: bsClient, Timeout: *bitswapFullDL},
+			combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second},
+			combined.Source{Name: "glif", Getter: glif.New("", 20*time.Second), Timeout: 20 * time.Second},
+		)
+		rebindBlockGetter(chainAPI, fetcher)
+		fmt.Printf("  bitswap:  enabled (preferred=%d, fast=%s, full=%s)\n",
+			len(preferred), bitswapFastDL.String(), bitswapFullDL.String())
+	}
+
+	// Phase 10 Part B: optional /metrics endpoint exposes per-source hit
+	// counts so operators can see Bitswap actually carrying load.
+	if *metricsListen != "" {
+		go serveMetrics(ctx, *metricsListen, fetcher, bsClient, p2pHost)
+		fmt.Printf("  metrics:  http://%s/metrics\n", *metricsListen)
 	}
 
 	srv, err := server.New(server.Config{
