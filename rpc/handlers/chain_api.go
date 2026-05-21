@@ -939,21 +939,35 @@ func (c *ChainAPI) MpoolPending(_ context.Context, _ []types.TipSetKey) ([]*type
 }
 
 // ----------------- SP block production (Tier 4) -----------------
+//
+// MinerGetBaseInfo, MinerCreateBlock, MpoolSelect live in miner_block.go.
+// SyncSubmitBlock is gated below.
 
-func (c *ChainAPI) MinerGetBaseInfo(_ context.Context, _ address.Address, _ abi.ChainEpoch, _ types.TipSetKey) (*api.MiningBaseInfo, error) {
-	return nil, ErrNotImpl("MinerGetBaseInfo", "requires VM + winning POST infra, see Phase 7")
-}
-func (c *ChainAPI) MinerCreateBlock(_ context.Context, _ *api.BlockTemplate) (*types.BlockMsg, error) {
-	return nil, ErrNotImpl("MinerCreateBlock", "requires VM, see Phase 5/7")
-}
-func (c *ChainAPI) MpoolSelect(_ context.Context, _ types.TipSetKey, _ float64) ([]*types.SignedMessage, error) {
-	return nil, ErrNotImpl("MpoolSelect", "requires mpool message-selection logic, see Phase 7")
-}
+// SyncSubmitBlock publishes a block to the gossipsub /fil/blocks/<network>
+// topic. Phase 7 implementation: requires AllowBlockSubmit=true to
+// actually publish. Otherwise returns an explicit "dry-run" error so
+// Curio's tests fail loudly instead of silently dropping blocks.
 func (c *ChainAPI) SyncSubmitBlock(ctx context.Context, blk *types.BlockMsg) error {
+	if blk == nil || blk.Header == nil {
+		return errors.New("SyncSubmitBlock: nil block")
+	}
+	if !c.AllowBlockSubmit {
+		return ErrNotImpl("SyncSubmitBlock",
+			"block submission requires ChainAPI.AllowBlockSubmit=true (operator opt-in)")
+	}
 	if c.Mpool == nil {
 		return ErrMpoolNotWired
 	}
-	return ErrNotImpl("SyncSubmitBlock", "block submission requires gossipsub /fil/blocks topic, see Phase 7")
+	bp, ok := c.Mpool.(BlockPublisher)
+	if !ok || bp == nil {
+		return errors.New("SyncSubmitBlock: mpool does not publish blocks")
+	}
+	return bp.PublishBlock(ctx, blk)
+}
+
+// BlockPublisher is the optional mpool extension for /fil/blocks topic.
+type BlockPublisher interface {
+	PublishBlock(ctx context.Context, blk *types.BlockMsg) error
 }
 
 // MarketAddBalance composes+signs+pushes a market deposit message.
