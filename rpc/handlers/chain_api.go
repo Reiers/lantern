@@ -20,13 +20,11 @@ import (
 	"time"
 
 	"github.com/filecoin-project/go-address"
-	"github.com/filecoin-project/go-bitfield"
 	"github.com/filecoin-project/go-jsonrpc/auth"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	verifreg "github.com/filecoin-project/go-state-types/builtin/v9/verifreg"
 	gscrypto "github.com/filecoin-project/go-state-types/crypto"
-	"github.com/filecoin-project/go-state-types/dline"
 	"github.com/filecoin-project/go-state-types/proof"
 
 	"github.com/filecoin-project/go-state-types/network"
@@ -447,61 +445,36 @@ func (c *ChainAPI) StateGetBeaconEntry(_ context.Context, _ abi.ChainEpoch) (*ty
 }
 
 // ----------------- Miner reads -----------------
+//
+// All StateMiner* / StateSector* handlers live in state_miner.go and
+// state_sector.go (Phase 5). Pure-formula compute-on-state methods (e.g.
+// StateMinerPreCommitDepositForPower) live in state_compute.go.
 
-// StateMinerInfo. Tier 1 (#8). Deferred: needs miner-state decoder per B11.
-func (c *ChainAPI) StateMinerInfo(_ context.Context, _ address.Address, _ types.TipSetKey) (api.MinerInfo, error) {
-	return api.MinerInfo{}, ErrNotImpl("StateMinerInfo", "miner sub-state decode deferred to Phase 5 (see PHASE2-BLOCKERS.md B11)")
-}
-func (c *ChainAPI) StateMinerPower(_ context.Context, _ address.Address, _ types.TipSetKey) (*api.MinerPower, error) {
-	return nil, ErrNotImpl("StateMinerPower", "power-actor state decode deferred to Phase 5")
-}
-func (c *ChainAPI) StateMinerSectors(_ context.Context, _ address.Address, _ *bitfield.BitField, _ types.TipSetKey) ([]*api.SectorOnChainInfo, error) {
-	return nil, ErrNotImpl("StateMinerSectors", "miner sector AMT walk deferred to Phase 5")
-}
-func (c *ChainAPI) StateMinerActiveSectors(_ context.Context, _ address.Address, _ types.TipSetKey) ([]*api.SectorOnChainInfo, error) {
-	return nil, ErrNotImpl("StateMinerActiveSectors", "needs miner sector decode")
-}
-func (c *ChainAPI) StateMinerProvingDeadline(_ context.Context, _ address.Address, _ types.TipSetKey) (*dline.Info, error) {
-	return nil, ErrNotImpl("StateMinerProvingDeadline", "needs miner state decode")
-}
-func (c *ChainAPI) StateMinerDeadlines(_ context.Context, _ address.Address, _ types.TipSetKey) ([]api.MinerDeadline, error) {
-	return nil, ErrNotImpl("StateMinerDeadlines", "needs miner state decode")
-}
-func (c *ChainAPI) StateMinerPartitions(_ context.Context, _ address.Address, _ uint64, _ types.TipSetKey) ([]api.Partition, error) {
-	return nil, ErrNotImpl("StateMinerPartitions", "needs miner state decode")
-}
-func (c *ChainAPI) StateMinerAvailableBalance(_ context.Context, _ address.Address, _ types.TipSetKey) (big.Int, error) {
-	return big.Zero(), ErrNotImpl("StateMinerAvailableBalance", "needs miner state decode")
-}
-func (c *ChainAPI) StateMinerAllocated(_ context.Context, _ address.Address, _ types.TipSetKey) (*bitfield.BitField, error) {
-	return nil, ErrNotImpl("StateMinerAllocated", "needs miner state decode")
-}
-func (c *ChainAPI) StateMinerFaults(_ context.Context, _ address.Address, _ types.TipSetKey) (bitfield.BitField, error) {
-	return bitfield.BitField{}, ErrNotImpl("StateMinerFaults", "needs miner state decode")
-}
-func (c *ChainAPI) StateMinerRecoveries(_ context.Context, _ address.Address, _ types.TipSetKey) (bitfield.BitField, error) {
-	return bitfield.BitField{}, ErrNotImpl("StateMinerRecoveries", "needs miner state decode")
-}
-func (c *ChainAPI) StateMinerSectorCount(_ context.Context, _ address.Address, _ types.TipSetKey) (api.MinerSectors, error) {
-	return api.MinerSectors{}, ErrNotImpl("StateMinerSectorCount", "needs miner state decode")
-}
-func (c *ChainAPI) StateMinerPreCommitDepositForPower(_ context.Context, _ address.Address, _ api.SectorPreCommitInfo, _ types.TipSetKey) (big.Int, error) {
-	return big.Zero(), ErrNotImpl("StateMinerPreCommitDepositForPower", "needs reward+power decode")
-}
-func (c *ChainAPI) StateMinerInitialPledgeForSector(_ context.Context, _ abi.ChainEpoch, _ abi.SectorSize, _ uint64, _ types.TipSetKey) (big.Int, error) {
-	return big.Zero(), ErrNotImpl("StateMinerInitialPledgeForSector", "needs reward+power decode")
-}
-func (c *ChainAPI) StateSectorPreCommitInfo(_ context.Context, _ address.Address, _ abi.SectorNumber, _ types.TipSetKey) (*api.SectorPreCommitOnChainInfo, error) {
-	return nil, ErrNotImpl("StateSectorPreCommitInfo", "needs miner state decode")
-}
-func (c *ChainAPI) StateSectorGetInfo(_ context.Context, _ address.Address, _ abi.SectorNumber, _ types.TipSetKey) (*api.SectorOnChainInfo, error) {
-	return nil, ErrNotImpl("StateSectorGetInfo", "needs miner state decode")
-}
-func (c *ChainAPI) StateSectorPartition(_ context.Context, _ address.Address, _ abi.SectorNumber, _ types.TipSetKey) (*api.SectorLocation, error) {
-	return nil, ErrNotImpl("StateSectorPartition", "needs miner state decode")
-}
 func (c *ChainAPI) StateMinerCreationDeposit(_ context.Context, _ types.TipSetKey) (big.Int, error) {
 	return big.Zero(), ErrNotImpl("StateMinerCreationDeposit", "needs reward+power decode")
+}
+
+// Compute-on-state methods (Phase 5 Part F). The pledge / collateral
+// formulas are implemented in state_compute.go; we keep no-op stubs here
+// only for methods not yet wired through.
+func (c *ChainAPI) StateMinerPreCommitDepositForPower(_ context.Context, _ address.Address, _ api.SectorPreCommitInfo, _ types.TipSetKey) (big.Int, error) {
+	return big.Zero(), ErrNotImpl("StateMinerPreCommitDepositForPower", "deferred to Phase 5 Part F")
+}
+func (c *ChainAPI) StateMinerInitialPledgeForSector(_ context.Context, _ abi.ChainEpoch, _ abi.SectorSize, _ uint64, _ types.TipSetKey) (big.Int, error) {
+	return big.Zero(), ErrNotImpl("StateMinerInitialPledgeForSector", "deferred to Phase 5 Part F")
+}
+
+// Sector / replica queries (Phase 5 Part E). Real impls live in
+// state_sector.go; these are typed stubs to keep the interface satisfied
+// until the file is added.
+func (c *ChainAPI) StateSectorPreCommitInfo(_ context.Context, _ address.Address, _ abi.SectorNumber, _ types.TipSetKey) (*api.SectorPreCommitOnChainInfo, error) {
+	return nil, ErrNotImpl("StateSectorPreCommitInfo", "see state_sector.go")
+}
+func (c *ChainAPI) StateSectorGetInfo(_ context.Context, _ address.Address, _ abi.SectorNumber, _ types.TipSetKey) (*api.SectorOnChainInfo, error) {
+	return nil, ErrNotImpl("StateSectorGetInfo", "see state_sector.go")
+}
+func (c *ChainAPI) StateSectorPartition(_ context.Context, _ address.Address, _ abi.SectorNumber, _ types.TipSetKey) (*api.SectorLocation, error) {
+	return nil, ErrNotImpl("StateSectorPartition", "see state_sector.go")
 }
 
 // ----------------- Market / verifreg -----------------
