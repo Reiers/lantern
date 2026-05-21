@@ -40,6 +40,31 @@ Filecoin's state is a content-addressed IPLD merkle tree (HAMTs and AMTs all the
 
 Lantern's bet: most users care about a small slice of state, and that slice can be fetched on demand from any honest peer while the cryptography stays airtight.
 
+## Do I need to run a Filecoin node?
+
+**No.** Lantern is the node, in the sense that matters.
+
+Filecoin's state is content-addressed: every IPLD block has a cryptographic CID, and any block claiming to be at a given CID is provable by hashing it. That means Lantern can ask **anyone** — our gateway, a public IPFS peer, a stranger's Forest node, a friend's Lotus — for the bytes it needs, hash them, and verify them against the CID. The peer that served the bytes cannot lie. They can refuse to answer (denial of service), but they cannot give you wrong data, because content addressing makes lying detectable.
+
+So running Lantern is closer to running your own full node — in security terms — than to using an RPC provider. The difference is that Lantern fetches the ~1 GB of headers, F3 certs, DRAND beacons, and actor code on first run, then pulls state on demand as you query it. No 76 GB snapshot, no hours of sync, no trust in any third party for the data you read.
+
+| Approach                                  | Trust model                                                                                  |
+|-------------------------------------------|----------------------------------------------------------------------------------------------|
+| Glif RPC, Ankr, web wallets               | Trust the provider's node. They control your view of the chain.                              |
+| Running your own Lotus or Forest          | Trust the math, hold all the state (76 GB+, hours to sync).                                  |
+| **Lantern**                               | **Trust the math, hold ~1 GB. Get data from anyone, verify everything.**                     |
+
+Lantern's gateway at `gateway.lantern.reiers.io` is a **convenience**, not a trust requirement. It exists to make first-run fast for users who don't yet have peers connected. Once Lantern is bootstrapped, it can pull blocks from any libp2p Bitswap peer that has them; the gateway is just one such peer. Every byte is verified locally regardless of source.
+
+### What are the soft trust points?
+
+Two, named explicitly:
+
+1. **The embedded genesis CID and F3 trust anchor** — baked into the binary at build time. If a malicious build is shipped, those could be wrong. Mitigations on the roadmap: reproducible builds, multiple independent maintainers re-pinning, community cross-validation of the anchor at install time.
+2. **The optional FVM bridge** (off by default) — if you opt in, Lantern delegates the small subset of VM operations its pure-Go shell can't execute (EVM contracts, some complex builtin actor methods) to a node you configure. Documented as a soft-trust point in [`TRUST-MODEL.md`](TRUST-MODEL.md).
+
+For everything else — wallet, balance queries, miner info, market deals, deal status, paych vouchers, state of any actor — zero third-party trust. Just BLS signatures, content-addressed blocks, and your local CPU verifying the math.
+
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │ Lantern node (~1 GB boot, <100 MB steady state)                  │
