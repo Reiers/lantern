@@ -464,18 +464,7 @@ func (c *ChainAPI) StateMinerInitialPledgeForSector(_ context.Context, _ abi.Cha
 	return big.Zero(), ErrNotImpl("StateMinerInitialPledgeForSector", "deferred to Phase 5 Part F")
 }
 
-// Sector / replica queries (Phase 5 Part E). Real impls live in
-// state_sector.go; these are typed stubs to keep the interface satisfied
-// until the file is added.
-func (c *ChainAPI) StateSectorPreCommitInfo(_ context.Context, _ address.Address, _ abi.SectorNumber, _ types.TipSetKey) (*api.SectorPreCommitOnChainInfo, error) {
-	return nil, ErrNotImpl("StateSectorPreCommitInfo", "see state_sector.go")
-}
-func (c *ChainAPI) StateSectorGetInfo(_ context.Context, _ address.Address, _ abi.SectorNumber, _ types.TipSetKey) (*api.SectorOnChainInfo, error) {
-	return nil, ErrNotImpl("StateSectorGetInfo", "see state_sector.go")
-}
-func (c *ChainAPI) StateSectorPartition(_ context.Context, _ address.Address, _ abi.SectorNumber, _ types.TipSetKey) (*api.SectorLocation, error) {
-	return nil, ErrNotImpl("StateSectorPartition", "see state_sector.go")
-}
+// Sector / replica queries live in state_sector.go (Phase 5 Part E).
 
 // ----------------- Market / verifreg -----------------
 //
