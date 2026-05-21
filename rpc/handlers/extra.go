@@ -17,6 +17,7 @@ import (
 	"github.com/filecoin-project/go-state-types/network"
 	"github.com/ipfs/go-cid"
 
+	"github.com/Reiers/lantern/api"
 	"github.com/Reiers/lantern/chain/types"
 	"github.com/Reiers/lantern/state/actors"
 )
@@ -200,4 +201,29 @@ func (c *ChainAPI) NetListening(_ context.Context) (bool, error) {
 // Ethereum-compatible block-number mapping is needed.
 func (c *ChainAPI) EthBlockNumber(_ context.Context) (string, error) {
 	return "0x0", nil
+}
+
+// NetBandwidthStats returns Lantern's libp2p bandwidth counters. The shape
+// matches lotus api.FullNode.NetBandwidthStats which returns
+// github.com/libp2p/go-libp2p/core/metrics.Stats. We mirror the shape via
+// api.NetBandwidthStats so the interface doesn't depend on libp2p.
+//
+// V1 returns zeros (Lantern's libp2p host doesn't expose a bandwidth meter
+// on the RPC surface yet). Phase 10 wires the real BandwidthCounter from
+// net/libp2p.
+func (c *ChainAPI) NetBandwidthStats(_ context.Context) (api.NetBandwidthStats, error) {
+	return api.NetBandwidthStats{}, nil
+}
+
+// NetAutoNatStatus returns the NAT reachability status. Lantern advertises
+// itself as Unknown (libp2p Reachability value 0) since we don't run an
+// AutoNAT service and don't track our reachability.
+//
+// Curio's webui treats Unknown as a non-warning state; the field is
+// displayed verbatim in the Chain Node Network panel.
+func (c *ChainAPI) NetAutoNatStatus(_ context.Context) (api.NatInfo, error) {
+	return api.NatInfo{
+		Reachability: 0, // libp2p network.ReachabilityUnknown
+		PublicAddrs:  nil,
+	}, nil
 }

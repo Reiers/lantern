@@ -167,7 +167,25 @@ type FullNode interface {
 	NetAgentVersion(ctx context.Context, peerID string) (string, error)
 	NetConnectedness(ctx context.Context, peerID string) (int, error)
 	NetListening(ctx context.Context) (bool, error)
+	NetBandwidthStats(ctx context.Context) (NetBandwidthStats, error)
+	NetAutoNatStatus(ctx context.Context) (NatInfo, error)
 	EthBlockNumber(ctx context.Context) (string, error)
+}
+
+// NetBandwidthStats mirrors libp2p/core/metrics.Stats. Re-declared here so
+// the API interface doesn't pull libp2p into every consumer's import graph.
+type NetBandwidthStats struct {
+	TotalIn  int64
+	TotalOut int64
+	RateIn   float64
+	RateOut  float64
+}
+
+// NatInfo mirrors lotus api.NatInfo. Reachability is the integer value of
+// libp2p network.Reachability (0=Unknown, 1=Public, 2=Private).
+type NatInfo struct {
+	Reachability int
+	PublicAddrs  []string
 }
 
 // KeyType is wallet.KeyType, re-exported so callers don't pull wallet into
