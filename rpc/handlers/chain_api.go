@@ -454,15 +454,8 @@ func (c *ChainAPI) StateMinerCreationDeposit(_ context.Context, _ types.TipSetKe
 	return big.Zero(), ErrNotImpl("StateMinerCreationDeposit", "needs reward+power decode")
 }
 
-// Compute-on-state methods (Phase 5 Part F). The pledge / collateral
-// formulas are implemented in state_compute.go; we keep no-op stubs here
-// only for methods not yet wired through.
-func (c *ChainAPI) StateMinerPreCommitDepositForPower(_ context.Context, _ address.Address, _ api.SectorPreCommitInfo, _ types.TipSetKey) (big.Int, error) {
-	return big.Zero(), ErrNotImpl("StateMinerPreCommitDepositForPower", "deferred to Phase 5 Part F")
-}
-func (c *ChainAPI) StateMinerInitialPledgeForSector(_ context.Context, _ abi.ChainEpoch, _ abi.SectorSize, _ uint64, _ types.TipSetKey) (big.Int, error) {
-	return big.Zero(), ErrNotImpl("StateMinerInitialPledgeForSector", "deferred to Phase 5 Part F")
-}
+// StateMinerPreCommitDepositForPower / StateMinerInitialPledgeForSector
+// live in state_compute.go (Phase 5 Part F).
 
 // Sector / replica queries live in state_sector.go (Phase 5 Part E).
 
@@ -481,12 +474,8 @@ func (c *ChainAPI) StateGetAllocationForPendingDeal(_ context.Context, _ abi.Dea
 func (c *ChainAPI) StateListMessages(_ context.Context, _ *api.MessageMatch, _ types.TipSetKey, _ abi.ChainEpoch) ([]cid.Cid, error) {
 	return nil, ErrNotImpl("StateListMessages", "heavy scan deferred to Phase 5")
 }
-func (c *ChainAPI) StateCirculatingSupply(_ context.Context, _ types.TipSetKey) (abi.TokenAmount, error) {
-	return big.Zero(), ErrNotImpl("StateCirculatingSupply", "vesting math deferred to Phase 5")
-}
-func (c *ChainAPI) StateVMCirculatingSupplyInternal(_ context.Context, _ types.TipSetKey) (api.CirculatingSupply, error) {
-	return api.CirculatingSupply{}, ErrNotImpl("StateVMCirculatingSupplyInternal", "vesting math deferred")
-}
+// StateCirculatingSupply / StateVMCirculatingSupplyInternal live in
+// state_compute.go (Phase 5 Part F).
 
 // ----------------- Wait / search / call -----------------
 
