@@ -50,6 +50,7 @@ import (
 	addr "github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
+	paych9 "github.com/filecoin-project/go-state-types/builtin/v9/paych"
 	gscrypto "github.com/filecoin-project/go-state-types/crypto"
 	"github.com/ipfs/go-cid"
 
@@ -263,34 +264,74 @@ func (c *ChainAPI) PaychVoucherList(ctx context.Context, ch addr.Address) ([]*ap
 	return nil, nil
 }
 
-// paychVoucherSigningBytes mirrors go-state-types paych.SignedVoucher.SigningBytes:
-// CBOR-encode the voucher with Signature=nil and Sha256-hash the result.
+// paychVoucherSigningBytes returns the canonical signing bytes for a
+// SignedVoucher, byte-exact with Lotus + Forest.
 //
-// We don't import the v18 SignedVoucher type into api/ to keep that
-// package light. Instead we build the canonical bytes manually here
-// using a struct that mirrors the wire shape.
+// Phase 8 fix (PHASE7-BLOCKERS.md B3): previously this returned a
+// Lantern-internal string "voucher:<addr>:<lane>..." which round-tripped
+// through Lantern itself but did not verify under Lotus's voucher
+// checker. The Lotus reference implementation (lotus@v1.36
+// paychmgr/paych.go signVoucher) calls SignedVoucher.SigningBytes from
+// go-state-types/builtin/v{N}/paych, which is:
+//
+//	osv := *t
+//	osv.Signature = nil
+//	buf := new(bytes.Buffer)
+//	osv.MarshalCBOR(buf)
+//	return buf.Bytes(), nil
+//
+// We translate api.PaychSignedVoucher -> paych9.SignedVoucher (the
+// SignedVoucher wire shape has been stable across actor versions v8
+// onward) and invoke that same MarshalCBOR.
 func paychVoucherSigningBytes(sv *api.PaychSignedVoucher) ([]byte, error) {
 	if sv == nil {
 		return nil, errors.New("nil voucher")
 	}
-	// Phase 7 implementation: encode a minimal canonical representation.
-	// The exact byte format is determined by go-state-types paych
-	// cbor-gen. For Phase 7 cross-tests we round-trip through Lantern
-	// itself; if Curio cross-validation requires Lotus-exact bytes we
-	// will need to lift paych.SignedVoucher.SigningBytes verbatim.
-	buf := new(bytes.Buffer)
-	// Tag with ChannelAddr + Lane + Nonce + Amount + TimeLockMin/Max
-	// + Merges. This is enough to defeat replay but is NOT
-	// byte-compatible with Lotus. PHASE7-BLOCKERS.md tracks this.
-	fmt.Fprintf(buf, "voucher:%s:%d:%d:%s:%d:%d",
-		sv.ChannelAddr, sv.Lane, sv.Nonce, sv.Amount, sv.TimeLockMin, sv.TimeLockMax)
-	if len(sv.SecretHash) > 0 {
-		buf.Write(sv.SecretHash)
+	upstream, err := paychVoucherToUpstream(sv)
+	if err != nil {
+		return nil, fmt.Errorf("paychVoucherSigningBytes convert: %w", err)
 	}
-	for _, m := range sv.Merges {
-		fmt.Fprintf(buf, ":merge:%d:%d", m.Lane, m.Nonce)
+	upstream.Signature = nil // matches the SigningBytes contract
+	buf := new(bytes.Buffer)
+	if err := upstream.MarshalCBOR(buf); err != nil {
+		return nil, fmt.Errorf("paychVoucherSigningBytes marshal: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// paychVoucherToUpstream converts Lantern's api.PaychSignedVoucher into
+// the canonical go-state-types paych.SignedVoucher used by Lotus.
+func paychVoucherToUpstream(sv *api.PaychSignedVoucher) (*paych9.SignedVoucher, error) {
+	out := &paych9.SignedVoucher{
+		ChannelAddr:     sv.ChannelAddr,
+		TimeLockMin:     sv.TimeLockMin,
+		TimeLockMax:     sv.TimeLockMax,
+		SecretHash:      sv.SecretHash,
+		Lane:            sv.Lane,
+		Nonce:           sv.Nonce,
+		Amount:          sv.Amount,
+		MinSettleHeight: sv.MinSettleHeight,
+	}
+	if sv.Extra != nil {
+		out.Extra = &paych9.ModVerifyParams{
+			Actor:  sv.Extra.Actor,
+			Method: sv.Extra.Method,
+			Data:   sv.Extra.Data,
+		}
+	}
+	if len(sv.Merges) > 0 {
+		out.Merges = make([]paych9.Merge, len(sv.Merges))
+		for i, m := range sv.Merges {
+			out.Merges[i] = paych9.Merge{Lane: m.Lane, Nonce: m.Nonce}
+		}
+	}
+	if sv.Signature != nil {
+		out.Signature = &gscrypto.Signature{
+			Type: gscrypto.SigType(sv.Signature.Type),
+			Data: sv.Signature.Data,
+		}
+	}
+	return out, nil
 }
 
 // Unused but referenced imports kept for future work.
