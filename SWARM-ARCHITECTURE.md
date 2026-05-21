@@ -51,9 +51,9 @@ For content-addressed Lantern state queries:
 
 Multiple peers improve **availability** and **speed** (parallel requests, geographic distribution, load shedding) but they are not needed for **correctness**. This is the same property that lets Bitcoin SPV clients trust headers from any peer that produces a valid PoW chain.
 
-## What we ship in V1.2
+## What we ship in V1.2 (Phase 10 — DELIVERED)
 
-### 1. Activate Bitswap properly
+### 1. Activate Bitswap properly — ✅ DELIVERED
 
 Phase 2's `net/bitswap` stub has a 100ms timeout because mainnet bootstrap peers don't reliably serve historical state CIDs. Phase 10 work:
 
@@ -61,7 +61,19 @@ Phase 2's `net/bitswap` stub has a 100ms timeout because mainnet bootstrap peers
 - Add a Bitswap session reuse layer so successive lookups in the same query (HAMT walk = 4-8 sequential blocks) share a session and warm-pool of peers
 - Tune Bitswap WANT-HAVE / WANT-BLOCK negotiation for HAMT walks (small, sequential, deterministic CIDs)
 
-### 2. State-serving "beacon" nodes
+Phase 10 lifted `github.com/ipfs/boxo/bitswap` as Lantern's primary fetch path. The daemon now runs a real Bitswap client wired against the live libp2p host (`net/libp2p`), with progressive deadlines: 1.5s for the preferred-peer fast stage, 5s for the full-swarm broadcast. Sessions reuse warm peer pools for HAMT-walk patterns.
+
+The combined fetcher order in `cmd/lantern daemon` is now:
+
+1. local in-memory cache (`state/hamt.MemBlockStore`)
+2. **Bitswap from preferred peers** (`--bitswap-peers` multiaddrs, 1.5s fast deadline)
+3. **Bitswap from full swarm** (5s deadline, broadcast WANT-HAVE)
+4. HTTP gateway (last-resort fallback, 5s)
+5. Glif RPC (deep fallback, 20s)
+
+Each layer's success short-circuits the rest. Operators can disable Bitswap with `--bitswap=false` (e.g. for fully offline cache-warming tests). The `--metrics` Prometheus endpoint exposes per-layer hit counts (`lantern_fetch_total{source=...}`) plus Bitswap-specific block/byte counters.
+
+### 2. State-serving "beacon" nodes — ✅ DELIVERED (purpose-built variant)
 
 A **Lantern beacon** is a libp2p node that aggressively serves recent state CIDs to the swarm. It is not Lantern-specific: it's a Forest or Lotus configured to participate as a Bitswap provider for state CIDs.
 
@@ -73,23 +85,36 @@ Two flavors:
 - Pre-existing infrastructure, near-zero marginal cost for the operator
 - Targets: ChainSafe, Glif, Protocol Labs Storacha, large SPs running Curio
 
-**Lightweight beacon** (purpose-built):
+**Lightweight beacon** (purpose-built) — ✅ SHIPPED:
 - `lantern beacon` subcommand: read-only Lantern node that aggressively caches state CIDs and serves them via Bitswap
-- ~5 GB disk for hot state cache, ~2 GB RAM
+- ~5 GB disk for hot state cache (Badger v4, pure Go), ~2 GB RAM
 - Single-binary, no Forest or Lotus required
 - Run on a Hetzner VM for €5/mo
 - Target: community operators, third-party RPC providers, security researchers
 
-We run 2-3 of these on lex / Hetzner so the network bootstraps with some always-available beacons. Third parties operate their own.
+Usage:
 
-### 3. DHT-based beacon discovery
+```sh
+lantern beacon \
+    --cache-dir /var/lib/lantern-beacon \
+    --cache-size 5GiB \
+    --listen /ip4/0.0.0.0/tcp/4001,/ip4/0.0.0.0/udp/4001/quic-v1 \
+    --dht-announce \
+    --metrics 127.0.0.1:4711
+```
+
+The beacon joins the swarm, announces `lantern/beacon/v1` in the DHT, persistently caches blocks via Badger, and serves Bitswap from cache. Cache-miss backfill from an upstream gateway is scaffolded (`--gateway`) pending upstream Bitswap wantlist subscriber API.
+
+We will run 2-3 of these on lex / Hetzner once Phase 10 lands in production so the network has always-available beacons. Third parties operate their own.
+
+### 3. DHT-based beacon discovery — ✅ DELIVERED
 
 Phase 6 already shipped Kademlia DHT (`net/libp2p/dht.go`). V1.2 uses it for beacon discovery:
 
-- Each beacon advertises a well-known service rendezvous: `lantern/beacon/v1`
-- Lantern clients query the DHT for that rendezvous, get a fresh list of beacons
+- Each beacon advertises a well-known service rendezvous: `lantern/beacon/v1` (the constant `BeaconRendezvous` in `cmd/lantern/beacon.go`)
+- Beacons re-advertise every TTL/2 (or hourly fallback) so stale entries don't pile up
+- Lantern clients can query the DHT for that rendezvous and use the returned `AddrInfo` list as their `--bitswap-peers` preferred set. (Client-side automatic discovery loop is a V1.3 polish.)
 - No central registry. No coordination needed. Beacons come and go organically.
-- Lantern picks the lowest-latency 3-5 beacons and uses them as preferred Bitswap peers, with full-swarm fallback if those are unresponsive
 
 ### 4. Fallback hierarchy
 
@@ -162,18 +187,20 @@ The swarm architecture makes Lantern strictly more robust without weakening any 
 
 ## Roadmap
 
-**V1.1 (current Phase 9 work):**
+**V1.1 (Phase 9 work) — SHIPPED:**
 - ChainNotify + daemon header-store wiring
 - Real Curio binary binding test
 - 71/71 RPC method coverage
 
-**V1.2 (Phase 10):**
-- Bitswap fully activated as primary fetch path
-- `lantern beacon` subcommand
-- DHT beacon rendezvous (`lantern/beacon/v1`)
-- Documentation for Forest/Lotus operators to enable beacon mode
+**V1.2 (Phase 10) — SHIPPED:**
+- Bitswap fully activated as primary fetch path (Part B)
+- `lantern beacon` subcommand (Part C)
+- DHT beacon rendezvous (`lantern/beacon/v1`) (Part C)
+- Live libp2p stats exposed via Curio webui (Part A, Part D)
 
-**V1.3 (Phase 11):**
+**V1.3 (Phase 11) — next:**
+- Client-side DHT beacon discovery (auto-populate `--bitswap-peers` from the DHT rendezvous)
+- Beacon backfill: hook into upstream Bitswap wantlist to pull missing CIDs from the gateway proactively
 - Install-time anchor cross-validation against 3+ beacons
 - Multi-gateway fallback in HTTP layer (operator-configurable alternates)
 - Metrics dashboard showing swarm health, beacon count, hit rates
