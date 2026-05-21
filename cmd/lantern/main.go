@@ -42,6 +42,7 @@ import (
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/chain/types"
 	"github.com/Reiers/lantern/net/combined"
+	"github.com/Reiers/lantern/net/glif"
 	"github.com/Reiers/lantern/net/hsync"
 	"github.com/Reiers/lantern/rpc/handlers"
 	"github.com/Reiers/lantern/rpc/server"
@@ -136,42 +137,56 @@ func openWallet() (*wallet.Wallet, error) {
 	return wallet.New(context.Background(), dir, passphrase())
 }
 
-// gatewayClient builds the (cache + gateway) BlockGetter chain that's used
-// by every state read in the CLI.
+// gatewayClient builds the (cache + gateway + glif fallback) BlockGetter
+// chain that's used by every state read in the CLI.
 func gatewayClient(gw string) (hamt.BlockGetter, *combined.Fetcher) {
 	cache := hamt.NewMemBlockStore()
 	httpc := hsync.NewClient([]string{gw}, 20*time.Second)
+	glifC := glif.New("", 20*time.Second)
 	f := combined.New(cache,
-		combined.Source{Name: "gateway", Getter: httpc, Timeout: 20 * time.Second},
+		combined.Source{Name: "gateway", Getter: httpc, Timeout: 5 * time.Second},
+		combined.Source{Name: "glif", Getter: glifC, Timeout: 20 * time.Second},
 	)
 	return f, f
 }
 
-// fetchTrustedHead probes the gateway's /state/root endpoint and returns
-// a header-only TrustedRoot.
+// fetchTrustedHead probes the primary gateway's /state/root endpoint,
+// falling back to Glif's Filecoin.ChainHead when the gateway is down.
+// Both responses are CID-verified before becoming a TrustedRoot.
 func fetchTrustedHead(ctx context.Context, gw string) (*trustedroot.TrustedRoot, error) {
-	hc := hsync.NewClient([]string{gw}, 10*time.Second)
+	hc := hsync.NewClient([]string{gw}, 5*time.Second)
 	head, err := hc.GetStateHead(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("probe /state/root on %s: %w", gw, err)
-	}
-	stateRoot, err := cid.Parse(head.StateRoot)
-	if err != nil {
-		return nil, fmt.Errorf("parse stateRoot %s: %w", head.StateRoot, err)
-	}
-	tskCids := make([]cid.Cid, 0, len(head.TipsetKey))
-	for _, s := range head.TipsetKey {
-		c, err := cid.Parse(s)
-		if err == nil {
-			tskCids = append(tskCids, c)
+	if err == nil {
+		stateRoot, e := cid.Parse(head.StateRoot)
+		if e == nil {
+			tskCids := make([]cid.Cid, 0, len(head.TipsetKey))
+			for _, s := range head.TipsetKey {
+				if c, e := cid.Parse(s); e == nil {
+					tskCids = append(tskCids, c)
+				}
+			}
+			pw, _ := big.FromString(head.ParentWeight)
+			return &trustedroot.TrustedRoot{
+				Epoch:        abi.ChainEpoch(head.Epoch),
+				StateRoot:    stateRoot,
+				TipSetKey:    types.NewTipSetKey(tskCids...),
+				ParentWeight: pw,
+			}, nil
 		}
 	}
-	pw, _ := big.FromString(head.ParentWeight)
+	// Fallback to Glif.
+	fmt.Fprintln(os.Stderr, "(gateway unavailable; falling back to Glif RPC)")
+	gc := glif.New("", 10*time.Second)
+	gh, err := gc.FetchHead(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("both gateway and Glif failed: %w", err)
+	}
 	return &trustedroot.TrustedRoot{
-		Epoch:        abi.ChainEpoch(head.Epoch),
-		StateRoot:    stateRoot,
-		TipSetKey:    types.NewTipSetKey(tskCids...),
-		ParentWeight: pw,
+		Epoch:        gh.Epoch,
+		StateRoot:    gh.StateRoot,
+		TipSetKey:    gh.TipSetKey,
+		ParentWeight: gh.ParentWeight,
+		ParentMessageReceipts: gh.ParentMessageReceipts,
 	}, nil
 }
 

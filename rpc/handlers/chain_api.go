@@ -161,6 +161,10 @@ func (c *ChainAPI) ChainHead(_ context.Context) (*types.TipSet, error) {
 // (Lotus, Curio) read the right fields. The header's CID becomes the
 // TipSet key.
 func synthesizeTipSet(tr *trustedroot.TrustedRoot) *types.TipSet {
+	pmr := tr.ParentMessageReceipts
+	if !pmr.Defined() {
+		pmr = tr.StateRoot // placeholder if not set
+	}
 	bh := &types.BlockHeader{
 		Miner:                 mustZeroIDAddr(),
 		Ticket:                &types.Ticket{VRFProof: []byte("lantern-synth")},
@@ -171,7 +175,7 @@ func synthesizeTipSet(tr *trustedroot.TrustedRoot) *types.TipSet {
 		ParentWeight:          tr.ParentWeight,
 		Height:                tr.Epoch,
 		ParentStateRoot:       tr.StateRoot,
-		ParentMessageReceipts: tr.ParentMessageReceipts,
+		ParentMessageReceipts: pmr,
 		Messages:              tr.StateRoot, // placeholder
 		BLSAggregate:          &gscrypto.Signature{Type: gscrypto.SigTypeBLS, Data: make([]byte, 96)},
 		Timestamp:             uint64(time.Now().Unix()),
