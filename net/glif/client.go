@@ -80,7 +80,13 @@ func (c *Client) rpcCall(ctx context.Context, method string, params []any, out a
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(all, &rr); err != nil {
+	// Use a streaming decoder rather than Unmarshal so we tolerate stray
+	// bytes after the JSON document. Glif's edge occasionally returns
+	// the body doubled or appends a stray newline under load — the
+	// envelope itself is always the FIRST JSON document, so we stop
+	// after the first Decode call.
+	dec := json.NewDecoder(bytes.NewReader(all))
+	if err := dec.Decode(&rr); err != nil {
 		return fmt.Errorf("decode envelope: %w (len=%d body=%s tail=%s)", err, len(all), truncate(all), tailOf(all, 200))
 	}
 	if rr.Error != nil {
