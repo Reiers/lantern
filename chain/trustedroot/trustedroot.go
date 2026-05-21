@@ -321,6 +321,39 @@ func Persist(db *badger.DB, tr *TrustedRoot) error {
 	})
 }
 
+// FromF3State produces a TrustedRoot from an F3 subscriber's verified
+// state. This is the Phase 6 "activated cert chain" path: instead of
+// running the legacy Build pipeline against header sources, we trust the
+// subscriber's `(Instance, LatestChain)` which was walked forward from the
+// embedded anchor with full BLS-aggregate verification at every step.
+//
+// `headers` is used to fetch the canonical tipset at the F3-finalized
+// epoch so we can populate Lantern-side fields (StateRoot,
+// ParentMessageReceipts, ParentWeight). Pass nil to defer those fields
+// (acceptable when the caller only needs F3Instance / F3Cert).
+func FromF3State(ctx context.Context, finalizedTSK ltypes.TipSetKey, finalizedEpoch abi.ChainEpoch, instance uint64, latest *certs.FinalityCertificate, headers HeaderSource) (*TrustedRoot, error) {
+	tr := &TrustedRoot{
+		Epoch:      finalizedEpoch,
+		TipSetKey:  finalizedTSK,
+		F3Instance: instance,
+		F3Cert:     latest,
+		AcceptedAt: time.Now().UTC(),
+	}
+	if headers != nil {
+		ts, err := headers.Tipset(ctx, finalizedEpoch)
+		if err == nil && ts != nil && len(ts.Blocks()) > 0 {
+			b := ts.Blocks()[0]
+			tr.StateRoot = b.ParentStateRoot
+			tr.ParentMessageReceipts = b.ParentMessageReceipts
+			tr.ParentWeight = b.ParentWeight
+			if n := len(b.BeaconEntries); n > 0 {
+				tr.BeaconRound = b.BeaconEntries[n-1].Round
+			}
+		}
+	}
+	return tr, nil
+}
+
 // Load returns the latest persisted TrustedRoot, or (nil, badger.ErrKeyNotFound)
 // if no root was previously stored.
 func Load(_ context.Context, db *badger.DB) (*TrustedRoot, error) {
