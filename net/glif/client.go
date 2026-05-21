@@ -149,6 +149,84 @@ func (c *Client) FetchHead(ctx context.Context) (*Head, error) {
 	}, nil
 }
 
+// FetchTipsetByHeight queries Filecoin.ChainGetTipSetByHeight at the given
+// epoch, returning the block CIDs and (parent-state-root, parent-weight) of
+// the first block in the tipset. Caller is responsible for fetching each
+// block CID via Get(...) and verifying.
+func (c *Client) FetchTipsetByHeight(ctx context.Context, h abi.ChainEpoch) (*Head, error) {
+	var raw struct {
+		Cids   []struct {
+			Slash string `json:"/"`
+		} `json:"Cids"`
+		Blocks []struct {
+			ParentStateRoot       struct{ Slash string `json:"/"` } `json:"ParentStateRoot"`
+			ParentMessageReceipts struct{ Slash string `json:"/"` } `json:"ParentMessageReceipts"`
+			ParentWeight          string                              `json:"ParentWeight"`
+			Height                abi.ChainEpoch                      `json:"Height"`
+		} `json:"Blocks"`
+		Height abi.ChainEpoch `json:"Height"`
+	}
+	params := []any{int64(h), []any{}}
+	if err := c.rpcCall(ctx, "Filecoin.ChainGetTipSetByHeight", params, &raw); err != nil {
+		return nil, err
+	}
+	if len(raw.Blocks) == 0 {
+		return nil, fmt.Errorf("glif returned empty tipset at height %d", h)
+	}
+	first := raw.Blocks[0]
+	sr, err := cid.Parse(first.ParentStateRoot.Slash)
+	if err != nil {
+		return nil, fmt.Errorf("parse stateRoot: %w", err)
+	}
+	pmr, _ := cid.Parse(first.ParentMessageReceipts.Slash)
+	pw, _ := big.FromString(first.ParentWeight)
+	cids := make([]cid.Cid, 0, len(raw.Cids))
+	for _, c := range raw.Cids {
+		cc, _ := cid.Parse(c.Slash)
+		cids = append(cids, cc)
+	}
+	return &Head{
+		Epoch:                 raw.Height,
+		TipSetKey:             types.NewTipSetKey(cids...),
+		StateRoot:             sr,
+		ParentWeight:          pw,
+		ParentMessageReceipts: pmr,
+	}, nil
+}
+
+// FetchBlock fetches a single BlockHeader by CID. We use ChainReadObj
+// (which returns the raw CBOR bytes) and decode locally. This avoids the
+// JSON serialisation roundtrip in ChainGetBlock and is byte-stable.
+func (c *Client) FetchBlock(ctx context.Context, k cid.Cid) (*types.BlockHeader, error) {
+	raw, err := c.Get(ctx, k)
+	if err != nil {
+		return nil, err
+	}
+	bh, err := types.DecodeBlock(raw)
+	if err != nil {
+		return nil, fmt.Errorf("decode block %s: %w", k, err)
+	}
+	return bh, nil
+}
+
+// HeadEpoch satisfies header/store.RPCSource.
+func (c *Client) HeadEpoch(ctx context.Context) (abi.ChainEpoch, error) {
+	h, err := c.FetchHead(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return h.Epoch, nil
+}
+
+// TipsetCIDsByHeight satisfies header/store.RPCSource.
+func (c *Client) TipsetCIDsByHeight(ctx context.Context, h abi.ChainEpoch) ([]cid.Cid, error) {
+	ts, err := c.FetchTipsetByHeight(ctx, h)
+	if err != nil {
+		return nil, err
+	}
+	return ts.TipSetKey.Cids(), nil
+}
+
 // Get implements state/hamt.BlockGetter via Filecoin.ChainReadObj.
 func (c *Client) Get(ctx context.Context, k cid.Cid) ([]byte, error) {
 	var raw string
