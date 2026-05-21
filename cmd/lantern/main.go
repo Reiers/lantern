@@ -73,6 +73,8 @@ func main() {
 		err = cmdInit(rest)
 	case "daemon":
 		err = cmdDaemon(rest)
+	case "beacon":
+		err = cmdBeacon(rest)
 	case "wallet":
 		err = cmdWallet(rest)
 	case "chain":
@@ -105,6 +107,7 @@ USAGE
 COMMANDS
   init                                Interactive setup wizard
   daemon [--gateway <url>]            Run RPC server (default 127.0.0.1:1234)
+  beacon [--cache-dir <p>]            Run a Lantern beacon (Bitswap-only, no RPC)
   wallet new --type={bls|secp|delegated}
   wallet list
   wallet balance <addr>
