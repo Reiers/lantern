@@ -303,10 +303,11 @@ func cmdDaemon(args []string) error {
 		// is hamt-shaped (only Get), but Sync needs RPC-shaped
 		// HeadEpoch/TipsetCIDsByHeight/FetchBlock — that's exactly what
 		// glif.Client exposes.
-		src := glif.New("", 20*time.Second)
+		src := glif.New("", 8*time.Second)
 		sync = hstore.NewSync(store, src, hstore.SyncOptions{
-			Interval:     *syncInterval,
-			MaxBacktrack: 60,
+			Interval:       *syncInterval,
+			MaxBacktrack:   60,
+			BootstrapDepth: 3, // small cold start; ongoing polls catch up
 		})
 		if err := sync.Start(ctx); err != nil {
 			return fmt.Errorf("start header sync: %w", err)

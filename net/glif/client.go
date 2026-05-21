@@ -81,7 +81,7 @@ func (c *Client) rpcCall(ctx context.Context, method string, params []any, out a
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(all, &rr); err != nil {
-		return fmt.Errorf("decode envelope: %w (body %s)", err, truncate(all))
+		return fmt.Errorf("decode envelope: %w (len=%d body=%s tail=%s)", err, len(all), truncate(all), tailOf(all, 200))
 	}
 	if rr.Error != nil {
 		return fmt.Errorf("glif: %s (code=%d)", rr.Error.Message, rr.Error.Code)
@@ -90,6 +90,13 @@ func (c *Client) rpcCall(ctx context.Context, method string, params []any, out a
 		return nil
 	}
 	return json.Unmarshal(rr.Result, out)
+}
+
+func tailOf(b []byte, n int) string {
+	if len(b) > n {
+		return "..." + string(b[len(b)-n:])
+	}
+	return string(b)
 }
 
 func truncate(b []byte) string {

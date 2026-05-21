@@ -52,6 +52,12 @@ type SyncOptions struct {
 	// MaxBacktrack caps how far back the agent walks on each poll
 	// (defends against unbounded catch-up cost). Default 30.
 	MaxBacktrack abi.ChainEpoch
+	// BootstrapDepth is how many tipsets to ingest on the very first
+	// poll when the store is empty. Defaults to MaxBacktrack. Operators
+	// running against rate-limited public RPC providers (Glif) should
+	// set this small (1–3) so startup is quick; subsequent polls catch
+	// up incrementally.
+	BootstrapDepth abi.ChainEpoch
 	// OnReorg is fired (after Store.SetHead) when the new head's parent
 	// chain replaced canonical pointers at one or more epochs. The
 	// argument is the divergence epoch (the deepest epoch whose
@@ -88,6 +94,9 @@ func NewSync(s *Store, src RPCSource, opts SyncOptions) *Sync {
 	}
 	if opts.MaxBacktrack == 0 {
 		opts.MaxBacktrack = 30
+	}
+	if opts.BootstrapDepth == 0 {
+		opts.BootstrapDepth = opts.MaxBacktrack
 	}
 	return &Sync{store: s, src: src, opts: opts}
 }
@@ -165,8 +174,15 @@ func (s *Sync) pollAndApply(ctx context.Context) error {
 		return nil
 	}
 
-	// Walk forward from max(currentHead+1, head-MaxBacktrack) to head.
-	start := head - s.opts.MaxBacktrack
+	// Walk forward from max(currentHead+1, head-window) to head.
+	// On a cold start (currentHead < 0) use BootstrapDepth instead of
+	// MaxBacktrack so the first poll completes quickly against
+	// rate-limited public RPC providers; later polls catch up.
+	window := s.opts.MaxBacktrack
+	if currentHead < 0 {
+		window = s.opts.BootstrapDepth
+	}
+	start := head - window
 	if currentHead+1 > start && currentHead >= 0 {
 		start = currentHead + 1
 	}
@@ -183,29 +199,44 @@ func (s *Sync) pollAndApply(ctx context.Context) error {
 		}
 	}
 
-	// Pre-fetch each epoch's blocks.
+	// Pre-fetch each epoch's blocks. Errors are recorded but not
+	// fatal — individual epochs may legitimately fail (null rounds,
+	// transient Glif 5xx) without sinking the whole sync cycle.
 	newTSs := make(map[abi.ChainEpoch]*ltypes.TipSet, int(head-start+1))
 	for ep := start; ep <= head; ep++ {
 		ts, err := s.fetchAndPersistTipset(ctx, ep)
-		if err != nil || ts == nil {
+		if err != nil {
+			s.recordErr(fmt.Errorf("fetch epoch %d: %w", ep, err))
+			log.Debugw("sync: fetch epoch failed", "epoch", ep, "err", err)
+			continue
+		}
+		if ts == nil {
 			continue
 		}
 		newTSs[ep] = ts
 	}
 
-	// Always backfill parents for each new tipset. This catches the
-	// reorg case where divergence is deeper than `start`: the new tip's
-	// parent chain branches off at some epoch we've already canonicalized
-	// to a different fork, and that parent header isn't yet in store.
+	// Backfill parents for each new tipset. This catches the reorg
+	// case where divergence is deeper than `start`: the new tip's parent
+	// chain branches off at some epoch we've already canonicalized to a
+	// different fork, and that parent header isn't yet in store.
+	//
+	// On a cold start (currentHead < 0) we skip backfill entirely — the
+	// only sensible alternative is to walk back to genesis (millions of
+	// epochs), which would block startup for hours against rate-limited
+	// public RPC. Subsequent polls catch up incrementally.
 	added := 0
+	skipBackfill := currentHead < 0
 	for ep := start; ep <= head; ep++ {
 		ts, ok := newTSs[ep]
 		if !ok {
 			continue
 		}
-		if err := s.backfillParents(ctx, ts); err != nil {
-			s.recordErr(err)
-			return err
+		if !skipBackfill {
+			if err := s.backfillParents(ctx, ts); err != nil {
+				s.recordErr(err)
+				return err
+			}
 		}
 		if err := s.store.SetHead(ctx, ts); err != nil {
 			s.recordErr(err)
@@ -245,14 +276,24 @@ func (s *Sync) pollAndApply(ctx context.Context) error {
 }
 
 // backfillParents walks back from the given tipset through its parent
-// pointers until it reaches an epoch whose blocks are already in the store.
-// All intermediate headers are inserted via putLenient.
+// pointers until it reaches an epoch whose blocks are already in the store,
+// OR until the depth cap is hit. All intermediate headers are inserted via
+// putLenient.
+//
+// The depth cap (default MaxBacktrack) is critical: without it, the very
+// first sync against a fresh store would walk back to genesis (millions
+// of epochs). Subsequent polls' backfill is a no-op because the store has
+// the relevant parents already.
 func (s *Sync) backfillParents(ctx context.Context, ts *ltypes.TipSet) error {
 	if ts == nil {
 		return nil
 	}
+	cap := s.opts.MaxBacktrack
+	if cap <= 0 {
+		cap = 30
+	}
 	cur := ts
-	for cur.Height() > 0 {
+	for depth := abi.ChainEpoch(0); cur.Height() > 0 && depth < cap; depth++ {
 		parents := cur.Blocks()[0].Parents
 		allPresent := true
 		for _, pc := range parents {
