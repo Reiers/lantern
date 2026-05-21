@@ -23,8 +23,15 @@ import (
 
 // MainnetPublicForestURLs is the mainnet-only subset of the public
 // JSON-RPC endpoints. Use this when bootstrapping a mainnet node.
+//
+// Curated to be operationally independent: Glif (Protocol Labs
+// infra), chain.love (Protocol Labs community), and any user-added
+// --peer URLs add to this base set. The quorum tally treats each as
+// one vote regardless of operator, so users who want stronger
+// independence guarantees should add their own --peer flags.
 var MainnetPublicForestURLs = []string{
 	"https://api.node.glif.io/rpc/v1",
+	"https://api.chain.love/rpc/v1",
 }
 
 // DefaultPublicForestURLs is the curated set of public Filecoin
