@@ -1,0 +1,101 @@
+{
+  "1": {
+    "id": 1,
+    "jsonrpc": "2.0",
+    "result": {
+      "epoch": 6036202,
+      "peerCount": 675,
+      "bandwidth": {
+        "totalIn": 13243565760,
+        "totalOut": 14450830343,
+        "rateIn": 168966.6800774446,
+        "rateOut": 92838.54251680852
+      },
+      "reachability": {
+        "status": "public",
+        "publicAddrs": [
+          "/ip4/127.0.0.1/tcp/46353",
+          "/ip4/127.0.0.1/udp/43755/quic-v1",
+          "/ip4/172.17.0.1/tcp/46353",
+          "/ip4/172.17.0.1/udp/43755/quic-v1",
+          "/ip4/192.168.2.32/tcp/46353",
+          "/ip4/192.168.2.32/udp/43755/quic-v1",
+          "/ip4/31.169.51.133/tcp/1349",
+          "/ip6/2a05:a00:2::112/tcp/0"
+        ]
+      },
+      "nodeCount": 2,
+      "nodes": [
+        {
+          "node": "/ip4/127.0.0.1/tcp/11234/http",
+          "epoch": 6036202,
+          "peerCount": 2,
+          "bandwidth": {
+            "totalIn": 5031,
+            "totalOut": 3486,
+            "rateIn": 0,
+            "rateOut": 0
+          },
+          "reachability": {
+            "status": "private",
+            "publicAddrs": [
+              "/ip4/127.0.0.1/tcp/46353",
+              "/ip4/127.0.0.1/udp/43755/quic-v1",
+              "/ip4/172.17.0.1/tcp/46353",
+              "/ip4/172.17.0.1/udp/43755/quic-v1",
+              "/ip4/192.168.2.32/tcp/46353",
+              "/ip4/192.168.2.32/udp/43755/quic-v1"
+            ]
+          }
+        },
+        {
+          "node": "/ip4/192.168.2.32/tcp/1234/http",
+          "epoch": 6036202,
+          "peerCount": 673,
+          "bandwidth": {
+            "totalIn": 13243560729,
+            "totalOut": 14450826857,
+            "rateIn": 337933.3601548892,
+            "rateOut": 185677.08503361704
+          },
+          "reachability": {
+            "status": "public",
+            "publicAddrs": [
+              "/ip4/31.169.51.133/tcp/1349",
+              "/ip6/2a05:a00:2::112/tcp/0"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "3": {
+    "id": 3,
+    "jsonrpc": "2.0",
+    "result": "1.28.1+mainnet+git_16cce66a_2026-05-19T07:30:11+00:00"
+  },
+  "2": {
+    "id": 2,
+    "jsonrpc": "2.0",
+    "result": [
+      {
+        "Address": "/ip4/127.0.0.1/tcp/11234/http",
+        "CLayers": [
+          "base"
+        ],
+        "Reachable": true,
+        "SyncState": "ok",
+        "Version": "lantern/0.4.0 (lotus-compat)"
+      },
+      {
+        "Address": "/ip4/192.168.2.32/tcp/1234/http",
+        "CLayers": [
+          "base"
+        ],
+        "Reachable": true,
+        "SyncState": "ok",
+        "Version": "1.36.0+mainnet+git.154c0c3a4"
+      }
+    ]
+  }
+}

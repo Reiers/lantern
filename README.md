@@ -3,7 +3,7 @@
 
   # Lantern
 
-  **A Filecoin light node that boots in minutes with ~1 GB instead of 76 GB.**
+  **A Filecoin light node that boots in minutes with ~150 MB of disk instead of 76 GB.**
 
   *Verified end-to-end. No CGo. No remote RPC trust.*
 
@@ -19,10 +19,11 @@
 
 Lantern is a Filecoin light client. It does what Lotus or Forest do — verify the chain, serve state, sign and submit messages — but with a fraction of the footprint:
 
-- **~1 GB on disk** instead of 76 GB (and growing)
+- **~35 MB binary, ~150 MB steady state** (vs Lotus's 76 GB+)
 - **Minutes to boot**, not hours
 - **Single static Go binary**, no CGo, no `filecoin-ffi`, no Rust toolchain
 - **Cryptographically verifying** end-to-end. Headers, F3 finality certificates, DRAND beacons, and every IPLD block fetched on demand is verified against its CID. No RPC provider is trusted.
+- **Swarm-native** since Phase 10. Lantern joins the Filecoin libp2p network and fetches state via Bitswap from any honest peer; the HTTP gateway is a last-resort fallback, not the hot path.
 
 It's designed for three user classes:
 
@@ -36,7 +37,7 @@ It's designed for three user classes:
 
 ## How it works
 
-Filecoin's state is a content-addressed IPLD merkle tree (HAMTs and AMTs all the way down). If you have a verified state root, you don't need the whole tree — you need the *path* from the root to the actor you care about. That path is a handful of nodes, KBs not GBs, and every node is self-verifying against its parent by CID.
+Filecoin's state is a content-addressed IPLD merkle tree (HAMTs and AMTs all the way down). If you have a verified state root, you don't need the whole tree - you need the *path* from the root to the actor you care about. That path is a handful of nodes, KBs not GBs, and every node is self-verifying against its parent by CID.
 
 Lantern's bet: most users care about a small slice of state, and that slice can be fetched on demand from any honest peer while the cryptography stays airtight.
 
@@ -44,28 +45,48 @@ Lantern's bet: most users care about a small slice of state, and that slice can 
 
 **No.** Lantern is the node, in the sense that matters.
 
-Filecoin's state is content-addressed: every IPLD block has a cryptographic CID, and any block claiming to be at a given CID is provable by hashing it. That means Lantern can ask **anyone** — our gateway, a public IPFS peer, a stranger's Forest node, a friend's Lotus — for the bytes it needs, hash them, and verify them against the CID. The peer that served the bytes cannot lie. They can refuse to answer (denial of service), but they cannot give you wrong data, because content addressing makes lying detectable.
+Filecoin's state is content-addressed: every IPLD block has a cryptographic CID, and any block claiming to be at a given CID is provable by hashing it. That means Lantern can ask **anyone** - our gateway, a public IPFS peer, a stranger's Forest node, a friend's Lotus - for the bytes it needs, hash them, and verify them against the CID. The peer that served the bytes cannot lie. They can refuse to answer (denial of service), but they cannot give you wrong data, because content addressing makes lying detectable.
 
-So running Lantern is closer to running your own full node — in security terms — than to using an RPC provider. The difference is that Lantern fetches the ~1 GB of headers, F3 certs, DRAND beacons, and actor code on first run, then pulls state on demand as you query it. No 76 GB snapshot, no hours of sync, no trust in any third party for the data you read.
+So running Lantern is closer to running your own full node — in security terms — than to using an RPC provider. The difference is that Lantern downloads ~35 MB of binary, ~150 MB of steady-state working set (headers, F3 certs, DRAND beacons, actor code), and pulls state blocks on demand as you query them. No 76 GB snapshot, no hours of sync, no trust in any third party for the data you read.
+
+### Does Lantern participate in F3?
+
+Lantern is **F3-aware but not F3-participating**.
+
+- ✅ **Verifies F3 finality certificates** — every cert's BLS aggregate signature is checked locally against the evolving power table. Lantern's trust anchor is an F3-finalized tipset.
+- ✅ **Uses F3 fast-finality** — when you query the chain via Lantern, you get the F3-finalized view, not the EC-finalized view 7.5 hours behind.
+- ❌ **Does not vote in GPBFT** — F3 participation requires on-chain storage power and is for Storage Providers only. Light clients have no power and cannot vote.
+- ❌ **Does not publish finality certificates** — only GPBFT committee members publish certs.
+
+If you're a Storage Provider running Curio + Lantern, your existing Curio still participates in F3 the normal way. Lantern verifies the certs it produces; it doesn't replace the participation path.
 
 | Approach                                  | Trust model                                                                                  |
 |-------------------------------------------|----------------------------------------------------------------------------------------------|
 | Glif RPC, Ankr, web wallets               | Trust the provider's node. They control your view of the chain.                              |
-| Running your own Lotus or Forest          | Trust the math, hold all the state (76 GB+, hours to sync).                                  |
-| **Lantern**                               | **Trust the math, hold ~1 GB. Get data from anyone, verify everything.**                     |
+| Running your own Lotus or Forest          | Trust the math, hold all the state (76 GB+, hours to sync).                                  |
+| **Lantern**                               | **Trust the math, hold ~150 MB. Get data from any honest libp2p peer, verify everything.**   |
 
-Lantern's gateway at `gateway.lantern.reiers.io` is a **convenience**, not a trust requirement. It exists to make first-run fast for users who don't yet have peers connected. Once Lantern is bootstrapped, it can pull blocks from any libp2p Bitswap peer that has them; the gateway is just one such peer. Every byte is verified locally regardless of source.
+Lantern's gateway at `gateway.lantern.reiers.io` is a **last-resort convenience**, not a trust requirement. After Phase 10 Lantern is **swarm-native**: it joins the same Filecoin libp2p network every Lotus, Forest, and Curio node is on, and pulls state via Bitswap from any honest peer. Content-addressing means one honest peer is sufficient for correctness; multiple peers add availability and speed. The HTTP gateway is consulted only when Bitswap can't find the block. See [`SWARM-ARCHITECTURE.md`](SWARM-ARCHITECTURE.md) for the full design.
 
-The long-term architecture is **swarm-native**: Lantern joins the same Filecoin libp2p network every Lotus, Forest, and Curio node is already on, and pulls state from any honest peer via Bitswap. Content-addressing means one honest peer is sufficient for correctness; multiple peers add availability and speed. The central HTTP gateway becomes a last-resort fallback as the swarm of state-serving "beacons" grows. See [`SWARM-ARCHITECTURE.md`](SWARM-ARCHITECTURE.md) for the full design and V1.2 roadmap.
+To strengthen the swarm, operators can run a **Lantern beacon** — a lightweight purpose-built state-serving node:
+
+```sh
+./lantern beacon \
+    --cache-dir /var/lib/lantern-beacon \
+    --cache-size 5GiB \
+    --listen /ip4/0.0.0.0/tcp/4001
+```
+
+Beacons announce themselves in the DHT under `lantern/beacon/v1` and serve Bitswap requests for any CID in their cache. Forest and Lotus operators can also enable Bitswap advertisement in their existing nodes to become beacons at zero marginal cost. See SWARM-ARCHITECTURE.md §5.
 
 ### What are the soft trust points?
 
 Two, named explicitly:
 
-1. **The embedded genesis CID and F3 trust anchor** — baked into the binary at build time. If a malicious build is shipped, those could be wrong. Mitigations on the roadmap: reproducible builds, multiple independent maintainers re-pinning, community cross-validation of the anchor at install time.
-2. **The optional FVM bridge** (off by default) — if you opt in, Lantern delegates the small subset of VM operations its pure-Go shell can't execute (EVM contracts, some complex builtin actor methods) to a node you configure. Documented as a soft-trust point in [`TRUST-MODEL.md`](TRUST-MODEL.md).
+1. **The embedded genesis CID and F3 trust anchor** - baked into the binary at build time. If a malicious build is shipped, those could be wrong. Mitigations on the roadmap: reproducible builds, multiple independent maintainers re-pinning, community cross-validation of the anchor at install time.
+2. **The optional FVM bridge** (off by default) - if you opt in, Lantern delegates the small subset of VM operations its pure-Go shell can't execute (EVM contracts, some complex builtin actor methods) to a node you configure. Documented as a soft-trust point in [`TRUST-MODEL.md`](TRUST-MODEL.md).
 
-For everything else — wallet, balance queries, miner info, market deals, deal status, paych vouchers, state of any actor — zero third-party trust. Just BLS signatures, content-addressed blocks, and your local CPU verifying the math.
+For everything else - wallet, balance queries, miner info, market deals, deal status, paych vouchers, state of any actor - zero third-party trust. Just BLS signatures, content-addressed blocks, and your local CPU verifying the math.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -75,7 +96,7 @@ For everything else — wallet, balance queries, miner info, market deals, deal 
 │         │                                                        │
 │   State accessor (HAMT/AMT walker, proof-recording)              │
 │         │                                                        │
-│   Combined fetcher: local cache → Bitswap → HTTP gateway         │
+│   Combined fetcher: cache → Bitswap (primary) → HTTP gateway     │
 │         │                                                        │
 │   Trusted root: (epoch, tipsetCID, stateRoot, F3 cert)           │
 │         ▲                                                        │
@@ -134,28 +155,29 @@ Or use Lantern's own CLI:
 
 Lantern is **alpha**. The cryptography works. The light-client primitives work. The Lotus-compatible RPC surface covers Curio's read path end-to-end. The VM is a **gas-accurate execution shell** that handles account-to-account `Send` natively; an optional **FVM bridge** delegates non-Send execution to a trusted Forest/Lotus node when operators want full VM coverage.
 
-Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on mainnet — see [`docs/phase8-part-a-results.md`](docs/phase8-part-a-results.md). Every state read tested matched Glif byte-for-byte.
+Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on mainnet - see [`docs/phase8-part-a-results.md`](docs/phase8-part-a-results.md). Every state read tested matched Glif byte-for-byte.
 
 | Phase | Scope                                                                   | Status      |
 |-------|-------------------------------------------------------------------------|-------------|
 | 1     | Trusted root, header validation, F3 + DRAND verifier                    | ✅ Shipped  |
 | 2     | HAMT/AMT walker, state accessor, gateway proxy                          | ✅ Shipped  |
-| 3     | (folded into Phase 4)                                                   | —           |
+| 3     | (folded into Phase 4)                                                   | -           |
 | 4     | Lotus-compatible RPC server, wallet, signing                            | ✅ Shipped  |
-| 5     | StateMiner/Market/VerifiedRegistry — SP-killer state APIs               | ✅ Shipped  |
+| 5     | StateMiner/Market/VerifiedRegistry - SP-killer state APIs               | ✅ Shipped  |
 | 6     | Persistent header store, libp2p, gossipsub mempool, StateWaitMsg        | ✅ Shipped  |
 | 7     | Pure-Go VM shell, gas estimation, paych vouchers, block production scaffolding | ✅ Shipped  |
 | 8     | Live Curio binding test, FVM bridge, block publisher, DHT, paych byte-exact, TRUST-MODEL.md | ✅ Shipped  |
 | 9     | `ChainNotify` end-to-end + daemon header-store wiring + real Curio bind on lex — the V1.1 unlock | ✅ Shipped  |
+| 10    | Live libp2p stats wired to Curio webui (Net*), Bitswap as primary fetch path, `lantern beacon` subcommand — V1.2 swarm-native delivery | ✅ Shipped  |
 
-**71 of 71** methods in the Curio FULLNODE_API surface are implemented after Phase 9. The V1.1 unlock landed: `ChainNotify` is wired through a head-change distributor (Lotus-style apply/revert events, bounded per-subscriber buffer with drop-slow semantics) and `StateAccountKey` decodes the account actor state. Live-validated against `lotus v1.36` CLI for 6 minutes and against a real Curio 1.28.1 binary on lex for 10 minutes — see [`docs/phase9-part-b-curio-bind.md`](docs/phase9-part-b-curio-bind.md). The 1 remaining hard-gated stub:
+**71 of 71** methods in the Curio FULLNODE_API surface are implemented after Phase 9; Phase 10 turned the Net*/Eth probe stubs (`NetPeers`, `NetBandwidthStats`, `NetAutoNatStatus`, etc.) into **live data** sourced from the running libp2p host. The V1.1 unlock landed in Phase 9: `ChainNotify` is wired through a head-change distributor (Lotus-style apply/revert events, bounded per-subscriber buffer with drop-slow semantics) and `StateAccountKey` decodes the account actor state. Live-validated against `lotus v1.36` CLI for 6 minutes and against a real Curio 1.28.1 binary on lex for 10 minutes — see [`docs/phase9-part-b-curio-bind.md`](docs/phase9-part-b-curio-bind.md) and [`docs/phase10-part-d-live-bind.md`](docs/phase10-part-d-live-bind.md). The 1 remaining hard-gated stub:
 - `SyncSubmitBlock` is never lit without explicit `AllowBlockSubmit=true` plus a configured bridge. See [`docs/SAFETY-CHECKLIST.md`](docs/SAFETY-CHECKLIST.md) §1.
 
 ---
 
 ## Trust model
 
-- **What you trust:** the cryptographic primitives (BLS, secp256k1, blake2b, SHA-256, DRAND), the embedded genesis CID, and the embedded F3 trust anchor (a recent finalized power table — re-pinned per release).
+- **What you trust:** the cryptographic primitives (BLS, secp256k1, blake2b, SHA-256, DRAND), the embedded genesis CID, and the embedded F3 trust anchor (a recent finalized power table - re-pinned per release).
 - **What you verify:** every header (BLS aggregate sig), every F3 certificate (BLS aggregate over ≥2/3 of committee power), every IPLD block fetched (CID hash match), every DRAND beacon, every actor state path you query.
 - **What you do not trust:** any RPC provider, any peer serving state, any gateway. They can refuse to serve, but they cannot lie. Wrong bytes fail the hash check and get discarded.
 
@@ -166,7 +188,7 @@ This is strictly stronger than the "trust your RPC" model that most lightweight 
 The Phase 7 VM is a **gas-accurate execution shell**, not a complete FVM. It:
 
 - **Dispatches** every message to the correct built-in actor method (v17/v18 method tables)
-- **Accounts gas** using the canonical Filecoin gas schedule — numbers match Lotus byte-for-byte for builtin calls
+- **Accounts gas** using the canonical Filecoin gas schedule - numbers match Lotus byte-for-byte for builtin calls
 - **Executes Send** (account-to-account FIL transfer) end-to-end against real state
 - **Returns sensible defaults** (ExitCode=0, conservative GasUsed) for every other builtin call
 - **Refuses to compute** state-mutating actor methods that would produce a state root the network doesn't agree with
@@ -176,12 +198,12 @@ The shell alone is enough for: wallet sends, gas estimation, mempool participati
 
 ## FVM bridge (optional, opt-in)
 
-For operators who need full VM coverage — EVM contract calls, complex multisig operations, or block production with a real state root — Lantern V1 supports an opt-in **side-channel bridge** to a trusted Forest or Lotus node. The bridge is bounded to two operations:
+For operators who need full VM coverage - EVM contract calls, complex multisig operations, or block production with a real state root - Lantern V1 supports an opt-in **side-channel bridge** to a trusted Forest or Lotus node. The bridge is bounded to two operations:
 
 1. Non-`Send` `StateCall` execution
 2. `ParentStateRoot` computation for block production
 
-The bridge is **not** used for header verification, F3 finality, state reads (HAMT lookups), DRAND randomness, or any of Lantern's core trust-critical paths — those remain entirely self-verified.
+The bridge is **not** used for header verification, F3 finality, state reads (HAMT lookups), DRAND randomness, or any of Lantern's core trust-critical paths - those remain entirely self-verified.
 
 Default daemon has no bridge configured. Operators who want it configure their own trusted node and accept that node as a documented soft-trust point. See [`TRUST-MODEL.md`](TRUST-MODEL.md) for the full attacker analysis.
 
@@ -259,7 +281,7 @@ Choose whichever fits your use case. Code lifted from Lotus is dual-licensed und
 
 ## Project name
 
-Lantern fits Filecoin's natural-element family: **Lotus**, **Forest**, **Aurora**, **Spark**, **Saturn**, **Calibration**. A lantern is portable light — that's the whole product in one word.
+Lantern fits Filecoin's natural-element family: **Lotus**, **Forest**, **Aurora**, **Spark**, **Saturn**, **Calibration**. A lantern is portable light - that's the whole product in one word.
 
 ---
 
