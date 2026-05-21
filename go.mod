@@ -10,11 +10,13 @@ require (
 	github.com/filecoin-project/go-address v1.2.0
 	github.com/filecoin-project/go-crypto v0.1.0
 	github.com/filecoin-project/go-f3 v0.8.13
+	github.com/filecoin-project/go-hamt-ipld/v3 v3.4.1
 	github.com/filecoin-project/go-keccak v0.1.0
 	github.com/filecoin-project/go-state-types v0.18.0
 	github.com/invopop/jsonschema v0.14.0
 	github.com/ipfs/go-block-format v0.2.3
 	github.com/ipfs/go-cid v0.6.1
+	github.com/ipfs/go-ipld-cbor v0.2.1
 	github.com/ipfs/go-log/v2 v2.9.2
 	github.com/multiformats/go-multihash v0.2.3
 	github.com/stretchr/testify v1.11.1
@@ -36,7 +38,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/filecoin-project/go-amt-ipld/v4 v4.4.0 // indirect
 	github.com/filecoin-project/go-bitfield v0.2.4 // indirect
-	github.com/filecoin-project/go-hamt-ipld/v3 v3.4.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -46,7 +47,6 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/ipfs/boxo v0.34.0 // indirect
 	github.com/ipfs/go-datastore v0.9.0 // indirect
-	github.com/ipfs/go-ipld-cbor v0.2.1 // indirect
 	github.com/ipfs/go-ipld-format v0.6.2 // indirect
 	github.com/kilic/bls12-381 v0.1.0 // indirect
 	github.com/klauspost/compress v1.18.2 // indirect
