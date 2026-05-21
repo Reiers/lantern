@@ -33,6 +33,8 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/Reiers/lantern/api"
+	lbeacon "github.com/Reiers/lantern/chain/beacon"
+	hstore "github.com/Reiers/lantern/chain/header/store"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/chain/types"
 	"github.com/Reiers/lantern/state/accessor"
@@ -48,6 +50,16 @@ type ChainAPI struct {
 	Wallet      *wallet.Wallet
 	Mpool       MpoolPublisher
 	NetworkName string
+
+	// HeaderStore is the optional persistent header store. When wired,
+	// methods like ChainGetTipSetByHeight, StateGetRandomnessFromTickets,
+	// StateGetRandomnessFromBeacon, StateSearchMsg and StateWaitMsg are
+	// available; otherwise they return ErrNotImpl.
+	HeaderStore *hstore.Store
+
+	// BeaconParams is the drand-round mapping for the active network.
+	// Defaults to mainnet quicknet if zero-value.
+	BeaconParams lbeacon.QuicknetParams
 
 	// AuthIssuer satisfies AuthNew / AuthVerify by delegating to the RPC
 	// server's Auth state.
@@ -84,14 +96,22 @@ func ErrNotImpl(method, reason string) error {
 // New returns a ChainAPI ready to register on a go-jsonrpc server.
 func New(tr *trustedroot.TrustedRoot, bg hamt.BlockGetter, w *wallet.Wallet, mp MpoolPublisher, netName string) *ChainAPI {
 	return &ChainAPI{
-		Trusted:     tr,
-		BlockGetter: bg,
-		Accessor:    accessor.New(tr, bg),
-		Wallet:      w,
-		Mpool:       mp,
-		NetworkName: netName,
-		sessionUUID: uuid.New().String(),
+		Trusted:      tr,
+		BlockGetter:  bg,
+		Accessor:     accessor.New(tr, bg),
+		Wallet:       w,
+		Mpool:        mp,
+		NetworkName:  netName,
+		BeaconParams: lbeacon.MainnetQuicknetParams(),
+		sessionUUID:  uuid.New().String(),
 	}
+}
+
+// WithHeaderStore returns c with the header store attached. The store
+// unlocks ChainGetTipSetByHeight, randomness queries, and StateSearchMsg.
+func (c *ChainAPI) WithHeaderStore(s *hstore.Store) *ChainAPI {
+	c.HeaderStore = s
+	return c
 }
 
 // ----------------- Node admin (N) -----------------
@@ -219,8 +239,7 @@ func tipsetKeyMatches(a, b types.TipSetKey) bool {
 
 // ChainGetTipSetByHeight walks back to the tipset at h. Tier 1 (#45).
 //
-// V1: only the current head epoch is known. Phase 5 wires a real header
-// store walk-back.
+// Phase 6: served from the persistent header store when configured.
 func (c *ChainAPI) ChainGetTipSetByHeight(_ context.Context, h abi.ChainEpoch, _ types.TipSetKey) (*types.TipSet, error) {
 	if c.Trusted == nil {
 		return nil, errors.New("trusted root not initialised")
@@ -228,7 +247,10 @@ func (c *ChainAPI) ChainGetTipSetByHeight(_ context.Context, h abi.ChainEpoch, _
 	if h == c.Trusted.Epoch {
 		return synthesizeTipSet(c.Trusted), nil
 	}
-	return nil, ErrNotImpl("ChainGetTipSetByHeight", "header store walk-back deferred to Phase 5; only current head is known")
+	if c.HeaderStore == nil {
+		return nil, ErrNotImpl("ChainGetTipSetByHeight", "header store not configured")
+	}
+	return c.HeaderStore.GetTipSetByHeight(h)
 }
 
 // ChainGetTipSetAfterHeight returns the first tipset at or after h.
@@ -429,19 +451,101 @@ func (c *ChainAPI) StateReadState(ctx context.Context, a address.Address, _ type
 	}, nil
 }
 
-// StateGetRandomnessFromBeacon. Tier 2 (#22). Deferred.
-func (c *ChainAPI) StateGetRandomnessFromBeacon(_ context.Context, _ gscrypto.DomainSeparationTag, _ abi.ChainEpoch, _ []byte, _ types.TipSetKey) (abi.Randomness, error) {
-	return nil, ErrNotImpl("StateGetRandomnessFromBeacon", "beacon-entry walk deferred to Phase 5")
+// StateGetRandomnessFromBeacon implements drand-derived randomness for the
+// requested filecoin epoch and personalisation tag. Walks back from the
+// reference tipset to find the canonical tipset for `randEpoch`, picks the
+// beacon entry whose drand round matches MaxBeaconRoundForEpoch, then
+// applies the Lotus DrawRandomnessFromDigest formula.
+func (c *ChainAPI) StateGetRandomnessFromBeacon(ctx context.Context, pers gscrypto.DomainSeparationTag, randEpoch abi.ChainEpoch, entropy []byte, _ types.TipSetKey) (abi.Randomness, error) {
+	entry, err := c.beaconEntryForEpoch(ctx, randEpoch)
+	if err != nil {
+		return nil, err
+	}
+	out, err := lbeacon.DrawBeaconRandomness(*entry, pers, randEpoch, entropy)
+	if err != nil {
+		return nil, err
+	}
+	return abi.Randomness(out), nil
 }
 
-// StateGetRandomnessFromTickets. Tier 2 (#26). Deferred.
-func (c *ChainAPI) StateGetRandomnessFromTickets(_ context.Context, _ gscrypto.DomainSeparationTag, _ abi.ChainEpoch, _ []byte, _ types.TipSetKey) (abi.Randomness, error) {
-	return nil, ErrNotImpl("StateGetRandomnessFromTickets", "ticket chain walk deferred to Phase 5")
+// StateGetRandomnessFromTickets returns randomness derived from the chain
+// ticket at the requested epoch. Matches Lotus' getChainRandomness +
+// DrawRandomnessFromDigest path for nv >= 13 (no lookback flag; we use the
+// exact canonical tipset at randEpoch, walking back through null rounds).
+func (c *ChainAPI) StateGetRandomnessFromTickets(ctx context.Context, pers gscrypto.DomainSeparationTag, randEpoch abi.ChainEpoch, entropy []byte, _ types.TipSetKey) (abi.Randomness, error) {
+	ts, err := c.tipsetForRandomness(ctx, randEpoch)
+	if err != nil {
+		return nil, err
+	}
+	out, err := lbeacon.DrawChainRandomness(ts, pers, randEpoch, entropy)
+	if err != nil {
+		return nil, err
+	}
+	return abi.Randomness(out), nil
 }
 
-// StateGetBeaconEntry. Tier 2 (#30). Deferred.
-func (c *ChainAPI) StateGetBeaconEntry(_ context.Context, _ abi.ChainEpoch) (*types.BeaconEntry, error) {
-	return nil, ErrNotImpl("StateGetBeaconEntry", "beacon-entry lookup deferred to Phase 5")
+// StateGetBeaconEntry returns the beacon entry whose drand round matches
+// the canonical max-round for the given filecoin epoch.
+func (c *ChainAPI) StateGetBeaconEntry(ctx context.Context, epoch abi.ChainEpoch) (*types.BeaconEntry, error) {
+	return c.beaconEntryForEpoch(ctx, epoch)
+}
+
+// tipsetForRandomness returns the canonical tipset at randEpoch, walking
+// back through null rounds. Uses the header store when configured;
+// otherwise returns the synthesized current-head tipset if randEpoch is
+// the current head, else an error.
+func (c *ChainAPI) tipsetForRandomness(_ context.Context, randEpoch abi.ChainEpoch) (*types.TipSet, error) {
+	if c.Trusted == nil {
+		return nil, errors.New("trusted root not initialised")
+	}
+	if randEpoch < 0 {
+		return nil, fmt.Errorf("randomness epoch %d cannot be negative", randEpoch)
+	}
+	if randEpoch > c.Trusted.Epoch {
+		return nil, fmt.Errorf("cannot draw randomness from future epoch %d (head %d)", randEpoch, c.Trusted.Epoch)
+	}
+	if c.HeaderStore != nil {
+		ts, err := c.HeaderStore.GetTipSetByHeight(randEpoch)
+		if err == nil {
+			return ts, nil
+		}
+		// fall through: maybe header store doesn't have it yet but the
+		// requested epoch is exactly the current head.
+	}
+	if randEpoch == c.Trusted.Epoch {
+		return synthesizeTipSet(c.Trusted), nil
+	}
+	return nil, ErrNotImpl("randomness", fmt.Sprintf("tipset at epoch %d not in header store", randEpoch))
+}
+
+// beaconEntryForEpoch finds the BeaconEntry whose drand round matches
+// MaxBeaconRoundForEpoch(epoch). Walks back up to 20 tipsets if the
+// expected entry isn't on the first candidate.
+func (c *ChainAPI) beaconEntryForEpoch(ctx context.Context, epoch abi.ChainEpoch) (*types.BeaconEntry, error) {
+	ts, err := c.tipsetForRandomness(ctx, epoch)
+	if err != nil {
+		return nil, err
+	}
+	wantRound := c.BeaconParams.MaxBeaconRoundForEpoch(epoch)
+	for i := 0; i < 20; i++ {
+		for _, b := range ts.Blocks() {
+			for _, e := range b.BeaconEntries {
+				if e.Round == wantRound {
+					copy := e
+					return &copy, nil
+				}
+			}
+		}
+		if ts.Height() <= 0 || c.HeaderStore == nil {
+			break
+		}
+		prev, perr := c.HeaderStore.GetTipSetByHeight(ts.Height() - 1)
+		if perr != nil {
+			break
+		}
+		ts = prev
+	}
+	return nil, fmt.Errorf("beacon entry for round %d (epoch %d) not found in walked tipsets", wantRound, epoch)
 }
 
 // ----------------- Miner reads -----------------
