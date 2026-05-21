@@ -149,81 +149,108 @@ func networkVersionToActorVersion(nv network.Version) int {
 	}
 }
 
-// --- Net* and Eth* health probes (Phase 9 ops follow-up) -----------------
+// --- Net* and Eth* health probes (Phase 10: live libp2p host wiring) ----
 //
-// Curio probes these endpoints periodically for status display in its
-// GUI. Phase 9 Part B (live curio bind) surfaced them as "method not found"
-// warnings. None of them are state-critical; they're shape-of-the-node info.
+// Curio's webui consumes these for the "Chain Node Network" panel. When
+// NetInfoSource is wired (daemon path) the methods read live state off the
+// libp2p host's peerstore + bandwidth counter + AutoNAT subsystem. When it
+// is nil (one-shot CLI invocations like `lantern wallet balance`) the
+// methods return zero-value answers so typed clients don't error.
 
-// NetPeers returns a stub empty peer list. Lantern V1 does not yet expose
-// libp2p peer state through the RPC layer (the libp2p host runs but its
-// peer set isn't part of the trust surface). Returning an empty list is
-// the safe answer Curio's NetSummary handles gracefully.
-//
-// Phase 10 wiring: populate from the live libp2p host's peerstore.
+// NetPeers returns the currently-connected peer set with each peer's known
+// multiaddrs. Reads off host.Network().Peers() + host.Peerstore().Addrs().
 func (c *ChainAPI) NetPeers(_ context.Context) ([]struct {
 	ID    string
 	Addrs []string
 }, error) {
-	return []struct {
+	if c.NetInfoSource == nil {
+		return []struct {
+			ID    string
+			Addrs []string
+		}{}, nil
+	}
+	ps := c.NetInfoSource.Peers()
+	out := make([]struct {
 		ID    string
 		Addrs []string
-	}{}, nil
+	}, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, struct {
+			ID    string
+			Addrs []string
+		}{ID: p.ID, Addrs: p.Addrs})
+	}
+	return out, nil
 }
 
-// NetAgentVersion returns the libp2p agent string of a remote peer. Lantern
-// doesn't actively track peer agent versions yet; return a sentinel that
-// Curio's UI can render as "unknown".
-func (c *ChainAPI) NetAgentVersion(_ context.Context, _ string) (string, error) {
-	return "lantern/unknown", nil
+// NetAgentVersion returns the libp2p agent string of a remote peer as
+// recorded in the peerstore. Returns "unknown" when the peerstore has no
+// record for that peer (matches Lotus's behaviour for unseen peers).
+func (c *ChainAPI) NetAgentVersion(_ context.Context, peerID string) (string, error) {
+	if c.NetInfoSource == nil {
+		return "lantern/unknown", nil
+	}
+	av := c.NetInfoSource.AgentVersion(peerID)
+	if av == "" {
+		return "unknown", nil
+	}
+	return av, nil
 }
 
-// NetConnectedness returns the connectedness state of a peer. Always
-// reports NotConnected from Lantern's perspective (we don't expose peer
-// state to RPC callers in V1).
-func (c *ChainAPI) NetConnectedness(_ context.Context, _ string) (int, error) {
-	// 0 = NotConnected in libp2p's connmgr semantics.
-	return 0, nil
+// NetConnectedness returns the libp2p network.Connectedness value for
+// peerID. Returns 0 (NotConnected) when NetInfoSource is unwired or the
+// peer is unknown.
+func (c *ChainAPI) NetConnectedness(_ context.Context, peerID string) (int, error) {
+	if c.NetInfoSource == nil {
+		return 0, nil
+	}
+	return c.NetInfoSource.Connectedness(peerID), nil
 }
 
-// NetListening returns whether the node is accepting connections. Lantern's
-// libp2p host listens but we don't expose it as a public service; report
-// true so Curio's health checks don't warn.
+// NetListening returns whether the host has any listen addresses. Lantern's
+// daemon ALWAYS opens a libp2p listener (TCP+QUIC) on Phase 6+ so this is
+// true in steady state; the false branch matters for early-boot probes.
 func (c *ChainAPI) NetListening(_ context.Context) (bool, error) {
-	return true, nil
+	if c.NetInfoSource == nil {
+		return true, nil // CLI-only path: report true to keep Curio quiet.
+	}
+	return c.NetInfoSource.Listening(), nil
 }
 
-// EthBlockNumber returns "0x0" — Lantern V1 does not run an FEVM index.
-// Curio's GUI probes this on startup; returning the hex string for zero
-// keeps the call from erroring.
-//
-// Phase 10 wiring: derive from current trusted head's epoch when an
-// Ethereum-compatible block-number mapping is needed.
+// EthBlockNumber returns the current head epoch as a 0x-prefixed hex
+// string. Lantern doesn't run an FEVM block-number index, so this just
+// mirrors the Filecoin chain epoch — which is what Curio's webui uses for
+// the "Eth block height" display when no separate index is available.
 func (c *ChainAPI) EthBlockNumber(_ context.Context) (string, error) {
-	return "0x0", nil
+	var epoch int64
+	if c.HeaderStore != nil {
+		epoch = int64(c.HeaderStore.HeadEpoch())
+	} else if c.Trusted != nil {
+		epoch = int64(c.Trusted.Epoch)
+	}
+	if epoch < 0 {
+		epoch = 0
+	}
+	return fmt.Sprintf("0x%x", epoch), nil
 }
 
-// NetBandwidthStats returns Lantern's libp2p bandwidth counters. The shape
-// matches lotus api.FullNode.NetBandwidthStats which returns
-// github.com/libp2p/go-libp2p/core/metrics.Stats. We mirror the shape via
-// api.NetBandwidthStats so the interface doesn't depend on libp2p.
-//
-// V1 returns zeros (Lantern's libp2p host doesn't expose a bandwidth meter
-// on the RPC surface yet). Phase 10 wires the real BandwidthCounter from
-// net/libp2p.
+// NetBandwidthStats returns the live libp2p BandwidthCounter totals. The
+// counter is installed at Host construction via libp2p.BandwidthReporter,
+// so the values reflect stream-level bytes since the host started.
 func (c *ChainAPI) NetBandwidthStats(_ context.Context) (api.NetBandwidthStats, error) {
-	return api.NetBandwidthStats{}, nil
+	if c.NetInfoSource == nil {
+		return api.NetBandwidthStats{}, nil
+	}
+	return c.NetInfoSource.BandwidthTotals(), nil
 }
 
-// NetAutoNatStatus returns the NAT reachability status. Lantern advertises
-// itself as Unknown (libp2p Reachability value 0) since we don't run an
-// AutoNAT service and don't track our reachability.
-//
-// Curio's webui treats Unknown as a non-warning state; the field is
-// displayed verbatim in the Chain Node Network panel.
+// NetAutoNatStatus returns the latest AutoNAT-discovered reachability +
+// the host's public addresses. Light clients behind NAT report
+// ReachabilityPrivate after ~30s; beacon nodes on public IPs report
+// ReachabilityPublic with the dial-back addrs filled in.
 func (c *ChainAPI) NetAutoNatStatus(_ context.Context) (api.NatInfo, error) {
-	return api.NatInfo{
-		Reachability: 0, // libp2p network.ReachabilityUnknown
-		PublicAddrs:  nil,
-	}, nil
+	if c.NetInfoSource == nil {
+		return api.NatInfo{Reachability: 0, PublicAddrs: nil}, nil
+	}
+	return c.NetInfoSource.AutoNatStatus(), nil
 }
