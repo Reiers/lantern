@@ -33,8 +33,8 @@ This is the new piece. **No single source determines the trust anchor.** The ins
    - Any Lantern beacons announced via DHT under `lantern/beacon/v1` rendezvous
    - Optional: user-configured trusted nodes via `--peer` flags
 3. **Asks each source: "give me the F3 finality certificate for the latest GPBFT instance"**
-4. **Requires ≥ 3 sources to agree** on the same finalized tipset + state root before accepting it as the current head.
-5. If 3 sources don't agree, the installer **refuses to continue** and prints a clear error: "Could not reach quorum of 3 independent sources within 60s. Run `lantern bootstrap --debug` to see per-source responses."
+4. **Requires ≥ 5 sources to agree** on the same finalized tipset + state root before accepting it as the current head. Five is cheap (cold-start only, runs once) and a meaningful step beyond "trust one provider." SP-grade deployments can raise this further with `--bootstrap-quorum`.
+5. If 5 sources don't agree, the installer **refuses to continue** and prints a clear error: "Could not reach quorum of 5 independent sources within 60s. Run `lantern doctor` to see per-source responses."
 
 This is the killer property: the installer mathematically cannot be fooled by a single compromised gateway, RPC provider, or even by us (the Lantern project) running a malicious beacon. **Verification quorum at install time is the trust foundation everything else builds on.**
 
@@ -57,15 +57,36 @@ Same as today's `lantern init`:
 - Mint JWT auth tokens (admin / sign / write / read)
 - Write `~/.lantern/` files with sensible perms
 
-### 6. Daemon launchd / systemd service (10s)
+### 6. Daemon: user picks the lifecycle (10s)
 
-Filbucket runs as a foreground process. Lantern should be persistent. The installer offers:
+Filbucket runs as a foreground process. Lantern can be either. The installer **asks the user** which they prefer:
 
-- macOS: writes `~/Library/LaunchAgents/io.lantern.daemon.plist`, registers, starts
-- Linux: writes `~/.config/systemd/user/lantern.service`, registers, starts
-- Either: starts in foreground (default for ephemeral testing)
+- **Background service** — macOS launchd / Linux systemd user service. Survives reboot, restarts on failure, logs to `~/.lantern/lantern.log`. Best for production / SP use.
+- **Foreground** — just starts `lantern daemon` in the current shell. Good for testing, debugging, or one-off use. Survives until the shell closes.
+- **Skip** — install only, start manually later with `lantern daemon`.
 
-Asks before installing the service. Adds `lantern stop` and `lantern restart` aliases for the user-service lifecycle.
+Default depends on context: non-interactive (`--yes`, `LANTERN_YES=1`) defaults to background service. Interactive default is foreground (less surprising for first-run users; they can re-run with `lantern service install` later).
+
+Adds `lantern stop` and `lantern restart` aliases for the user-service lifecycle.
+
+### 6b. Native Mac app (optional, V1.2)
+
+For users who want zero-CLI Lantern, ship a SwiftUI menu-bar app:
+
+- Menu-bar icon shows current chain head epoch + peer count at a glance
+- Click for a popover with `lantern info` status
+- Right-click for daemon controls (start / stop / restart, view log)
+- Quorum status indicator: green if all configured sources currently agree, amber if N−1, red if quorum lost
+- Settings pane: choose quorum sources, JWT scopes, beacon mode toggle
+- Auto-updates via Sparkle once we ship signed release artifacts
+
+Lives at `apps/mac/` (mirrors filbucket's layout). SwiftPM only, no Xcode project required. Optional install at the end of the bash flow:
+
+```
+? Install the Lantern menu-bar app? [Y/n]
+```
+
+If yes: download signed `.app`, install to `/Applications/Lantern.app`, register it as a login item if the user opts in. The app talks to the local Lantern daemon via the same JSON-RPC; no extra trust surface.
 
 ### 7. Final state (10s)
 
@@ -172,19 +193,21 @@ That's an unrealistic threat surface for a light client. Most existing Filecoin 
 
 ## Configurable quorum sources
 
-The default quorum sources, baked into the binary:
+The default quorum candidates, baked into the binary, ranked by independence:
 
-1. **libp2p mainnet bootstrap peers** — the same list Lotus and Forest use
-2. **`gateway.lantern.reiers.io`** — our gateway (optional, falls back gracefully)
-3. **`forest-archive.chainsafe.dev`** — ChainSafe's public Forest archive
-4. **DHT-discovered Lantern beacons** under `lantern/beacon/v1` rendezvous
+1. **libp2p mainnet bootstrap peers** — the same list every Lotus, Forest, and Curio uses. We query ≥5 of them directly via libp2p; if they all respond with the same head, that's already a real quorum from independent operators (the bootstrap list spans Protocol Labs, ChainSafe, Glif, and others, on geographically diverse infra).
+2. **`forest-archive.chainsafe.dev`** — ChainSafe's public Forest archive, completely independent operator from us.
+3. **DHT-discovered Lantern beacons** under `lantern/beacon/v1` rendezvous — ad-hoc community state-serving nodes. Counted in the quorum once we have a healthy ecosystem of beacons; today, treated as a bonus source.
+4. **User-configured `--peer` flags** — the user's own Forest / Lotus / RPC endpoint(s). Counted toward quorum.
+5. **`gateway.lantern.reiers.io`** — our gateway. **NOT counted in the quorum by default.** If the user already trusts us they trust the binary; the quorum's value comes from independent operators. The gateway is still used as a fast fallback for raw IPLD block fetches *after* the trust anchor is established — just not part of the bootstrap consensus.
 
 Users can:
 - Add their own: `lantern init --peer http://my-forest:2345/rpc/v1 --peer http://other-forest:2345/...`
-- Require more than 3: `--bootstrap-quorum 5`
-- Bring their own Forest: `--peer http://my-forest:2345/rpc/v1 --bootstrap-quorum 1` (single-source if they trust their own infra)
+- Lower the quorum (not recommended unless you really know your sources): `--bootstrap-quorum 3`
+- Single-source mode for users who run their own Forest + trust it: `--peer http://my-forest:2345/rpc/v1 --bootstrap-quorum 1`
+- Raise the quorum for paranoid deployments: `--bootstrap-quorum 7`
 
-Production deployments (SPs, exchanges) would typically configure their own Forest + 2 public sources for a balanced 3-of-3 quorum.
+Default is **5 agreeing sources**. From the available pool, we draw enough to reach 5. The math: if a user adds zero `--peer`s, the default mix is ≥5 libp2p peers + ChainSafe Forest archive + any DHT-announced Lantern beacons reachable in 60s. Cheap because it runs once at install time, not on every query.
 
 ## Stretch goals (V2 of the installer)
 
@@ -194,15 +217,19 @@ Production deployments (SPs, exchanges) would typically configure their own Fore
 - **`lantern beacon` subcommand** (already in Phase 10 scope): turn the local Lantern into a state-serving beacon for the swarm
 - **`lantern repair`** subcommand: when the embedded anchor goes stale, re-anchor from the live swarm without a full reinstall
 
-## What this changes for the V1.1 release
+## V1.2 is the GA target (V1.1 stays as alpha + Phase 10)
 
-The current `v0.1.0-rc.1` tag is what's running on sp.reiers.io and what an early adopter would download. It works, but it relies on the embedded anchor as the sole trust foundation, and the cold-start path goes through the gateway. That's fine for alpha; it's not the V1.1 GA shape.
+The current `v0.1.0-rc.1` tag is what's running on sp.reiers.io. It works, but it relies on the embedded anchor as the sole trust foundation and the cold-start path goes through our gateway. That's fine for alpha. It is not the GA shape we want.
 
-V1.1 GA ships:
+**V1.1** ships the Phase 10 swarm work — real libp2p peer count + bandwidth in the RPC surface, Bitswap as primary fetch path, `lantern beacon` subcommand. Still has the embedded anchor as sole trust foundation; the live-quorum bootstrap is V1.2.
 
-1. The Phase 10 swarm work (libp2p bandwidth, real peer count, beacon subcommand) — in progress
-2. The install.sh + `lantern init --bootstrap=N` quorum work — this doc
-3. `lantern doctor` + `lantern repair`
-4. Reproducible builds + GitHub-Actions-signed release artifacts
+**V1.2** ships the install story:
 
-That's the GA story: **download, ≤ 3 minutes, fully verified, fully independent of any single provider**.
+1. `install.sh` + `lantern init --bootstrap-quorum=5` multi-source quorum bootstrap
+2. `lantern doctor` + `lantern repair` subcommands
+3. `lantern service install/uninstall/start/stop` (launchd + systemd)
+4. SwiftUI menu-bar app at `apps/mac/`
+5. Reproducible builds + GitHub-Actions-signed release artifacts
+6. `get.lantern.reiers.io` (or `lantern.reiers.io/install`) serving install.sh
+
+That's the GA story: **download, ≤ 3 minutes, fully verified, fully independent of any single provider, optional Mac app for non-CLI users**.
