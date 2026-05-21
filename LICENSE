@@ -1,0 +1,7 @@
+Lantern is licensed under the Apache License, Version 2.0 OR the MIT License,
+at your option. See LICENSE-APACHE and LICENSE-MIT.
+
+Portions of this software are copied from the Filecoin Lotus project; see
+LICENSE-LOTUS, LICENSE-LOTUS-APACHE, and LICENSE-LOTUS-MIT for the upstream
+license terms. Other third-party code retains its original license; see the
+header comments of the relevant files for attribution.

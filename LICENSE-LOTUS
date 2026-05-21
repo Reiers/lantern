@@ -1,0 +1,12 @@
+Lantern includes code copied from the Lotus project
+(github.com/filecoin-project/lotus). Lotus is dual-licensed under the Apache
+License 2.0 and the MIT License; see LICENSE-LOTUS-APACHE and LICENSE-LOTUS-MIT
+in this directory.
+
+Every file in this repository that contains code copied from Lotus carries a
+header line referencing the original source path and the upstream commit hash.
+Modifications made by the Lantern project are noted in those headers where
+substantive.
+
+Upstream commit used for all initial lifts:
+  github.com/filecoin-project/lotus @ a0ecb8687f1c60d5e66040b6de364dbc9cc4d253
