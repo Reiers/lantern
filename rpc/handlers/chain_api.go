@@ -177,8 +177,12 @@ func (c *ChainAPI) AuthNew(_ context.Context, perms []auth.Permission) ([]byte, 
 // Version returns Lantern's identification. Tier 1 (#3).
 func (c *ChainAPI) Version(_ context.Context) (api.Version, error) {
 	return api.Version{
-		Version:    "lantern/0.4.0 (lotus-compat)",
-		APIVersion: 0x000d0900, // matches Lotus v1.36 APIVersion = NewVer(1, 13, 9)
+		Version: "lantern/0.4.0 (lotus-compat)",
+		// Lotus FullAPIVersion1 = newVer(2,3,0) = (2<<16)|(3<<8)|0 = 0x020300.
+		// Curio / Lotus CLI EqMajorMinor checks the high 16 bits, so the
+		// patch byte is free for us to bump as Lantern's RPC surface
+		// evolves; the 2.3.x major.minor is what's gated.
+		APIVersion: 0x00020300,
 		BlockDelay: 30,
 	}, nil
 }
