@@ -258,6 +258,30 @@ func (c *ChainAPI) StateMinerAllocated(ctx context.Context, a address.Address, _
 	return &bf, nil
 }
 
+// StateMinerSectorAllocated reports whether a specific sector number has
+// been allocated for this miner. Curio's pre-flight sector allocator
+// uses this to pick the next sector number.
+func (c *ChainAPI) StateMinerSectorAllocated(ctx context.Context, a address.Address, s abi.SectorNumber, _ types.TipSetKey) (bool, error) {
+	ms, _, err := c.Accessor.LoadMiner(ctx, a)
+	if err != nil {
+		return false, fmt.Errorf("StateMinerSectorAllocated(%s,%d): %w", a, s, err)
+	}
+	root := ms.AllocatedSectorsRoot()
+	raw, err := c.BlockGetter.Get(ctx, root)
+	if err != nil {
+		return false, fmt.Errorf("StateMinerSectorAllocated fetch bitfield %s: %w", root, err)
+	}
+	bf, err := bitfield.NewFromBytes(raw)
+	if err != nil {
+		return false, fmt.Errorf("StateMinerSectorAllocated decode bitfield: %w", err)
+	}
+	isSet, err := bf.IsSet(uint64(s))
+	if err != nil {
+		return false, fmt.Errorf("StateMinerSectorAllocated isSet(%d): %w", s, err)
+	}
+	return isSet, nil
+}
+
 // StateMinerSectorCount returns counts of active/faulty/live sectors.
 // Tier 3 (#67).
 func (c *ChainAPI) StateMinerSectorCount(ctx context.Context, a address.Address, _ types.TipSetKey) (api.MinerSectors, error) {

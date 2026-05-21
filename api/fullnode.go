@@ -90,6 +90,8 @@ type FullNode interface {
 	StateMinerSectorCount(ctx context.Context, m address.Address, key types.TipSetKey) (MinerSectors, error)
 	StateMinerPreCommitDepositForPower(ctx context.Context, m address.Address, pci SectorPreCommitInfo, key types.TipSetKey) (big.Int, error)
 	StateMinerInitialPledgeForSector(ctx context.Context, sectorDuration abi.ChainEpoch, sectorSize abi.SectorSize, verifiedSize uint64, key types.TipSetKey) (big.Int, error)
+	StateMinerInitialPledgeCollateral(ctx context.Context, m address.Address, pci SectorPreCommitInfo, key types.TipSetKey) (big.Int, error)
+	StateMinerSectorAllocated(ctx context.Context, m address.Address, s abi.SectorNumber, key types.TipSetKey) (bool, error)
 	StateSectorPreCommitInfo(ctx context.Context, m address.Address, sector abi.SectorNumber, key types.TipSetKey) (*SectorPreCommitOnChainInfo, error)
 	StateSectorGetInfo(ctx context.Context, m address.Address, sector abi.SectorNumber, key types.TipSetKey) (*SectorOnChainInfo, error)
 	StateSectorPartition(ctx context.Context, m address.Address, sector abi.SectorNumber, key types.TipSetKey) (*SectorLocation, error)

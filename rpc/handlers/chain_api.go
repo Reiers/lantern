@@ -469,13 +469,17 @@ func (c *ChainAPI) StateLookupID(ctx context.Context, a address.Address, _ types
 // because the decode helper isn't in Phase 2's accessor (per B11). Phase 5
 // adds the proper sub-state decoder.
 func (c *ChainAPI) StateAccountKey(ctx context.Context, a address.Address, _ types.TipSetKey) (address.Address, error) {
-	// If `a` is already non-ID, pass through.
+	// If `a` is already a pubkey-typed (BLS / secp256k1 / delegated)
+	// address, return it unchanged — Lotus does the same.
 	if a.Protocol() != address.ID {
 		return a, nil
 	}
-	// Otherwise we need the account actor's state. For now return a
-	// not-impl error — Phase 5 wires the account-state decoder.
-	return address.Undef, ErrNotImpl("StateAccountKey", "account-actor state decode deferred to Phase 5 (see PHASE2-BLOCKERS.md B11)")
+	// Otherwise load the account actor's state and read PubkeyAddress.
+	as, _, err := c.Accessor.LoadAccount(ctx, a)
+	if err != nil {
+		return address.Undef, fmt.Errorf("StateAccountKey load account %s: %w", a, err)
+	}
+	return as.PubkeyAddress(), nil
 }
 
 // StateNetworkVersion returns the network version at a tipset. Tier 1 (#11).

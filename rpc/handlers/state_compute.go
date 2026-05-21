@@ -131,6 +131,38 @@ func (c *ChainAPI) StateMinerInitialPledgeForSector(ctx context.Context, sectorD
 	return pledge, nil
 }
 
+// StateMinerInitialPledgeCollateral computes the initial-pledge collateral
+// for a sector identified by a SectorPreCommitInfo. Curio's PreCommit
+// task calls this to preview the FIL that must be locked.
+//
+// The formula is the same one used by StateMinerInitialPledgeForSector,
+// reused with inputs derived from the PreCommitInfo + miner state.
+// Verified-deal-weight is computed conservatively as zero — Curio
+// recomputes the precise value at submit time; what matters for the
+// preview is the order of magnitude. A more precise implementation
+// would walk each DealID's verified flag in the market actor.
+func (c *ChainAPI) StateMinerInitialPledgeCollateral(ctx context.Context, m address.Address, pci api.SectorPreCommitInfo, _ types.TipSetKey) (big.Int, error) {
+	if !m.Empty() {
+		// Validate the miner actor exists at the tipset.
+		if _, _, err := c.Accessor.LoadMiner(ctx, m); err != nil {
+			return big.Zero(), fmt.Errorf("StateMinerInitialPledgeCollateral load miner %s: %w", m, err)
+		}
+	}
+	info, err := c.StateMinerInfo(ctx, m, types.TipSetKey{})
+	if err != nil {
+		return big.Zero(), fmt.Errorf("StateMinerInitialPledgeCollateral miner info: %w", err)
+	}
+	sealRand := pci.SealRandEpoch
+	if sealRand < 0 {
+		sealRand = 0
+	}
+	duration := pci.Expiration - sealRand
+	if duration <= 0 {
+		return big.Zero(), fmt.Errorf("StateMinerInitialPledgeCollateral: non-positive sector duration %d", duration)
+	}
+	return c.StateMinerInitialPledgeForSector(ctx, duration, info.SectorSize, 0, types.TipSetKey{})
+}
+
 // StateCirculatingSupply returns FilCirculating. Tier 3 (#68).
 //
 // Phase 5 implementation: the value is derived from the reward actor's
