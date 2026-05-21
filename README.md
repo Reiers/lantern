@@ -105,20 +105,22 @@ Or use Lantern's own CLI:
 
 ## Status
 
-Lantern is **alpha**. The cryptography works. The light-client primitives work. The Lotus-compatible RPC surface covers most of Curio's read path. Phase 7 (pure-Go VM for `StateCall` / `GasEstimateMessageGas` / block production) is in progress.
+Lantern is **alpha**. The cryptography works. The light-client primitives work. The Lotus-compatible RPC surface covers Curio's read path end-to-end. The VM is a **gas-accurate execution shell**, not a full FVM port — it dispatches every Curio call and accounts gas correctly, but only executes account-to-account `Send` end-to-end. Block production is gated behind an explicit operator opt-in flag pending the FVM bridge.
 
-| Phase | Scope                                                     | Status      |
-|-------|-----------------------------------------------------------|-------------|
-| 1     | Trusted root, header validation, F3 + DRAND verifier      | ✅ Shipped  |
-| 2     | HAMT/AMT walker, state accessor, gateway proxy            | ✅ Shipped  |
-| 3     | (folded into Phase 4)                                     | —           |
-| 4     | Lotus-compatible RPC server, wallet, signing              | ✅ Shipped  |
-| 5     | StateMiner/Market/VerifiedRegistry — SP-killer state APIs | ✅ Shipped  |
-| 6     | Persistent header store, libp2p, gossipsub mempool, StateWaitMsg | ✅ Shipped  |
-| 7     | Pure-Go VM, gas estimation, block production, paych       | 🔄 In progress |
-| 8     | Dedicated gateway infra, public release, docs site        | 📋 Planned  |
+| Phase | Scope                                                                   | Status      |
+|-------|-------------------------------------------------------------------------|-------------|
+| 1     | Trusted root, header validation, F3 + DRAND verifier                    | ✅ Shipped  |
+| 2     | HAMT/AMT walker, state accessor, gateway proxy                          | ✅ Shipped  |
+| 3     | (folded into Phase 4)                                                   | —           |
+| 4     | Lotus-compatible RPC server, wallet, signing                            | ✅ Shipped  |
+| 5     | StateMiner/Market/VerifiedRegistry — SP-killer state APIs               | ✅ Shipped  |
+| 6     | Persistent header store, libp2p, gossipsub mempool, StateWaitMsg        | ✅ Shipped  |
+| 7     | Pure-Go VM shell, gas estimation, paych vouchers, block production scaffolding | ✅ Shipped  |
+| 8     | Live Curio binding, FVM bridge, public release, docs site               | 🔄 In progress |
 
-**38 of 71** methods in the Curio FULLNODE_API surface are implemented as of Phase 5. **52 of 71** as of Phase 6. Tier-4 methods that need a VM are Phase 7's target.
+**64 of 71** methods in the Curio FULLNODE_API surface are implemented after Phase 7. Of the remaining 7:
+- 6 are partial / approximation (the most material gaps: `MinerCreateBlock` and `StateCall` for EVM contracts, both pending the FVM bridge in Phase 8)
+- 1 is a hard-gated stub (`SyncSubmitBlock` — never publishes without explicit `AllowBlockSubmit=true`)
 
 ---
 
@@ -129,6 +131,19 @@ Lantern is **alpha**. The cryptography works. The light-client primitives work. 
 - **What you do not trust:** any RPC provider, any peer serving state, any gateway. They can refuse to serve, but they cannot lie. Wrong bytes fail the hash check and get discarded.
 
 This is strictly stronger than the "trust your RPC" model that most lightweight Filecoin tooling falls back to.
+
+## VM honesty
+
+The Phase 7 VM is a **gas-accurate execution shell**, not a complete FVM. It:
+
+- **Dispatches** every message to the correct built-in actor method (v17/v18 method tables)
+- **Accounts gas** using the canonical Filecoin gas schedule — numbers match Lotus byte-for-byte for builtin calls
+- **Executes Send** (account-to-account FIL transfer) end-to-end against real state
+- **Returns sensible defaults** (ExitCode=0, conservative GasUsed) for every other builtin call
+- **Refuses to compute** state-mutating actor methods that would produce a state root the network doesn't agree with
+- **Refuses to publish** blocks unless `AllowBlockSubmit=true` is explicitly set
+
+Full FVM bridge is Phase 8. The shell is enough for: wallet sends, gas estimation, mempool participation, `StateWaitMsg`, and most of Curio's read-path operations. It is **not** enough for: block production, EVM contract execution, complex multisig operations.
 
 ---
 
