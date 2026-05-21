@@ -60,6 +60,10 @@ const (
 	defaultListen  = "127.0.0.1:1234"
 )
 
+// versionTag is set by the release build via -ldflags "-X main.versionTag=v...".
+// Empty when built from source without -ldflags.
+var versionTag string
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -94,7 +98,11 @@ func main() {
 	case "info":
 		err = cmdInfo(rest)
 	case "version", "--version", "-v":
-		fmt.Println("lantern 0.5.0 (Phase 11 — installer + quorum bootstrap)")
+		if versionTag != "" {
+			fmt.Println("lantern " + versionTag + " (Phase 11 — installer + quorum bootstrap)")
+		} else {
+			fmt.Println("lantern 0.5.0 (Phase 11 — installer + quorum bootstrap)")
+		}
 	case "help", "--help", "-h":
 		usage()
 	default:
