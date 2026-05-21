@@ -105,7 +105,9 @@ Or use Lantern's own CLI:
 
 ## Status
 
-Lantern is **alpha**. The cryptography works. The light-client primitives work. The Lotus-compatible RPC surface covers Curio's read path end-to-end. The VM is a **gas-accurate execution shell**, not a full FVM port — it dispatches every Curio call and accounts gas correctly, but only executes account-to-account `Send` end-to-end. Block production is gated behind an explicit operator opt-in flag pending the FVM bridge.
+Lantern is **alpha**. The cryptography works. The light-client primitives work. The Lotus-compatible RPC surface covers Curio's read path end-to-end. The VM is a **gas-accurate execution shell** that handles account-to-account `Send` natively; an optional **FVM bridge** delegates non-Send execution to a trusted Forest/Lotus node when operators want full VM coverage.
+
+Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on mainnet — see [`docs/phase8-part-a-results.md`](docs/phase8-part-a-results.md). Every state read tested matched Glif byte-for-byte.
 
 | Phase | Scope                                                                   | Status      |
 |-------|-------------------------------------------------------------------------|-------------|
@@ -116,11 +118,12 @@ Lantern is **alpha**. The cryptography works. The light-client primitives work. 
 | 5     | StateMiner/Market/VerifiedRegistry — SP-killer state APIs               | ✅ Shipped  |
 | 6     | Persistent header store, libp2p, gossipsub mempool, StateWaitMsg        | ✅ Shipped  |
 | 7     | Pure-Go VM shell, gas estimation, paych vouchers, block production scaffolding | ✅ Shipped  |
-| 8     | Live Curio binding, FVM bridge, public release, docs site               | 🔄 In progress |
+| 8     | Live Curio binding test, FVM bridge, block publisher, DHT, paych byte-exact, TRUST-MODEL.md | ✅ Shipped  |
+| 9     | `ChainNotify` + daemon header-store wiring — the V1.1 Curio-actually-advances unlock | 🔄 In progress |
 
-**64 of 71** methods in the Curio FULLNODE_API surface are implemented after Phase 7. Of the remaining 7:
-- 6 are partial / approximation (the most material gaps: `MinerCreateBlock` and `StateCall` for EVM contracts, both pending the FVM bridge in Phase 8)
-- 1 is a hard-gated stub (`SyncSubmitBlock` — never publishes without explicit `AllowBlockSubmit=true`)
+**69 of 71** methods in the Curio FULLNODE_API surface are implemented after Phase 8. The remaining 2:
+- `ChainNotify` (chain-head subscription) — Phase 9's headline. The single most important gap for real Curio use.
+- `SyncSubmitBlock` is a hard-gated stub. Never publishes without explicit `AllowBlockSubmit=true` plus a configured bridge.
 
 ---
 
@@ -143,7 +146,18 @@ The Phase 7 VM is a **gas-accurate execution shell**, not a complete FVM. It:
 - **Refuses to compute** state-mutating actor methods that would produce a state root the network doesn't agree with
 - **Refuses to publish** blocks unless `AllowBlockSubmit=true` is explicitly set
 
-Full FVM bridge is Phase 8. The shell is enough for: wallet sends, gas estimation, mempool participation, `StateWaitMsg`, and most of Curio's read-path operations. It is **not** enough for: block production, EVM contract execution, complex multisig operations.
+The shell alone is enough for: wallet sends, gas estimation, mempool participation, `StateWaitMsg`, and most of Curio's read-path operations.
+
+## FVM bridge (optional, opt-in)
+
+For operators who need full VM coverage — EVM contract calls, complex multisig operations, or block production with a real state root — Lantern V1 supports an opt-in **side-channel bridge** to a trusted Forest or Lotus node. The bridge is bounded to two operations:
+
+1. Non-`Send` `StateCall` execution
+2. `ParentStateRoot` computation for block production
+
+The bridge is **not** used for header verification, F3 finality, state reads (HAMT lookups), DRAND randomness, or any of Lantern's core trust-critical paths — those remain entirely self-verified.
+
+Default daemon has no bridge configured. Operators who want it configure their own trusted node and accept that node as a documented soft-trust point. See [`TRUST-MODEL.md`](TRUST-MODEL.md) for the full attacker analysis.
 
 ---
 
