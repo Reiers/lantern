@@ -354,6 +354,20 @@ func cmdDaemon(args []string) error {
 		} else {
 			fmt.Printf("  libp2p: DHT discovery on (target peers >= 50, hwm 200)\n")
 		}
+
+		// Issue #1: subscribe to /fil/blocks/<network> on gossipsub so
+		// new heads land in the header store within ~1-3s of network
+		// propagation, instead of waiting for the next 6-30s poll cycle.
+		// The polling Sync above stays as the catch-up fallback for
+		// blocks that gossipsub missed (connectivity blips, late join,
+		// etc.) and for the first install on a cold start.
+		if store != nil && p2pHost.PubSub != nil {
+			if _, _, gerr := startGossipBlocks(ctx, p2pHost.PubSub, store); gerr != nil {
+				fmt.Printf("  gossipsub-blocks: failed to start: %v (continuing without)\n", gerr)
+			} else {
+				fmt.Printf("  gossipsub-blocks: subscribed to %s (ingestor active)\n", build.MainnetGossipTopicBlocks)
+			}
+		}
 	}
 
 	// Phase 10 Part B: real Bitswap as primary fetch path. We rebuild
