@@ -193,7 +193,7 @@ func gatewayClient(gw string) (hamt.BlockGetter, *combined.Fetcher) {
 	httpc := hsync.NewClient([]string{gw}, 20*time.Second)
 	glifC := glif.New("", 20*time.Second)
 	f := combined.New(cache,
-		combined.Source{Name: "gateway", Getter: httpc, Timeout: 5 * time.Second},
+		combined.Source{Name: "gateway", Getter: httpc, Timeout: 5 * time.Second, Race: true},
 		combined.Source{Name: "glif", Getter: glifC, Timeout: 20 * time.Second},
 	)
 	return f, f
@@ -295,7 +295,7 @@ func cmdDaemon(args []string) error {
 	// once the libp2p host is up.
 	cache := hamt.NewMemBlockStore()
 	fetcher := combined.New(cache,
-		combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second},
+		combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
 		combined.Source{Name: "glif", Getter: glif.New("", 20*time.Second), Timeout: 20 * time.Second},
 	)
 	chainAPI := handlers.New(tr, fetcher, w, nil, "mainnet")
@@ -436,9 +436,15 @@ func cmdDaemon(args []string) error {
 			return fmt.Errorf("start bitswap: %w", err)
 		}
 		defer bsClient.Close()
+		// Issue #3 fix: gateway + Bitswap race in parallel for cold
+		// blocks. State-tree walks that previously timed out at 30s
+		// (because every cold block hit the 5s Bitswap timeout before
+		// falling through to the gateway) now complete in low seconds.
+		// Glif stays as the sequential last-resort fallback (different
+		// shape, slower, public-service rate-limited).
 		fetcher = combined.New(cache,
-			combined.Source{Name: "bitswap", Getter: bsClient, Timeout: *bitswapFullDL},
-			combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second},
+			combined.Source{Name: "bitswap", Getter: bsClient, Timeout: *bitswapFullDL, Race: true},
+			combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
 			combined.Source{Name: "glif", Getter: glif.New("", 20*time.Second), Timeout: 20 * time.Second},
 		)
 		rebindBlockGetter(chainAPI, fetcher)

@@ -23,10 +23,20 @@ type Cache interface {
 }
 
 // Source is any networked BlockGetter (Bitswap, HTTP gateway).
+//
+// Race=true sources are fired in parallel; the first successful response
+// wins and the rest are abandoned. Race=false sources are tried
+// sequentially AFTER all Race sources have failed.
+//
+// Use Race=true for fast, low-cost alternative paths to the same blocks
+// (e.g. our HTTP gateway and Bitswap both serve cold IPLD blocks).
+// Use Race=false for last-resort fallbacks with different semantics or
+// cost (e.g. Glif RPC, which is a public service and has a fee structure).
 type Source struct {
 	Name    string
 	Getter  hamt.BlockGetter
 	Timeout time.Duration
+	Race    bool
 }
 
 // Fetcher wires Cache + N Sources into the standard cache-first fallback
@@ -57,9 +67,14 @@ func New(cache Cache, sources ...Source) *Fetcher {
 	return f
 }
 
-// Get implements hamt.BlockGetter. It tries the cache, then each Source in
-// order, returning the first CID-matching response and caching it on the
-// way back.
+// Get implements hamt.BlockGetter. Cache-first; then race-tier sources
+// in parallel; then sequential fallback sources. The first CID-matching
+// response wins, is cached, and the rest are abandoned via ctx cancel.
+//
+// Issue #3: racing the gateway against Bitswap cuts cold-block latency
+// from "5s Bitswap timeout + gateway fetch" to "gateway fetch (~100ms)
+// OR Bitswap fast deadline", whichever fires first. State-tree walks
+// that previously took 30s+ now complete in low single seconds.
 func (f *Fetcher) Get(ctx context.Context, c cid.Cid) ([]byte, error) {
 	// 1. Cache.
 	if f.cache != nil {
@@ -68,43 +83,131 @@ func (f *Fetcher) Get(ctx context.Context, c cid.Cid) ([]byte, error) {
 			return raw, nil
 		}
 	}
-	// 2. Each source in order.
-	var firstErr error
+
+	// 2. Race tier: fire every Race=true source concurrently. First
+	//    successful CID-verified response wins, others are cancelled.
+	race := make([]Source, 0, len(f.sources))
+	fallback := make([]Source, 0, len(f.sources))
 	for _, s := range f.sources {
-		sctx := ctx
-		if s.Timeout > 0 {
-			var cancel context.CancelFunc
-			sctx, cancel = context.WithTimeout(ctx, s.Timeout)
-			defer cancel()
+		if s.Race {
+			race = append(race, s)
+		} else {
+			fallback = append(fallback, s)
 		}
-		raw, err := s.Getter.Get(sctx, c)
+	}
+
+	var firstErr error
+	if len(race) > 0 {
+		raw, name, err := f.raceFetch(ctx, c, race)
+		if err == nil {
+			f.recordHit(c, raw, name)
+			return raw, nil
+		}
+		firstErr = err
+	}
+
+	// 3. Sequential fallback tier.
+	for _, s := range fallback {
+		raw, err := f.fetchOne(ctx, c, s)
 		if err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
 			continue
 		}
-		// CID verify.
-		if vErr := hamt.VerifyBlockCID(c, raw); vErr != nil {
-			if firstErr == nil {
-				firstErr = vErr
-			}
-			continue
-		}
-		// Cache it.
-		if f.cache != nil {
-			f.cache.Put(c, raw)
-		}
-		f.mu.Lock()
-		f.sourceHits[s.Name].Add(1)
-		f.mu.Unlock()
+		f.recordHit(c, raw, s.Name)
 		return raw, nil
 	}
+
 	f.totalMisses.Add(1)
 	if firstErr == nil {
 		firstErr = errors.New("no source returned the block")
 	}
 	return nil, firstErr
+}
+
+// raceFetch fires `sources` concurrently with their per-source timeouts.
+// Returns the first successful CID-verified response, with the name of
+// the source that served it. On total failure returns the first error
+// observed (best-effort; the goroutines may have produced different errors).
+func (f *Fetcher) raceFetch(ctx context.Context, c cid.Cid, sources []Source) ([]byte, string, error) {
+	rctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type result struct {
+		raw  []byte
+		name string
+		err  error
+	}
+	out := make(chan result, len(sources))
+	for _, s := range sources {
+		go func(s Source) {
+			sctx := rctx
+			if s.Timeout > 0 {
+				var tcancel context.CancelFunc
+				sctx, tcancel = context.WithTimeout(rctx, s.Timeout)
+				defer tcancel()
+			}
+			raw, err := s.Getter.Get(sctx, c)
+			if err != nil {
+				out <- result{nil, s.Name, err}
+				return
+			}
+			if vErr := hamt.VerifyBlockCID(c, raw); vErr != nil {
+				out <- result{nil, s.Name, vErr}
+				return
+			}
+			out <- result{raw, s.Name, nil}
+		}(s)
+	}
+
+	var firstErr error
+	for i := 0; i < len(sources); i++ {
+		r := <-out
+		if r.err != nil {
+			if firstErr == nil {
+				firstErr = r.err
+			}
+			continue
+		}
+		// Got one. Cancel the rest (defer cancel does this).
+		return r.raw, r.name, nil
+	}
+	if firstErr == nil {
+		firstErr = errors.New("race: no source returned the block")
+	}
+	return nil, "", firstErr
+}
+
+// fetchOne does a single sequential fetch with per-source timeout + CID verify.
+func (f *Fetcher) fetchOne(ctx context.Context, c cid.Cid, s Source) ([]byte, error) {
+	sctx := ctx
+	if s.Timeout > 0 {
+		var cancel context.CancelFunc
+		sctx, cancel = context.WithTimeout(ctx, s.Timeout)
+		defer cancel()
+	}
+	raw, err := s.Getter.Get(sctx, c)
+	if err != nil {
+		return nil, err
+	}
+	if vErr := hamt.VerifyBlockCID(c, raw); vErr != nil {
+		return nil, vErr
+	}
+	return raw, nil
+}
+
+// recordHit caches the block (if cache present) and bumps the source-hit
+// counter for `name`.
+func (f *Fetcher) recordHit(c cid.Cid, raw []byte, name string) {
+	if f.cache != nil {
+		f.cache.Put(c, raw)
+	}
+	f.mu.Lock()
+	if counter, ok := f.sourceHits[name]; ok {
+		counter.Add(1)
+	}
+	f.mu.Unlock()
 }
 
 // Stats returns a snapshot of fetch counters by source.
