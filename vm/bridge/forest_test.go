@@ -92,7 +92,11 @@ func TestForestBridge_HappyPath(t *testing.T) {
 		req := decodeRPC(t, r)
 		seenMethod = req.Method
 		seenParamsLen = len(req.Params)
-		resp := map[string]interface{}{
+		// Lotus encodes Root as the IPLD-link JSON shape
+		// `{"/":"<cid>"}`, not as a bare string. Mirror that
+		// in the test so we catch any future regression in the
+		// bridge decoder.
+		respPayload := map[string]interface{}{
 			"jsonrpc": "2.0",
 			"id":      1,
 			"result": map[string]interface{}{
@@ -106,23 +110,6 @@ func TestForestBridge_HappyPath(t *testing.T) {
 				},
 			},
 		}
-		// The bridge expects Root as a JSON string. Adjust to the wire
-		// shape Forest actually sends: a bare CID string under "Root".
-		respPayload := map[string]interface{}{
-			"jsonrpc": "2.0",
-			"id":      1,
-			"result": map[string]interface{}{
-				"Root": wantRoot.String(),
-				"Trace": []map[string]interface{}{
-					{"MsgRct": map[string]interface{}{
-						"ExitCode": 0,
-						"Return":   base64.StdEncoding.EncodeToString([]byte("hello")),
-						"GasUsed":  12345,
-					}},
-				},
-			},
-		}
-		_ = resp
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(respPayload)
 	}))
@@ -212,7 +199,7 @@ func TestForestBridge_BearerToken(t *testing.T) {
 			"jsonrpc": "2.0",
 			"id":      1,
 			"result": map[string]interface{}{
-				"Root":  mkRootCID(t, "tok").String(),
+				"Root":  map[string]string{"/": mkRootCID(t, "tok").String()},
 				"Trace": []map[string]interface{}{},
 			},
 		})
@@ -226,6 +213,60 @@ func TestForestBridge_BearerToken(t *testing.T) {
 	}
 	if sawAuth != "Bearer "+wantToken {
 		t.Fatalf("auth header = %q, want %q", sawAuth, "Bearer "+wantToken)
+	}
+}
+
+// TestForestBridge_RejectsBareStringRoot guards against regressing the
+// wire format: if a future change accepts {"Root": "<cid>"} (bare string)
+// instead of {"Root": {"/": "<cid>"}}, the decoder must reject it so we
+// don't silently produce undefined state roots against a quirky upstream.
+func TestForestBridge_RejectsBareStringRoot(t *testing.T) {
+	wantRoot := mkRootCID(t, "bare-string")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"result": map[string]interface{}{
+				"Root":  wantRoot.String(), // bare string, NOT a link object
+				"Trace": []map[string]interface{}{},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	b := NewForestBridge(srv.URL, "", 5*time.Second)
+	_, _, err := b.ComputeStateRoot(context.Background(), mkRootCID(t, "base"), 1, nil)
+	if err == nil {
+		t.Fatal("want error when Root is bare string, got nil")
+	}
+}
+
+// TestForestBridge_DecodesLinkRoot is the positive companion: confirms
+// the bridge accepts the canonical IPLD-link shape `{"/":"<cid>"}`
+// (which is what live Lotus actually sends).
+func TestForestBridge_DecodesLinkRoot(t *testing.T) {
+	wantRoot := mkRootCID(t, "canonical-link")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"result": map[string]interface{}{
+				"Root":  map[string]string{"/": wantRoot.String()},
+				"Trace": []map[string]interface{}{},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	b := NewForestBridge(srv.URL, "", 5*time.Second)
+	gotRoot, _, err := b.ComputeStateRoot(context.Background(), mkRootCID(t, "base"), 1, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotRoot != wantRoot {
+		t.Fatalf("root mismatch: got %s want %s", gotRoot, wantRoot)
 	}
 }
 
