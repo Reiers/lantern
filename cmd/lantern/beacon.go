@@ -37,6 +37,10 @@ import (
 	"github.com/multiformats/go-multihash"
 
 	"github.com/Reiers/lantern/build"
+	f3pkg "github.com/Reiers/lantern/chain/f3"
+	"github.com/Reiers/lantern/chain/f3/anchor"
+	"github.com/Reiers/lantern/chain/f3/certexch"
+	"github.com/Reiers/lantern/chain/f3/subscriber"
 	llibp2p "github.com/Reiers/lantern/net/libp2p"
 )
 
@@ -52,6 +56,9 @@ func cmdBeacon(args []string) error {
 	announceDHT := fs.Bool("dht-announce", true, "Announce ourselves under the lantern/beacon/v1 rendezvous.")
 	gateway := fs.String("gateway", "https://gateway.lantern.reiers.io", "Upstream gateway URL for backfill on cache miss. Empty disables backfill.")
 	metricsAddr := fs.String("metrics", "", "Optional listen address for /metrics. Empty disables.")
+	certexchEnable := fs.Bool("certexch", true, "Serve F3 cert-exchange over libp2p (B-11-01). Disable to skip the ingest loop.")
+	certexchUpstream := fs.String("certexch-upstream", "https://api.node.glif.io/rpc/v1", "Upstream Lotus-compatible JSON-RPC source for F3 certs.")
+	certexchPoll := fs.Duration("certexch-poll", 30*time.Second, "How often to pull new F3 certs from upstream.")
 	fs.Parse(args)
 
 	cacheBytes, err := parseSize(*cacheSizeStr)
@@ -155,6 +162,15 @@ func cmdBeacon(args []string) error {
 		}()
 	}
 
+	// 6a) F3 cert-exchange responder (B-11-01). Shares the beacon's libp2p
+	// host; serves /f3/certexch/get/1/<networkName> backed by an
+	// in-memory certstore populated from an upstream JSON-RPC source.
+	if *certexchEnable {
+		if err := startCertExch(ctx, host, *certexchUpstream, *certexchPoll); err != nil {
+			fmt.Printf("WARN cert-exchange responder: %v\n", err)
+		}
+	}
+
 	// 6) Optional cache-miss backfill from an upstream gateway. The block
 	// is fetched via the gateway's CAR-ish object endpoint and inserted
 	// into the local blockstore so subsequent Bitswap requests hit cache.
@@ -173,6 +189,45 @@ func cmdBeacon(args []string) error {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 	fmt.Println("\nShutting down...")
+	return nil
+}
+
+// startCertExch wires up the F3 cert-exchange responder on the beacon's
+// libp2p host. Logs one line confirming the listener is up so operators
+// see it in their boot transcript (this is the V1.2.1 deliverable —
+// the responder side of the cert-exchange protocol that completes
+// LanternBeaconSource in the bootstrap quorum).
+func startCertExch(ctx context.Context, h *llibp2p.Host, upstream string, poll time.Duration) error {
+	a, err := anchor.Embedded("mainnet")
+	if err != nil {
+		return fmt.Errorf("load anchor: %w", err)
+	}
+	mf, err := f3pkg.ParseManifest(build.F3ManifestMainnetJSON)
+	if err != nil {
+		return fmt.Errorf("parse manifest: %w", err)
+	}
+	src := subscriber.NewJSONRPCSource(upstream)
+	r, err := certexch.New(certexch.Config{
+		Host:         h.H,
+		Anchor:       a,
+		Manifest:     mf,
+		CertSource:   src,
+		PollInterval: poll,
+	})
+	if err != nil {
+		return err
+	}
+	if err := r.Start(ctx); err != nil {
+		return fmt.Errorf("start responder: %w", err)
+	}
+	fmt.Printf("Cert-exch:    listening on %s (peer %s, upstream %s)\n",
+		r.ProtocolID(), h.ID(), upstream)
+	go func() {
+		<-ctx.Done()
+		stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = r.Stop(stopCtx)
+	}()
 	return nil
 }
 
