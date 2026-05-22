@@ -41,6 +41,7 @@ import (
 	"github.com/Reiers/lantern/chain/f3/anchor"
 	"github.com/Reiers/lantern/chain/f3/certexch"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
+	"github.com/Reiers/lantern/internal/buildinfo"
 	llibp2p "github.com/Reiers/lantern/net/libp2p"
 )
 
@@ -94,8 +95,9 @@ func cmdBeacon(args []string) error {
 	hcfg := llibp2p.HostConfig{
 		ListenAddrs:    strings.Split(*listen, ","),
 		BootstrapPeers: build.MainnetBootstrapPeers,
+		MinPeers:       100,
 		MaxPeers:       200,
-		UserAgent:      "lantern-beacon/0.1",
+		UserAgent:      "lantern-beacon/" + buildinfo.BuildVersion(),
 	}
 	host, err := llibp2p.New(ctx, hcfg)
 	if err != nil {
@@ -116,6 +118,14 @@ func cmdBeacon(args []string) error {
 	if err := kdht.Bootstrap(ctx); err != nil {
 		return fmt.Errorf("dht bootstrap: %w", err)
 	}
+
+	// V1.2.1: run the same closest-walk + dial-walk discovery loops the
+	// daemon uses, so the beacon's peer count also climbs past the
+	// bootstrap floor. The beacon's DHT is server-mode (it contributes
+	// routing), but the discovery walks are mode-agnostic.
+	host.RunDHTDiscovery(ctx, kdht, llibp2p.DHTOptions{
+		BootstrapPeers: build.MainnetBootstrapPeers,
+	})
 
 	// 4) Bitswap (client+server). Server-side is enabled by default;
 	// clients dialing in will receive blocks present in beaconBS.
