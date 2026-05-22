@@ -114,3 +114,44 @@ Fix 3 is optional polish.
 Deploy updated binary to mainnet daemon, watch NetPeers for 10 minutes,
 expect monotonic climb to 50+ then stabilization at 75-150.
 
+
+---
+
+## V1.2.1 deploy finding (2026-05-22)
+
+After shipping Fix 1 + Fix 2 and redeploying to live mainnet
+(daemon 192.168.2.32:11234, lantern v1.2.1):
+
+```
+libp2p[dht]: closest-walk peers=0 rt_size=0 connected=4 err=failed to find any peer in table
+libp2p[dht]: dial-walk candidates=0 dialed=0 connected=4 rt_size=0
+```
+
+**Diagnosis:** the DHT walks fire on schedule, but the routing table
+never populates because:
+
+1. `dht.Bootstrap(ctx)` is not called against the standard libp2p /
+   Filecoin DHT seed peers after host construction.
+2. The 4 already-connected peers (3 PL/ChainSafe/Glif bootstraps +
+   1 Lantern beacon) come from the daemon's `connectKnownPeers` path,
+   which doesn't push them into the DHT routing table.
+
+**Sub-agent task for V1.2.1-followup-peers:**
+
+a) After `dht.New(...)` returns, call `dht.Bootstrap(ctx)` against
+   either:
+   - the libp2p IPFS DHT bootstrap list (8 known peers), OR
+   - the Filecoin-specific bootstrap list from `chain/bootstrap/peerlist`
+     (whichever already exists; otherwise add a small const list)
+
+b) After every successful `connectKnownPeers` connect, also call
+   `dht.RoutingTable().TryAddPeer(pid, ..., false)` so those peers
+   become walk candidates.
+
+c) Surface `rt_size` in the boot summary line, not just in the
+   periodic walk log, so misconfig is visible at startup.
+
+This unblocks peers >= 50 and likely also unblocks the StateMinerInfo
+timeouts (state walks over Bitswap with only 4 peers are the obvious
+bottleneck).
+
