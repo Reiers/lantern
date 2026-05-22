@@ -102,7 +102,7 @@ convention — same security posture as default Lotus).
    ```
 3. If `crypto` is null, the key is plaintext.
 
-**V1.1 hardening required (B-9-11, see PHASE9-BLOCKERS.md):** the daemon
+**V1.1 hardening required (tracked internally):** the daemon
 should refuse to start when `LANTERN_PASS` is empty AND the keystore
 contains plaintext keys, surfacing a one-shot upgrade command. Until
 that lands, this is an operator-discipline gate.
@@ -170,7 +170,7 @@ clock at daemon startup and **warns** (does not yet refuse) when
 - `chain/f3/anchor/anchor.go::Anchor.CapturedAt` field.
 - TODO (B-9-12): `cmd/lantern daemon` should hard-fail when the anchor
   is older than 60d, and warn at 30d. Currently neither is implemented.
-  See PHASE9-BLOCKERS.md.
+  See the hardening backlog.
 
 **Operator action:** re-build / re-deploy Lantern at least monthly so
 the embedded anchor stays fresh. The release CI (B-9-13) is what makes
@@ -184,7 +184,7 @@ $ python3 -c "import json; print(json.load(open('chain/f3/anchor/anchor_mainnet.
 ```
 
 **Default deployment status:** 🟡 enforce-at-start not yet wired. Track
-in PHASE9-BLOCKERS.md B-9-12.
+in the hardening backlog.
 
 ---
 
@@ -234,7 +234,7 @@ configured. Publishing is gated behind `AllowBlockSubmit` (see §1).
   `/fil/blocks/<network>`.
 - Surface validation in `validateIncoming` rejects obviously-malformed
   blocks (no miner, missing signature, missing BLS aggregate).
-- Deep validation is a future task — see PHASE9-BLOCKERS.md B-9-14.
+- Deep validation is a future task — see the hardening backlog.
 
 **Operator action:** none for V1.1. The blockpub package is wired but
 no consumer treats its output as canonical. If a Phase 10 component
@@ -269,7 +269,7 @@ If you see frequent reorgs in the daemon logs, audit the upstream.
 
 **Default deployment status:** 🟡 cross-check not yet implemented; F3
 subscriber and header store run in parallel without coordination.
-Track in PHASE9-BLOCKERS.md B-9-15.
+Track in the hardening backlog.
 
 ---
 
@@ -288,5 +288,5 @@ Track in PHASE9-BLOCKERS.md B-9-15.
 
 **Verdict for V1.1-rc.1:** ✅ ship as "alpha-quality for SP backends".
 The five ✅ gates are correctly locked. The two 🟡 items are tracked in
-PHASE9-BLOCKERS.md and don't block read-mostly use. The ⚠ items are
+the hardening backlog. and don't block read-mostly use. The ⚠ items are
 operator-discipline issues with mitigation paths documented above.

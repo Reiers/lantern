@@ -1,6 +1,6 @@
 # Lantern installer + setup spec
 
-> **Status (Phase 11):** Implementation **shipped** in v0.5.0 / V1.2-rc.1. The bootstrap quorum, `install.sh`, `lantern doctor`, `lantern repair`, `lantern service`, native Mac menu-bar app, and tag-triggered release pipeline are all in main. See `PHASE11-BLOCKERS.md` for the delivery report and `docs/phase11-install-evidence.md` for an end-to-end transcript proving 5 independent sources agreed on the same finalized tipset on real mainnet.
+> **Status:** shipped in v1.2.1. The bootstrap quorum, `install.sh`, `lantern doctor`, `lantern repair`, `lantern service`, native Mac menu-bar app, and tag-triggered release pipeline are all in main.
 
 The promise: one command on a fresh Mac, three minutes later you have a working Filecoin light node that cryptographically agrees with the canonical mainnet chain, with **no dependency on Glif or any single provider**.
 

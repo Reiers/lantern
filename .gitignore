@@ -6,3 +6,10 @@
 
 # Wrangler local cache from Cloudflare Pages deploys
 deploy/*/.wrangler/
+
+# Internal development notes (preserved in ~/.openclaw/workspace/projects/lantern-internal/)
+PHASE*-BLOCKERS.md
+PHASE*-PEER-COUNT-ASK.md
+F3-WIRING-NOTES.md
+ISSUE-*.md
+docs/phase*

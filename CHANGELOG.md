@@ -102,7 +102,7 @@ Measured against a live `lotus v1.36` on the same box:
   injection point. The legacy `lantern/0.4.0 (lotus-compat)` constant
   is gone; untagged dev builds report `dev Lantern+mainnet`.
 
-- **Peer-count lift (PHASE11-PEER-COUNT-ASK.md Fix 1 + Fix 2).**
+- **Peer-count lift.**
   Adds an explicit `connmgr.NewConnManager(MinPeers, MaxPeers, 20s)`
   to the libp2p host (daemon: 50/200, beacon: 100/200) and runs two
   DHT discovery loops on top of the client-mode DHT:
@@ -201,7 +201,7 @@ Real libp2p host wired into `Net*` RPC methods; `boxo/bitswap` as
 primary fetch source; `lantern beacon` subcommand; Curio webui Chain
 Node Network panel renders live data. 71/71 method coverage.
 
-See `PHASE10-BLOCKERS.md` for the full delivery report.
+
 
 ## v1.0.0 — Phases 1–9 (V1, working light client)
 
