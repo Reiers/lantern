@@ -53,6 +53,7 @@ import (
 	"github.com/Reiers/lantern/rpc/handlers"
 	"github.com/Reiers/lantern/rpc/server"
 	"github.com/Reiers/lantern/state/hamt"
+	"github.com/Reiers/lantern/vm/bridge"
 	"github.com/Reiers/lantern/wallet"
 )
 
@@ -255,6 +256,22 @@ func cmdDaemon(args []string) error {
 	bitswapFullDL := fs.Duration("bitswap-full", 5*time.Second, "Bitswap full-stage deadline for swarm broadcast.")
 	preferredPeersStr := fs.String("bitswap-peers", "", "Comma-separated multiaddrs to use as preferred Bitswap peers (e.g. lantern beacon nodes).")
 	metricsListen := fs.String("metrics", "", "Optional listen address for /metrics (Prometheus text exposition). Empty disables.")
+
+	// Issue #4: VM bridge for block production state-root computation.
+	//
+	// Lantern's native VM is a gas-accurate Send-only shell. For
+	// MinerCreateBlock + AllowBlockSubmit=true, the post-execution
+	// ParentStateRoot must come from a real FVM. When --vm-bridge-rpc is
+	// set, the daemon delegates that one computation to an upstream
+	// Forest/Lotus node (typically the operator's own primary). This is
+	// the SP failover backup story: when Lotus dies but Forest stays up
+	// (or vice versa), Lantern can still produce blocks for Curio.
+	//
+	// AllowBlockSubmit refuses to start without a bridge configured.
+	vmBridgeRPC := fs.String("vm-bridge-rpc", "", "Upstream Forest/Lotus JSON-RPC URL for VM bridge (e.g. http://127.0.0.1:1234/rpc/v1). Required when --allow-block-submit is set.")
+	vmBridgeToken := fs.String("vm-bridge-token", "", "Optional Bearer token for the VM bridge upstream (defaults to env LANTERN_VM_BRIDGE_TOKEN when empty).")
+	vmBridgeTimeout := fs.Duration("vm-bridge-timeout", 30*time.Second, "Per-request timeout for VM bridge RPC calls.")
+	allowBlockSubmit := fs.Bool("allow-block-submit", false, "Allow SyncSubmitBlock to publish to gossipsub. Requires --vm-bridge-rpc.")
 	fs.Parse(args)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -282,6 +299,29 @@ func cmdDaemon(args []string) error {
 		combined.Source{Name: "glif", Getter: glif.New("", 20*time.Second), Timeout: 20 * time.Second},
 	)
 	chainAPI := handlers.New(tr, fetcher, w, nil, "mainnet")
+
+	// Issue #4: wire optional VM bridge for block production. Refuse to
+	// start when AllowBlockSubmit is on but no bridge is configured;
+	// silently publishing blocks with the parent stateRoot copied
+	// verbatim would be rejected by the network and would consume the
+	// miner's winning ticket. Failing loud here protects the SP.
+	if *allowBlockSubmit && *vmBridgeRPC == "" {
+		return fmt.Errorf("--allow-block-submit requires --vm-bridge-rpc to be set (see issue #4 in repo)")
+	}
+	if *vmBridgeRPC != "" {
+		token := *vmBridgeToken
+		if token == "" {
+			token = os.Getenv("LANTERN_VM_BRIDGE_TOKEN")
+		}
+		vmBr := bridge.NewForestBridge(*vmBridgeRPC, token, *vmBridgeTimeout)
+		chainAPI.WithBridge(vmBr)
+		chainAPI.AllowBlockSubmit = *allowBlockSubmit
+		fmt.Printf("  vm-bridge:    %s", vmBr.Provenance())
+		if *allowBlockSubmit {
+			fmt.Printf("  (allow-block-submit=true)")
+		}
+		fmt.Println()
+	}
 
 	// Phase 9: wire the persistent header store + sync agent + head-change
 	// distributor so ChainNotify, ChainGetTipSetByHeight, ChainGetBlock,
