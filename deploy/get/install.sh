@@ -119,18 +119,18 @@ download_binary() {
 
   # Mirror chain. The Lantern git repo is currently private, so the
   # GitHub release endpoint returns 404 for anonymous downloads. The
-  # primary mirror is dl.lantern.reiers.io, served from the same
+  # primary mirror is dl-lantern.reiers.io, served from the same
   # Hetzner host that runs the gateway. GitHub releases are listed as
   # a fallback so once the repo flips public the chain Just Works
   # without an installer update.
   if [[ "$LANTERN_VERSION" == "latest" ]]; then
     declare -a urls=(
-      "https://dl.lantern.reiers.io/latest/${bin_name}"
+      "https://dl-lantern.reiers.io/latest/${bin_name}"
       "https://github.com/Reiers/lantern/releases/latest/download/${bin_name}"
     )
   else
     declare -a urls=(
-      "https://dl.lantern.reiers.io/${LANTERN_VERSION}/${bin_name}"
+      "https://dl-lantern.reiers.io/${LANTERN_VERSION}/${bin_name}"
       "https://github.com/Reiers/lantern/releases/download/${LANTERN_VERSION}/${bin_name}"
     )
   fi
