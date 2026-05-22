@@ -6,39 +6,47 @@
 <title>Lantern</title>
 <style>
 :root {
-  --bg: #f7f3eb;
+  /* Filecoin blue palette. Calibrated against calix-mainnet.reiers.io
+     for visual consistency across the reiers.io Filecoin tools. */
+  --bg: #f4f7fb;
   --bg-card: #ffffff;
-  --bg-soft: #fdf9f1;
-  --border: #ead9c0;
-  --border-strong: #d9c3a0;
-  --fg: #2a1f12;
-  --fg-soft: #5b4730;
-  --muted: #8a7558;
-  --accent: #d97a1e;
-  --accent-soft: #fbe9d3;
-  --ok: #2b8a3e;
-  --warn: #c5811a;
-  --bad: #c2342e;
-  --shadow: 0 1px 2px rgba(60, 40, 15, 0.04), 0 4px 12px rgba(60, 40, 15, 0.05);
+  --bg-soft: #eff3f9;
+  --border: rgba(15, 30, 60, 0.10);
+  --border-strong: rgba(0, 90, 200, 0.22);
+  --fg: #0a1628;
+  --fg-soft: #29476b;
+  --muted: #5a7896;
+  --accent: #0090ff;
+  --accent-bright: #44b0ff;
+  --accent-deep: #0066cc;
+  --accent-soft: rgba(0, 144, 255, 0.08);
+  --ok: #00a86b;
+  --warn: #d97706;
+  --bad: #dc2626;
+  --shadow: 0 1px 2px rgba(15, 30, 60, 0.04), 0 4px 16px rgba(15, 30, 60, 0.06);
+  --shadow-lg: 0 16px 48px rgba(0, 90, 200, 0.08), 0 6px 16px rgba(0, 50, 120, 0.05);
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #14110b;
-    --bg-card: #1d1812;
-    --bg-soft: #181410;
-    --border: #2e261b;
-    --border-strong: #3f3526;
-    --fg: #f5ecdb;
-    --fg-soft: #c9b48d;
-    --muted: #8a7a5b;
-    --accent: #f0a560;
-    --accent-soft: #2c2114;
-    --ok: #3fb950;
-    --warn: #e3b341;
-    --bad: #f47373;
-    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.4);
+    --bg: #0a1628;
+    --bg-card: #11203a;
+    --bg-soft: #0d1a30;
+    --border: rgba(150, 190, 240, 0.10);
+    --border-strong: rgba(68, 176, 255, 0.30);
+    --fg: #eaf2ff;
+    --fg-soft: #b5c8e2;
+    --muted: #7895b8;
+    --accent: #44b0ff;
+    --accent-bright: #6fc4ff;
+    --accent-deep: #0090ff;
+    --accent-soft: rgba(68, 176, 255, 0.10);
+    --ok: #2dd4a8;
+    --warn: #f59e0b;
+    --bad: #f87171;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 16px 48px rgba(0, 144, 255, 0.15), 0 6px 16px rgba(0, 0, 0, 0.6);
   }
 }
 
@@ -64,12 +72,12 @@ header { display: flex; align-items: center; justify-content: space-between; mar
 /* ---- Health pill ---- */
 .health-pill { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.8rem; font-weight: 500; background: var(--bg-card); border: 1px solid var(--border); }
 .health-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
-.health-dot.ok { background: var(--ok); box-shadow: 0 0 0 4px rgba(43, 138, 62, 0.15); animation: pulse 2.4s ease-in-out infinite; }
+.health-dot.ok { background: var(--ok); box-shadow: 0 0 0 4px rgba(0, 168, 107, 0.15); animation: pulse 2.4s ease-in-out infinite; }
 .health-dot.warn { background: var(--warn); }
 .health-dot.bad { background: var(--bad); }
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(43, 138, 62, 0.4); }
-  50%      { box-shadow: 0 0 0 6px rgba(43, 138, 62, 0.0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 168, 107, 0.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(0, 168, 107, 0.0); }
 }
 
 /* ---- Cards ---- */
@@ -79,7 +87,7 @@ header { display: flex; align-items: center; justify-content: space-between; mar
 .card-meta { font-size: 0.75rem; color: var(--muted); font-family: var(--mono); }
 
 /* ---- Hero (client mode) ---- */
-.hero { background: linear-gradient(135deg, var(--bg-card) 0%, var(--accent-soft) 100%); border: 1px solid var(--border); border-radius: 18px; padding: 2rem; margin-bottom: 1rem; }
+.hero { background: linear-gradient(135deg, var(--bg-card) 0%, var(--accent-soft) 100%); border: 1px solid var(--border); border-radius: 18px; padding: 2rem; margin-bottom: 1rem; box-shadow: var(--shadow-lg); }
 .hero-status { display: flex; align-items: center; gap: 0.75rem; font-size: 1.1rem; color: var(--fg); margin-bottom: 1.5rem; }
 .hero-status .health-dot { width: 12px; height: 12px; }
 .hero-grid { display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; gap: 1.5rem; align-items: end; }
@@ -90,6 +98,7 @@ header { display: flex; align-items: center; justify-content: space-between; mar
 .hero-stat { display: flex; flex-direction: column; }
 .hero-stat-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
 .hero-stat-value { font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; font-family: var(--mono); margin-top: 0.35rem; line-height: 1; }
+.hero-stat-value.ok { color: var(--ok); }
 .hero-stat-sub { font-size: 0.75rem; color: var(--muted); margin-top: 0.3rem; }
 
 @media (max-width: 720px) {
@@ -215,9 +224,9 @@ body[data-mode="dev"]    [data-show~="dev"].flex-show { display: flex; }
         <span class="hero-stat-sub" id="c-peers-sub">—</span>
       </div>
       <div class="hero-stat">
-        <span class="hero-stat-label">Lag</span>
-        <span class="hero-stat-value" id="c-lag">—</span>
-        <span class="hero-stat-sub">behind Lotus</span>
+        <span class="hero-stat-label">Status</span>
+        <span class="hero-stat-value" id="c-sync">—</span>
+        <span class="hero-stat-sub" id="c-sync-sub">—</span>
       </div>
       <div class="hero-stat">
         <span class="hero-stat-label">Uptime</span>
@@ -302,9 +311,9 @@ body[data-mode="dev"]    [data-show~="dev"].flex-show { display: flex; }
         <div class="stat-sub">Curio binds here</div>
       </div>
       <div class="stat">
-        <div class="stat-label">Lag vs network</div>
+        <div class="stat-label">Network sync</div>
         <div class="stat-value small" id="s-lag">—</div>
-        <div class="stat-sub">behind expected head</div>
+        <div class="stat-sub">blocks behind network head</div>
       </div>
     </div>
   </div>
@@ -499,7 +508,13 @@ const fmt = {
 };
 
 // ---- Health computation ----
-// Returns { tone: 'ok'|'warn'|'bad', sentence: human-readable for client mode }
+// Returns { tone, sentence, lag, syncLabel, syncSub, pillLabel }
+//
+// Client-facing language is deliberately calm. A 1-block delay against
+// the latest network timestamp is completely normal (the network just
+// produced a block in the last 30 seconds), so we don't surface it as
+// "lag" or "behind" in client mode. SP and dev modes keep the numeric
+// view.
 function computeHealth(overview, syncSnap) {
   const peers = overview.peers ?? 0;
   const minPeers = overview.peers_min ?? 50;
@@ -509,22 +524,31 @@ function computeHealth(overview, syncSnap) {
 
   let tone = "ok";
   let why = "";
-  if (!headSet) { tone = "bad"; why = "Lantern hasn't anchored a chain head yet"; }
+  if (!headSet) { tone = "bad"; why = "the node hasn't anchored a chain head yet"; }
   else if (peers < 5) { tone = "bad"; why = "very few peers connected"; }
-  else if (lag >= 5) { tone = "bad"; why = "Lantern is more than a few epochs behind the network"; }
-  else if (peers < Math.max(20, Math.floor(minPeers / 2))) { tone = "warn"; why = "peer count is low but recovering"; }
-  else if (lag >= 2) { tone = "warn"; why = "Lantern is catching up to the network"; }
-  else if (syncErr) { tone = "warn"; why = "recent sync warning logged: " + syncErr; }
+  else if (lag >= 8) { tone = "bad"; why = "the node is several minutes behind the network"; }
+  else if (peers < Math.max(20, Math.floor(minPeers / 2))) { tone = "warn"; why = "peer count is recovering"; }
+  else if (lag >= 4) { tone = "warn"; why = "the node is syncing fresh blocks from the network"; }
+  else if (syncErr) { tone = "warn"; why = "a recent sync warning was logged"; }
 
-  let sentence;
+  let sentence, syncLabel, syncSub, pillLabel;
   if (tone === "ok") {
-    sentence = "Lantern is connected to Filecoin and in sync. Everything looks good.";
+    sentence = "Your Lantern is connected to Filecoin and current with the network.";
+    syncLabel = "In sync";
+    syncSub = "current with the network";
+    pillLabel = "all good";
   } else if (tone === "warn") {
-    sentence = "Lantern is running, " + why + ".";
+    sentence = "Lantern is running well, " + why + ".";
+    syncLabel = "Syncing";
+    syncSub = "keeping up with fresh blocks";
+    pillLabel = "syncing";
   } else {
-    sentence = "Lantern needs attention: " + why + ".";
+    sentence = "Lantern needs a moment: " + why + ".";
+    syncLabel = "Reconnecting";
+    syncSub = why;
+    pillLabel = "needs attention";
   }
-  return { tone, sentence, lag };
+  return { tone, sentence, lag, syncLabel, syncSub, pillLabel };
 }
 
 // ---- Sparkline ring buffer + render ----
@@ -616,8 +640,10 @@ function renderClient(o, s, h) {
   $("c-head").textContent = fmt.int(o.head_epoch);
   $("c-head-sub").textContent = o.head_timestamp ? "updated " + fmt.ageAgo(o.now - o.head_timestamp) : "—";
   $("c-peers").textContent = fmt.int(o.peers);
-  $("c-peers-sub").textContent = "of " + (o.peers_min || 50) + " target";
-  $("c-lag").textContent = h.lag + (h.lag === 1 ? " epoch" : " epochs");
+  $("c-peers-sub").textContent = "connected to the network";
+  $("c-sync").textContent = h.syncLabel;
+  $("c-sync").className = "hero-stat-value" + (h.tone === "ok" ? " ok" : "");
+  $("c-sync-sub").textContent = h.syncSub;
   $("c-uptime").textContent = fmt.age(o.uptime_seconds);
   $("c-uptime-sub").textContent = "since boot";
   $("c-f3").textContent = fmt.int(o.f3_height);
@@ -634,7 +660,7 @@ function renderSp(o, s, h, fetcher) {
   $("s-bridge").textContent = o.vm_bridge ? "Wired" : "Off";
   $("s-bridge").className = "stat-value small " + (o.vm_bridge ? "ok" : "");
   $("s-rpc").textContent = o.rpc_addr || "—";
-  $("s-lag").textContent = h.lag + (h.lag === 1 ? " epoch" : " epochs");
+  $("s-lag").textContent = h.lag + (h.lag === 1 ? " block" : " blocks");
   $("s-lag").className = "stat-value small " + (h.lag <= 1 ? "ok" : h.lag <= 2 ? "" : "bad");
 
   $("s-head").textContent = fmt.int(o.head_epoch);
@@ -722,7 +748,7 @@ async function pollAll() {
     const h = computeHealth(overview, syncSnap);
     const verLabel = (overview.version || "").replace("v", "");
     $("brand-ver").textContent = verLabel ? verLabel.replace("Lantern+", "· ") : "—";
-    setHealth(h.tone, h.tone === "ok" ? "all good" : h.tone === "warn" ? "catching up" : "needs attention");
+    setHealth(h.tone, h.pillLabel);
 
     renderClient(overview, syncSnap, h);
     renderSp(overview, syncSnap, h, fetcher);
