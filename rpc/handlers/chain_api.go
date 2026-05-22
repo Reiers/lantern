@@ -39,6 +39,7 @@ import (
 	"github.com/Reiers/lantern/chain/msgsearch"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/chain/types"
+	"github.com/Reiers/lantern/internal/buildinfo"
 	"github.com/Reiers/lantern/state/accessor"
 	"github.com/Reiers/lantern/state/hamt"
 	"github.com/Reiers/lantern/vm"
@@ -181,9 +182,17 @@ func (c *ChainAPI) AuthNew(_ context.Context, perms []auth.Permission) ([]byte, 
 }
 
 // Version returns Lantern's identification. Tier 1 (#3).
+//
+// The version string is built from internal/buildinfo so it tracks the
+// ldflags-injected versionTag at release time. Format:
+//
+//	"<versionTag> Lantern+<network>"   e.g. "v1.2.1 Lantern+mainnet"
+//
+// Untagged dev builds report "dev Lantern+mainnet". No "lotus-compat"
+// suffix: Curio and Lotus CLIs only gate on APIVersion's major/minor.
 func (c *ChainAPI) Version(_ context.Context) (api.Version, error) {
 	return api.Version{
-		Version: "lantern/0.4.0 (lotus-compat)",
+		Version: buildinfo.BuildVersion() + " Lantern+" + buildinfo.Network(),
 		// Lotus FullAPIVersion1 = newVer(2,3,0) = (2<<16)|(3<<8)|0 = 0x020300.
 		// Curio / Lotus CLI EqMajorMinor checks the high 16 bits, so the
 		// patch byte is free for us to bump as Lantern's RPC surface
@@ -457,10 +466,10 @@ func (c *ChainAPI) StateGetActor(ctx context.Context, a address.Address, _ types
 		return nil, err
 	}
 	return &types.Actor{
-		Code:    act.Code,
-		Head:    act.Head,
-		Nonce:   act.Nonce,
-		Balance: act.Balance,
+		Code:             act.Code,
+		Head:             act.Head,
+		Nonce:            act.Nonce,
+		Balance:          act.Balance,
 		DelegatedAddress: act.DelegatedAddress,
 	}, nil
 }
@@ -654,6 +663,7 @@ func (c *ChainAPI) StateGetAllocationForPendingDeal(_ context.Context, _ abi.Dea
 func (c *ChainAPI) StateListMessages(_ context.Context, _ *api.MessageMatch, _ types.TipSetKey, _ abi.ChainEpoch) ([]cid.Cid, error) {
 	return nil, ErrNotImpl("StateListMessages", "heavy scan deferred to Phase 5")
 }
+
 // StateCirculatingSupply / StateVMCirculatingSupplyInternal live in
 // state_compute.go (Phase 5 Part F).
 
@@ -738,6 +748,7 @@ func (c *ChainAPI) StateWaitMsg(ctx context.Context, msgCID cid.Cid, confidence 
 		}
 	}
 }
+
 // StateCall runs `msg` in dry-run mode against the trusted tipset's
 // state. Tier 4 (#69). Phase 7 implementation: pure-Go VM shell from
 // `vm.StateCall`.

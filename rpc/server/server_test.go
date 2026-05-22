@@ -87,7 +87,10 @@ func TestServerVersionAndAuth(t *testing.T) {
 	if rr.Error != nil {
 		t.Fatalf("rpc error: %s", rr.Error.Message)
 	}
-	if !strings.Contains(rr.Result.Version, "lantern") {
+	// V1.2.1: Version is now "<tag> Lantern+<network>" (capital L). Match
+	// the case-insensitive substring so the test survives both the dev
+	// build ("dev Lantern+mainnet") and a tagged release ("v1.2.1 Lantern+mainnet").
+	if !strings.Contains(strings.ToLower(rr.Result.Version), "lantern") {
 		t.Fatalf("unexpected version: %+v", rr.Result)
 	}
 	if rr.Result.BlockDelay != 30 {
