@@ -480,6 +480,14 @@ body[data-mode="dev"]    [data-show~="dev"].flex-show { display: flex; }
   </div>
 
   <div class="card">
+    <div class="card-header"><h2 class="card-title">ChainExchange (/fil/chain/xchg/0.0.1)</h2></div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-label">Received</div><div class="stat-value small" id="d-xchg-recv">—</div></div>
+      <div class="stat"><div class="stat-label">Rejected</div><div class="stat-value small" id="d-xchg-rej">—</div></div>
+    </div>
+  </div>
+
+  <div class="card">
     <div class="card-header"><h2 class="card-title">Block source counters</h2></div>
     <table>
       <thead><tr><th>Source</th><th>Hits</th></tr></thead>
@@ -905,6 +913,11 @@ function renderDev(o, s, peers, fetcher) {
   $("d-hello-sent").textContent = fmt.int(hello.sent);
   $("d-hello-recv").textContent = fmt.int(hello.received);
   $("d-hello-rej").textContent = fmt.int(hello.rejected);
+
+  // ChainExchange (issue #17): NotFound responder activity.
+  const xchg = (s && s.chainxchg) || {};
+  $("d-xchg-recv").textContent = fmt.int(xchg.received);
+  $("d-xchg-rej").textContent = fmt.int(xchg.rejected);
 
   // Connected peers table.
   //

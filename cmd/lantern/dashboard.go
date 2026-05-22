@@ -35,6 +35,7 @@ import (
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/internal/buildinfo"
 	lbitswap "github.com/Reiers/lantern/net/bitswap"
+	"github.com/Reiers/lantern/net/chainxchg"
 	"github.com/Reiers/lantern/net/combined"
 	"github.com/Reiers/lantern/net/hello"
 	llibp2p "github.com/Reiers/lantern/net/libp2p"
@@ -72,6 +73,8 @@ type dashboardDeps struct {
 
 	// Issue #16: Hello service activity (received / sent / rejected).
 	hello *hello.Service
+	// Issue #17: ChainExchange responder activity (received / rejected).
+	xchg *chainxchg.Service
 }
 
 // registerDashboard attaches /dashboard and /api/dashboard/* to the mux.
@@ -379,6 +382,13 @@ func (d *dashboardDeps) syncSnapshot() map[string]any {
 			"received": hs.Received,
 			"sent":     hs.Sent,
 			"rejected": hs.Rejected,
+		}
+	}
+	if d.xchg != nil {
+		xs := d.xchg.Stats()
+		out["chainxchg"] = map[string]any{
+			"received": xs.Received,
+			"rejected": xs.Rejected,
 		}
 	}
 	return out
