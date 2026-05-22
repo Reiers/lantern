@@ -137,9 +137,9 @@ func (f *ForestBridge) ComputeStateRoot(ctx context.Context, base cid.Cid, epoch
 	if envelope.Result == nil {
 		return cid.Undef, nil, errors.New("ForestBridge: empty result")
 	}
-	root, err := cid.Parse(envelope.Result.Root)
+	root, err := envelope.Result.Root.parse()
 	if err != nil {
-		return cid.Undef, nil, fmt.Errorf("ForestBridge: parse root cid %q: %w", envelope.Result.Root, err)
+		return cid.Undef, nil, fmt.Errorf("ForestBridge: parse root cid %q: %w", envelope.Result.Root.Slash, err)
 	}
 	recs := make([]*types.MessageReceipt, 0, len(envelope.Result.Trace))
 	for i, t := range envelope.Result.Trace {
@@ -156,9 +156,27 @@ func (f *ForestBridge) ComputeStateRoot(ctx context.Context, base cid.Cid, epoch
 
 // --- wire types ---
 
+// stateComputeResult mirrors the Lotus StateCompute response shape.
+//
+// Critical wire-format note: Lotus encodes the Root CID as a JSON object
+// `{"/":"<cid>"}` (the standard IPLD-link JSON shape), NOT as a bare
+// string. Same for every other CID in the response. Decoding into a
+// `string` field silently leaves Root empty.
 type stateComputeResult struct {
-	Root  string                  `json:"Root"`
+	Root  cidLink                 `json:"Root"`
 	Trace []stateComputeTraceItem `json:"Trace"`
+}
+
+// cidLink is the IPLD-link JSON shape: {"/":"<cid>"}.
+type cidLink struct {
+	Slash string `json:"/"`
+}
+
+func (l cidLink) parse() (cid.Cid, error) {
+	if l.Slash == "" {
+		return cid.Undef, errors.New("cidLink: empty")
+	}
+	return cid.Parse(l.Slash)
 }
 
 type stateComputeTraceItem struct {
@@ -202,4 +220,3 @@ func truncate(s string, n int) string {
 	}
 	return s[:n] + "..."
 }
-
