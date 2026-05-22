@@ -103,14 +103,7 @@ sha256_of() {
 download_binary() {
   step "Download Lantern binary"
   LANTERN_VERSION="${LANTERN_VERSION:-latest}"
-  if [[ "$LANTERN_VERSION" == "latest" ]]; then
-    url_base="https://github.com/Reiers/lantern/releases/latest/download"
-  else
-    url_base="https://github.com/Reiers/lantern/releases/download/${LANTERN_VERSION}"
-  fi
   bin_name="lantern-${OS}-${ARCH}"
-  bin_url="${url_base}/${bin_name}"
-  sha_url="${bin_url}.sha256"
   target="${LANTERN_HOME}/lantern"
 
   # Idempotence: if a binary already exists and matches the latest sha,
@@ -124,19 +117,47 @@ download_binary() {
     fi
   fi
 
+  # Mirror chain. The Lantern git repo is currently private, so the
+  # GitHub release endpoint returns 404 for anonymous downloads. The
+  # primary mirror is dl.lantern.reiers.io, served from the same
+  # Hetzner host that runs the gateway. GitHub releases are listed as
+  # a fallback so once the repo flips public the chain Just Works
+  # without an installer update.
+  if [[ "$LANTERN_VERSION" == "latest" ]]; then
+    declare -a urls=(
+      "https://dl.lantern.reiers.io/latest/${bin_name}"
+      "https://github.com/Reiers/lantern/releases/latest/download/${bin_name}"
+    )
+  else
+    declare -a urls=(
+      "https://dl.lantern.reiers.io/${LANTERN_VERSION}/${bin_name}"
+      "https://github.com/Reiers/lantern/releases/download/${LANTERN_VERSION}/${bin_name}"
+    )
+  fi
+
   tmp_dir=$(mktemp -d)
   trap 'rm -rf "$tmp_dir"' EXIT
 
-  info "Fetching ${bin_url}"
-  http_code=$(curl -fsSL -o "$tmp_dir/$bin_name" -w "%{http_code}" "$bin_url" || echo "000")
-  if [[ "$http_code" != "200" ]]; then
-    warn "Binary not yet published at ${bin_url} (HTTP $http_code)"
+  bin_url=""
+  for candidate in "${urls[@]}"; do
+    info "Trying ${candidate}"
+    http_code=$(curl -fsSL -o "$tmp_dir/$bin_name" -w "%{http_code}" "$candidate" 2>/dev/null || echo "000")
+    if [[ "$http_code" == "200" ]]; then
+      bin_url="$candidate"
+      break
+    fi
+    info "  not available (HTTP $http_code)"
+  done
+
+  if [[ -z "$bin_url" ]]; then
+    warn "No release binary available from any mirror"
     info "Falling back to local source build (requires Go 1.25+)"
     build_from_source "$target"
     return
   fi
 
-  info "Fetching SHA-256 manifest"
+  sha_url="${bin_url}.sha256"
+  info "Fetching SHA-256 manifest from ${sha_url}"
   if curl -fsSL -o "$tmp_dir/$bin_name.sha256" "$sha_url"; then
     expected=$(cut -d' ' -f1 < "$tmp_dir/$bin_name.sha256")
     actual=$(sha256_of "$tmp_dir/$bin_name")
