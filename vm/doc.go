@@ -1,7 +1,7 @@
 // Package vm implements a minimal, pure-Go execution shell sufficient
 // for Curio's read-only and gas-estimation calls against Lantern.
 //
-// Scope and non-scope
+// # Scope and non-scope
 //
 // Filecoin's reference FVM (ref-fvm, Rust) executes WASM-compiled actor
 // code with a full gas-metered runtime, syscalls, and IPLD store. Lantern

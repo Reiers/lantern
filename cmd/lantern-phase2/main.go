@@ -274,8 +274,12 @@ func glifGetActor(ctx context.Context, glifURL string, a addr.Address, tsk []map
 	dec := json.NewDecoder(bytes.NewReader(all))
 	var raw struct {
 		Result *struct {
-			Code    struct{ Slash string `json:"/"` } `json:"Code"`
-			Head    struct{ Slash string `json:"/"` } `json:"Head"`
+			Code struct {
+				Slash string `json:"/"`
+			} `json:"Code"`
+			Head struct {
+				Slash string `json:"/"`
+			} `json:"Head"`
 			Nonce   uint64 `json:"Nonce"`
 			Balance string `json:"Balance"`
 		} `json:"result"`

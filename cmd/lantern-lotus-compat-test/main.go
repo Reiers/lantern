@@ -43,14 +43,14 @@ import (
 // fields and dispatches by method name.
 type LotusClient struct {
 	Internal struct {
-		Version               func(ctx context.Context) (api.Version, error)
-		ChainHead             func(ctx context.Context) (*types.TipSet, error)
-		StateNetworkVersion   func(ctx context.Context, key types.TipSetKey) (network.Version, error)
-		StateGetActor         func(ctx context.Context, a address.Address, key types.TipSetKey) (*types.Actor, error)
-		StateLookupID         func(ctx context.Context, a address.Address, key types.TipSetKey) (address.Address, error)
-		WalletList            func(ctx context.Context) ([]address.Address, error)
-		WalletBalance         func(ctx context.Context, a address.Address) (big.Int, error)
-		StateNetworkName      func(ctx context.Context) (string, error)
+		Version             func(ctx context.Context) (api.Version, error)
+		ChainHead           func(ctx context.Context) (*types.TipSet, error)
+		StateNetworkVersion func(ctx context.Context, key types.TipSetKey) (network.Version, error)
+		StateGetActor       func(ctx context.Context, a address.Address, key types.TipSetKey) (*types.Actor, error)
+		StateLookupID       func(ctx context.Context, a address.Address, key types.TipSetKey) (address.Address, error)
+		WalletList          func(ctx context.Context) ([]address.Address, error)
+		WalletBalance       func(ctx context.Context, a address.Address) (big.Int, error)
+		StateNetworkName    func(ctx context.Context) (string, error)
 	}
 }
 

@@ -15,8 +15,8 @@ type DrandNetwork int
 const (
 	DrandMainnet DrandNetwork = iota + 1 // legacy league-of-entropy chained chain
 	DrandTestnet
-	_ // historical: DrandDevnet (removed)
-	_ // historical: DrandLocalnet (removed)
+	_               // historical: DrandDevnet (removed)
+	_               // historical: DrandLocalnet (removed)
 	DrandIncentinet // legacy incentinet chain
 	DrandQuicknet   // post-FIP-0063 unchained chain
 )

@@ -20,16 +20,16 @@ import (
 // trustedRootJSON is the on-disk representation. Field tags are kept short
 // and explicit to allow inspection with `badger get tr:current | jq`.
 type trustedRootJSON struct {
-	Epoch                 int64           `json:"epoch"`
+	Epoch                 int64            `json:"epoch"`
 	TipSetKey             ltypes.TipSetKey `json:"tipset_key"`
-	StateRoot             string          `json:"state_root"`
-	ParentMessageReceipts string          `json:"parent_message_receipts"`
-	ParentWeight          string          `json:"parent_weight"`
-	BeaconRound           uint64          `json:"beacon_round"`
-	F3Instance            uint64          `json:"f3_instance"`
-	F3CertCBOR            []byte          `json:"f3_cert_cbor,omitempty"`
-	AcceptedAt            time.Time       `json:"accepted_at"`
-	AncestorRoots         []string        `json:"ancestor_roots,omitempty"`
+	StateRoot             string           `json:"state_root"`
+	ParentMessageReceipts string           `json:"parent_message_receipts"`
+	ParentWeight          string           `json:"parent_weight"`
+	BeaconRound           uint64           `json:"beacon_round"`
+	F3Instance            uint64           `json:"f3_instance"`
+	F3CertCBOR            []byte           `json:"f3_cert_cbor,omitempty"`
+	AcceptedAt            time.Time        `json:"accepted_at"`
+	AncestorRoots         []string         `json:"ancestor_roots,omitempty"`
 }
 
 func encodeTrustedRoot(tr *TrustedRoot) ([]byte, error) {

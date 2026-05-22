@@ -121,29 +121,29 @@ func snippet(b []byte) string {
 
 // State is the in-memory follower state.
 type State struct {
-	NetworkName  gpbft.NetworkName
-	Instance     uint64                       // next instance to verify
-	PowerTable   gpbft.PowerEntries           // committee at Instance
-	Latest       *certs.FinalityCertificate   // most recently verified cert
-	LatestChain  *gpbft.ECChain               // its EC chain (head = finalized)
+	NetworkName gpbft.NetworkName
+	Instance    uint64                     // next instance to verify
+	PowerTable  gpbft.PowerEntries         // committee at Instance
+	Latest      *certs.FinalityCertificate // most recently verified cert
+	LatestChain *gpbft.ECChain             // its EC chain (head = finalized)
 }
 
 // Subscriber walks F3 certs from anchor forward.
 type Subscriber struct {
-	mu     sync.Mutex
-	state  State
-	src    CertSource
-	store  *badger.DB
-	netNm  gpbft.NetworkName
-	stats  Stats
+	mu    sync.Mutex
+	state State
+	src   CertSource
+	store *badger.DB
+	netNm gpbft.NetworkName
+	stats Stats
 }
 
 // Stats tracks subscriber activity.
 type Stats struct {
-	CertsVerified  uint64
-	LastInstance   uint64
-	LatestFinalEp  int64
-	LastError      string
+	CertsVerified uint64
+	LastInstance  uint64
+	LatestFinalEp int64
+	LastError     string
 }
 
 // Options configures a Subscriber.
@@ -285,13 +285,13 @@ const stateKey = "f3:sub:state"
 // persistedState is the on-disk schema. PowerTable is JSON-encoded power
 // entries; we avoid CBOR here for diff-readability during debugging.
 type persistedState struct {
-	NetworkName string             `json:"networkName"`
-	Instance    uint64             `json:"instance"`
-	PowerTable  []entryJSON        `json:"powerTable"`
-	LatestEp    int64              `json:"latestEp"`
-	WrittenAt   string             `json:"writtenAt"`
+	NetworkName string      `json:"networkName"`
+	Instance    uint64      `json:"instance"`
+	PowerTable  []entryJSON `json:"powerTable"`
+	LatestEp    int64       `json:"latestEp"`
+	WrittenAt   string      `json:"writtenAt"`
 	// LatestCert is the serialized CBOR of the most recent verified cert.
-	LatestCert []byte             `json:"latestCert,omitempty"`
+	LatestCert []byte `json:"latestCert,omitempty"`
 }
 
 type entryJSON struct {

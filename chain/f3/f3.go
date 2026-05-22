@@ -51,7 +51,7 @@ func Verifier() gpbft.Verifier {
 //
 //   - nextInstance: the GPBFT instance immediately after the last validated cert
 //   - finalChain:   the EC chain finalized by the last cert (head-most tipset key
-//                   is the new "F3 finalized" tip)
+//     is the new "F3 finalized" tip)
 //   - newPowerTable: the power table to use validating the next cert
 //
 // Lantern keeps (finalChain.Head(), newPowerTable, nextInstance) as the F3

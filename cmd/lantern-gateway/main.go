@@ -173,11 +173,15 @@ func (g *gateway) handleStateRoot(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(bytes.NewReader(all))
 	var out struct {
 		Result struct {
-			Cids   []struct{ Slash string `json:"/"` } `json:"Cids"`
+			Cids []struct {
+				Slash string `json:"/"`
+			} `json:"Cids"`
 			Height int64 `json:"Height"`
 			Blocks []struct {
-				ParentStateRoot struct{ Slash string `json:"/"` } `json:"ParentStateRoot"`
-				ParentWeight    string `json:"ParentWeight"`
+				ParentStateRoot struct {
+					Slash string `json:"/"`
+				} `json:"ParentStateRoot"`
+				ParentWeight string `json:"ParentWeight"`
 			} `json:"Blocks"`
 		} `json:"result"`
 	}

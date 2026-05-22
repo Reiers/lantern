@@ -116,22 +116,28 @@ func truncate(b []byte) string {
 // The shape mirrors Lotus' api.TipSet so we can build a Lantern
 // TrustedRoot from it.
 type Head struct {
-	Epoch        abi.ChainEpoch
-	TipSetKey    types.TipSetKey
-	StateRoot    cid.Cid
-	ParentWeight big.Int
+	Epoch                 abi.ChainEpoch
+	TipSetKey             types.TipSetKey
+	StateRoot             cid.Cid
+	ParentWeight          big.Int
 	ParentMessageReceipts cid.Cid
 }
 
 // FetchHead queries Filecoin.ChainHead.
 func (c *Client) FetchHead(ctx context.Context) (*Head, error) {
 	var raw struct {
-		Cids   []struct{ Slash string `json:"/"` } `json:"Cids"`
+		Cids []struct {
+			Slash string `json:"/"`
+		} `json:"Cids"`
 		Blocks []struct {
-			ParentStateRoot       struct{ Slash string `json:"/"` } `json:"ParentStateRoot"`
-			ParentMessageReceipts struct{ Slash string `json:"/"` } `json:"ParentMessageReceipts"`
-			ParentWeight          string                              `json:"ParentWeight"`
-			Height                abi.ChainEpoch                      `json:"Height"`
+			ParentStateRoot struct {
+				Slash string `json:"/"`
+			} `json:"ParentStateRoot"`
+			ParentMessageReceipts struct {
+				Slash string `json:"/"`
+			} `json:"ParentMessageReceipts"`
+			ParentWeight string         `json:"ParentWeight"`
+			Height       abi.ChainEpoch `json:"Height"`
 		} `json:"Blocks"`
 		Height abi.ChainEpoch `json:"Height"`
 	}
@@ -154,10 +160,10 @@ func (c *Client) FetchHead(ctx context.Context) (*Head, error) {
 		cids = append(cids, cc)
 	}
 	return &Head{
-		Epoch:        raw.Height,
-		TipSetKey:    types.NewTipSetKey(cids...),
-		StateRoot:    sr,
-		ParentWeight: pw,
+		Epoch:                 raw.Height,
+		TipSetKey:             types.NewTipSetKey(cids...),
+		StateRoot:             sr,
+		ParentWeight:          pw,
 		ParentMessageReceipts: pmr,
 	}, nil
 }
@@ -168,14 +174,18 @@ func (c *Client) FetchHead(ctx context.Context) (*Head, error) {
 // block CID via Get(...) and verifying.
 func (c *Client) FetchTipsetByHeight(ctx context.Context, h abi.ChainEpoch) (*Head, error) {
 	var raw struct {
-		Cids   []struct {
+		Cids []struct {
 			Slash string `json:"/"`
 		} `json:"Cids"`
 		Blocks []struct {
-			ParentStateRoot       struct{ Slash string `json:"/"` } `json:"ParentStateRoot"`
-			ParentMessageReceipts struct{ Slash string `json:"/"` } `json:"ParentMessageReceipts"`
-			ParentWeight          string                              `json:"ParentWeight"`
-			Height                abi.ChainEpoch                      `json:"Height"`
+			ParentStateRoot struct {
+				Slash string `json:"/"`
+			} `json:"ParentStateRoot"`
+			ParentMessageReceipts struct {
+				Slash string `json:"/"`
+			} `json:"ParentMessageReceipts"`
+			ParentWeight string         `json:"ParentWeight"`
+			Height       abi.ChainEpoch `json:"Height"`
 		} `json:"Blocks"`
 		Height abi.ChainEpoch `json:"Height"`
 	}

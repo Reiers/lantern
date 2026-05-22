@@ -7,7 +7,9 @@
 //
 // Tier 1 (1-20): implemented against state/accessor + trustedroot.
 // Tier 2 (21-30): implemented where feasible, otherwise stubbed with a
-//   clear `xerrors.New("not implemented in Lantern V1 — ...")`.
+//
+//	clear `xerrors.New("not implemented in Lantern V1 — ...")`.
+//
 // Tier 3 (31-71): the long tail; partially implemented or stubbed.
 // Tier 4: deferred (StateCall, MinerCreateBlock — need a VM).
 //

@@ -11,8 +11,8 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-keccak"
-	gscrypto "github.com/filecoin-project/go-state-types/crypto"
 	gsbuiltin "github.com/filecoin-project/go-state-types/builtin"
+	gscrypto "github.com/filecoin-project/go-state-types/crypto"
 
 	"github.com/Reiers/lantern/crypto/sigs"
 	_ "github.com/Reiers/lantern/crypto/sigs/bls"

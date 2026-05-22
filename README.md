@@ -7,6 +7,7 @@
 
   *Boots in minutes. Verifies everything. No 76 GB snapshot. No third-party trust.*
 
+  [![CI](https://github.com/Reiers/lantern/actions/workflows/ci.yml/badge.svg)](https://github.com/Reiers/lantern/actions/workflows/ci.yml)
   [![License: Apache 2.0 OR MIT](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](#license)
   [![Release: v1.2.1](https://img.shields.io/badge/release-v1.2.1-d97a1e.svg)](https://github.com/Reiers/lantern/releases)
   [![Go: 1.25+](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](go.mod)

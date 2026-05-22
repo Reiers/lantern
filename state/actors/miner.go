@@ -204,7 +204,7 @@ func (m *minerV18) LockedFunds() (abi.TokenAmount, abi.TokenAmount, abi.TokenAmo
 	return m.s.LockedFunds, m.s.InitialPledge, m.s.PreCommitDeposits
 }
 
-func (m *minerV18) FeeDebt() abi.TokenAmount                              { return m.s.FeeDebt }
+func (m *minerV18) FeeDebt() abi.TokenAmount { return m.s.FeeDebt }
 func (m *minerV18) AvailableBalance(b abi.TokenAmount) (abi.TokenAmount, error) {
 	return m.s.GetAvailableBalance(b)
 }
@@ -425,7 +425,7 @@ func (m *minerV17) LockedFunds() (abi.TokenAmount, abi.TokenAmount, abi.TokenAmo
 	return m.s.LockedFunds, m.s.InitialPledge, m.s.PreCommitDeposits
 }
 
-func (m *minerV17) FeeDebt() abi.TokenAmount                              { return m.s.FeeDebt }
+func (m *minerV17) FeeDebt() abi.TokenAmount { return m.s.FeeDebt }
 func (m *minerV17) AvailableBalance(b abi.TokenAmount) (abi.TokenAmount, error) {
 	return m.s.GetAvailableBalance(b)
 }

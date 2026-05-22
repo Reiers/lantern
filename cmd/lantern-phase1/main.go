@@ -304,32 +304,34 @@ func (c *rpcClient) call(ctx context.Context, method string, params any, out any
 
 // glifTipSet matches the Lotus JSON shape for ChainHead/ChainGetTipSetByHeight.
 type glifTipSet struct {
-	Cids   []glifCid             `json:"Cids"`
-	Blocks []glifBlockHeader     `json:"Blocks"`
-	Height int64                 `json:"Height"`
+	Cids   []glifCid         `json:"Cids"`
+	Blocks []glifBlockHeader `json:"Blocks"`
+	Height int64             `json:"Height"`
 }
 type glifCid struct {
 	Slash string `json:"/"`
 }
 type glifBlockHeader struct {
-	Miner                 string         `json:"Miner"`
-	Ticket                *glifTicket    `json:"Ticket"`
-	ElectionProof         *glifElection  `json:"ElectionProof"`
-	BeaconEntries         []glifBeacon   `json:"BeaconEntries"`
+	Miner                 string          `json:"Miner"`
+	Ticket                *glifTicket     `json:"Ticket"`
+	ElectionProof         *glifElection   `json:"ElectionProof"`
+	BeaconEntries         []glifBeacon    `json:"BeaconEntries"`
 	WinPoStProof          []glifPoStProof `json:"WinPoStProof"`
-	Parents               []glifCid      `json:"Parents"`
-	ParentWeight          string         `json:"ParentWeight"`
-	Height                int64          `json:"Height"`
-	ParentStateRoot       glifCid        `json:"ParentStateRoot"`
-	ParentMessageReceipts glifCid        `json:"ParentMessageReceipts"`
-	Messages              glifCid        `json:"Messages"`
-	BLSAggregate          *glifSig       `json:"BLSAggregate"`
-	Timestamp             uint64         `json:"Timestamp"`
-	BlockSig              *glifSig       `json:"BlockSig"`
-	ForkSignaling         uint64         `json:"ForkSignaling"`
-	ParentBaseFee         string         `json:"ParentBaseFee"`
+	Parents               []glifCid       `json:"Parents"`
+	ParentWeight          string          `json:"ParentWeight"`
+	Height                int64           `json:"Height"`
+	ParentStateRoot       glifCid         `json:"ParentStateRoot"`
+	ParentMessageReceipts glifCid         `json:"ParentMessageReceipts"`
+	Messages              glifCid         `json:"Messages"`
+	BLSAggregate          *glifSig        `json:"BLSAggregate"`
+	Timestamp             uint64          `json:"Timestamp"`
+	BlockSig              *glifSig        `json:"BlockSig"`
+	ForkSignaling         uint64          `json:"ForkSignaling"`
+	ParentBaseFee         string          `json:"ParentBaseFee"`
 }
-type glifTicket struct{ VRFProof string `json:"VRFProof"` }
+type glifTicket struct {
+	VRFProof string `json:"VRFProof"`
+}
 type glifElection struct {
 	WinCount int64  `json:"WinCount"`
 	VRFProof string `json:"VRFProof"`
