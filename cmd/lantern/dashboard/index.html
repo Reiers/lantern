@@ -5,379 +5,737 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lantern</title>
 <style>
+:root {
+  --bg: #f7f3eb;
+  --bg-card: #ffffff;
+  --bg-soft: #fdf9f1;
+  --border: #ead9c0;
+  --border-strong: #d9c3a0;
+  --fg: #2a1f12;
+  --fg-soft: #5b4730;
+  --muted: #8a7558;
+  --accent: #d97a1e;
+  --accent-soft: #fbe9d3;
+  --ok: #2b8a3e;
+  --warn: #c5811a;
+  --bad: #c2342e;
+  --shadow: 0 1px 2px rgba(60, 40, 15, 0.04), 0 4px 12px rgba(60, 40, 15, 0.05);
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0e1116;
-    --panel: #161b22;
-    --border: #2d333b;
-    --fg: #e6edf3;
-    --muted: #7d8590;
-    --accent: #e8a86b;
+    --bg: #14110b;
+    --bg-card: #1d1812;
+    --bg-soft: #181410;
+    --border: #2e261b;
+    --border-strong: #3f3526;
+    --fg: #f5ecdb;
+    --fg-soft: #c9b48d;
+    --muted: #8a7a5b;
+    --accent: #f0a560;
+    --accent-soft: #2c2114;
     --ok: #3fb950;
-    --warn: #d29922;
-    --bad: #f85149;
-    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --warn: #e3b341;
+    --bad: #f47373;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.4);
   }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  body { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
-  header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 1rem; }
-  h1 { font-size: 1.4rem; font-weight: 600; margin: 0; }
-  h1 .brand { color: var(--accent); }
-  h1 .version { color: var(--muted); font-weight: 400; font-size: 0.9rem; font-family: var(--mono); margin-left: 0.5rem; }
-  nav { display: flex; gap: 0.25rem; margin-bottom: 1rem; flex-wrap: wrap; }
-  nav button { background: var(--panel); border: 1px solid var(--border); color: var(--muted); padding: 0.5rem 1rem; font-size: 0.875rem; cursor: pointer; border-radius: 6px; font-family: inherit; }
-  nav button:hover { color: var(--fg); }
-  nav button.active { background: var(--bg); color: var(--accent); border-color: var(--accent); }
-  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; margin-bottom: 1rem; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
-  .stat { padding: 0.75rem 0; }
-  .stat-label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
-  .stat-value { font-size: 1.5rem; font-weight: 600; font-family: var(--mono); margin-top: 0.25rem; }
-  .stat-value.small { font-size: 1rem; }
-  .stat-value.ok { color: var(--ok); }
-  .stat-value.warn { color: var(--warn); }
-  .stat-value.bad { color: var(--bad); }
-  .stat-sub { color: var(--muted); font-size: 0.8rem; margin-top: 0.25rem; font-family: var(--mono); }
-  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.85rem; }
-  th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); }
-  th { color: var(--muted); font-weight: 500; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
-  tr:last-child td { border-bottom: none; }
-  .footer { color: var(--muted); font-size: 0.75rem; text-align: center; margin-top: 2rem; font-family: var(--mono); }
-  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-family: var(--mono); }
-  .pill.ok { background: rgba(63, 185, 80, 0.15); color: var(--ok); }
-  .pill.warn { background: rgba(210, 153, 34, 0.15); color: var(--warn); }
-  .pill.bad { background: rgba(248, 81, 73, 0.15); color: var(--bad); }
-  .empty { color: var(--muted); padding: 1rem 0; text-align: center; font-style: italic; }
-  .tab { display: none; }
-  .tab.active { display: block; }
-  pre { background: var(--bg); border: 1px solid var(--border); padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-size: 0.8rem; }
-  .row-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 0.5rem; }
-  .row-head h2 { margin: 0; font-size: 1rem; font-weight: 500; color: var(--muted); }
-  .row-head .refresh { color: var(--muted); font-size: 0.75rem; font-family: var(--mono); }
-  code { font-family: var(--mono); font-size: 0.85em; color: var(--accent); }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+body { padding: 1.5rem 1.5rem 4rem; max-width: 1100px; margin: 0 auto; }
+
+/* ---- Header ---- */
+header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2rem; gap: 1rem; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 0.75rem; }
+.brand svg { flex-shrink: 0; }
+.brand-text { display: flex; flex-direction: column; }
+.brand-name { font-size: 1.35rem; font-weight: 600; letter-spacing: -0.01em; }
+.brand-tag { font-size: 0.75rem; color: var(--muted); font-family: var(--mono); margin-top: 2px; }
+.header-right { display: flex; align-items: center; gap: 0.75rem; }
+
+/* ---- Mode switcher ---- */
+.mode-switcher { display: inline-flex; background: var(--bg-card); border: 1px solid var(--border); border-radius: 999px; padding: 3px; gap: 2px; }
+.mode-btn { background: transparent; border: none; padding: 0.45rem 1rem; font-size: 0.8rem; font-weight: 500; color: var(--muted); cursor: pointer; border-radius: 999px; font-family: inherit; transition: all 0.15s ease; }
+.mode-btn:hover { color: var(--fg); }
+.mode-btn.active { background: var(--accent); color: white; }
+
+/* ---- Health pill ---- */
+.health-pill { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.8rem; font-weight: 500; background: var(--bg-card); border: 1px solid var(--border); }
+.health-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+.health-dot.ok { background: var(--ok); box-shadow: 0 0 0 4px rgba(43, 138, 62, 0.15); animation: pulse 2.4s ease-in-out infinite; }
+.health-dot.warn { background: var(--warn); }
+.health-dot.bad { background: var(--bad); }
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(43, 138, 62, 0.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(43, 138, 62, 0.0); }
+}
+
+/* ---- Cards ---- */
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; padding: 1.5rem; margin-bottom: 1rem; box-shadow: var(--shadow); }
+.card-header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 1rem; }
+.card-title { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin: 0; }
+.card-meta { font-size: 0.75rem; color: var(--muted); font-family: var(--mono); }
+
+/* ---- Hero (client mode) ---- */
+.hero { background: linear-gradient(135deg, var(--bg-card) 0%, var(--accent-soft) 100%); border: 1px solid var(--border); border-radius: 18px; padding: 2rem; margin-bottom: 1rem; }
+.hero-status { display: flex; align-items: center; gap: 0.75rem; font-size: 1.1rem; color: var(--fg); margin-bottom: 1.5rem; }
+.hero-status .health-dot { width: 12px; height: 12px; }
+.hero-grid { display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; gap: 1.5rem; align-items: end; }
+.hero-primary { display: flex; flex-direction: column; }
+.hero-primary-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+.hero-primary-value { font-size: 3rem; font-weight: 700; letter-spacing: -0.025em; line-height: 1; font-variant-numeric: tabular-nums; font-family: var(--mono); color: var(--accent); margin-top: 0.5rem; }
+.hero-primary-sub { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; }
+.hero-stat { display: flex; flex-direction: column; }
+.hero-stat-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+.hero-stat-value { font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; font-family: var(--mono); margin-top: 0.35rem; line-height: 1; }
+.hero-stat-sub { font-size: 0.75rem; color: var(--muted); margin-top: 0.3rem; }
+
+@media (max-width: 720px) {
+  .hero-grid { grid-template-columns: 1fr 1fr; }
+  .hero-primary { grid-column: span 2; }
+  .hero-primary-value { font-size: 2.2rem; }
+}
+
+/* ---- Stat grids (sp + dev mode) ---- */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; }
+.stat { padding: 0; }
+.stat-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+.stat-value { font-size: 1.4rem; font-weight: 600; font-variant-numeric: tabular-nums; font-family: var(--mono); margin-top: 0.4rem; line-height: 1; }
+.stat-value.small { font-size: 0.95rem; }
+.stat-value.ok { color: var(--ok); }
+.stat-value.bad { color: var(--bad); }
+.stat-sub { font-size: 0.75rem; color: var(--muted); margin-top: 0.35rem; font-family: var(--mono); }
+
+/* ---- Tables ---- */
+table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.85rem; }
+th, td { text-align: left; padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
+tr:last-child td { border-bottom: none; }
+.empty { color: var(--muted); padding: 1.25rem 0; text-align: center; font-style: italic; }
+
+/* ---- Sparklines / bars ---- */
+.spark { display: block; width: 100%; height: 36px; margin-top: 0.5rem; }
+.spark-line { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.spark-fill { fill: var(--accent); opacity: 0.12; }
+.bar-stack { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: var(--bg-soft); margin: 0.5rem 0; border: 1px solid var(--border); }
+.bar-seg { height: 100%; }
+.bar-legend { display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; font-size: 0.75rem; color: var(--muted); }
+.bar-legend-dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+
+/* ---- Quorum block ---- */
+.quorum-trust { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.25rem; font-size: 0.9rem; color: var(--fg-soft); line-height: 1.55; }
+.quorum-trust code { background: var(--bg-card); padding: 1px 6px; border-radius: 4px; font-size: 0.85em; border: 1px solid var(--border); color: var(--accent); }
+
+/* ---- CID + copy ---- */
+.cid { font-family: var(--mono); font-size: 0.8rem; color: var(--fg-soft); cursor: pointer; user-select: all; padding: 2px 6px; border-radius: 4px; transition: background 0.15s; }
+.cid:hover { background: var(--accent-soft); color: var(--fg); }
+.cid.copied::after { content: " ✓"; color: var(--ok); }
+
+/* ---- Mode visibility ---- */
+[data-show] { display: none; }
+body[data-mode="client"] [data-show~="client"],
+body[data-mode="sp"]     [data-show~="sp"],
+body[data-mode="dev"]    [data-show~="dev"] { display: block; }
+body[data-mode="client"] [data-show~="client"].grid-show,
+body[data-mode="sp"]     [data-show~="sp"].grid-show,
+body[data-mode="dev"]    [data-show~="dev"].grid-show { display: grid; }
+body[data-mode="client"] [data-show~="client"].flex-show,
+body[data-mode="sp"]     [data-show~="sp"].flex-show,
+body[data-mode="dev"]    [data-show~="dev"].flex-show { display: flex; }
+
+/* ---- Footer ---- */
+.footer { color: var(--muted); font-size: 0.75rem; text-align: center; margin-top: 2.5rem; font-family: var(--mono); }
+.footer a { color: var(--accent); text-decoration: none; }
+.footer a:hover { text-decoration: underline; }
 </style>
 </head>
-<body>
+<body data-mode="client">
 
 <header>
-  <h1><span class="brand">🪴 Lantern</span><span class="version" id="ver-tag">…</span></h1>
-  <div id="status-indicator"><span class="pill ok" id="status-pill">connected</span></div>
+  <div class="brand">
+    <!-- Lantern paper-lantern brand mark -->
+    <svg width="36" height="40" viewBox="0 0 36 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <!-- top cap -->
+      <rect x="11" y="2" width="14" height="2.5" rx="1" fill="var(--accent)"/>
+      <!-- top hanger -->
+      <line x1="18" y1="4.5" x2="18" y2="7" stroke="var(--accent)" stroke-width="1.2"/>
+      <!-- body (paper lantern shape) -->
+      <path d="M8 9 Q4 14, 4 20 Q4 26, 8 31 L28 31 Q32 26, 32 20 Q32 14, 28 9 Z"
+            fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
+      <!-- ribs -->
+      <path d="M8 9 Q11 20, 8 31" stroke="var(--accent)" stroke-width="0.8" fill="none" opacity="0.5"/>
+      <path d="M28 9 Q25 20, 28 31" stroke="var(--accent)" stroke-width="0.8" fill="none" opacity="0.5"/>
+      <line x1="4" y1="20" x2="32" y2="20" stroke="var(--accent)" stroke-width="0.8" opacity="0.4"/>
+      <!-- glow -->
+      <circle cx="18" cy="20" r="3" fill="var(--accent)" opacity="0.85"/>
+      <!-- bottom cap -->
+      <rect x="11" y="31" width="14" height="2.5" rx="1" fill="var(--accent)"/>
+      <!-- tassel -->
+      <line x1="18" y1="33.5" x2="18" y2="38" stroke="var(--accent)" stroke-width="1.2"/>
+      <circle cx="18" cy="38.5" r="1.3" fill="var(--accent)"/>
+    </svg>
+    <div class="brand-text">
+      <div class="brand-name">Lantern</div>
+      <div class="brand-tag" id="brand-ver">v1.2.1 · mainnet</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="mode-switcher" role="tablist">
+      <button class="mode-btn active" data-mode="client">Client</button>
+      <button class="mode-btn" data-mode="sp">SP</button>
+      <button class="mode-btn" data-mode="dev">Dev</button>
+    </div>
+    <div class="health-pill"><span class="health-dot" id="health-dot"></span><span id="health-text">connecting…</span></div>
+  </div>
 </header>
 
-<nav>
-  <button class="tab-btn active" data-tab="overview">Overview</button>
-  <button class="tab-btn" data-tab="peers">Peers</button>
-  <button class="tab-btn" data-tab="sync">Sync</button>
-  <button class="tab-btn" data-tab="quorum">Quorum</button>
-  <button class="tab-btn" data-tab="fetcher">Fetcher</button>
-</nav>
+<!-- =============================================================== -->
+<!-- CLIENT MODE                                                     -->
+<!-- =============================================================== -->
 
-<div class="tab active" id="tab-overview">
-  <div class="panel">
-    <div class="row-head"><h2>Chain</h2><span class="refresh" id="overview-refreshed">—</span></div>
-    <div class="grid">
-      <div class="stat">
-        <div class="stat-label">Chain head</div>
-        <div class="stat-value" id="o-head">…</div>
-        <div class="stat-sub" id="o-head-age">…</div>
+<div data-show="client">
+
+  <div class="hero">
+    <div class="hero-status">
+      <span class="health-dot" id="hero-dot"></span>
+      <span id="hero-sentence">Lantern is starting up…</span>
+    </div>
+
+    <div class="hero-grid">
+      <div class="hero-primary">
+        <span class="hero-primary-label">Chain head</span>
+        <span class="hero-primary-value" id="c-head">—</span>
+        <span class="hero-primary-sub" id="c-head-sub">—</span>
       </div>
-      <div class="stat">
-        <div class="stat-label">Tipset blocks</div>
-        <div class="stat-value" id="o-blocks">…</div>
-        <div class="stat-sub" id="o-tsk">…</div>
+      <div class="hero-stat">
+        <span class="hero-stat-label">Peers</span>
+        <span class="hero-stat-value" id="c-peers">—</span>
+        <span class="hero-stat-sub" id="c-peers-sub">—</span>
       </div>
-      <div class="stat">
-        <div class="stat-label">F3 finality</div>
-        <div class="stat-value" id="o-f3">…</div>
-        <div class="stat-sub" id="o-f3-sub">—</div>
+      <div class="hero-stat">
+        <span class="hero-stat-label">Lag</span>
+        <span class="hero-stat-value" id="c-lag">—</span>
+        <span class="hero-stat-sub">behind Lotus</span>
       </div>
-      <div class="stat">
-        <div class="stat-label">Network</div>
-        <div class="stat-value small" id="o-network">…</div>
-        <div class="stat-sub" id="o-bdelay">—</div>
+      <div class="hero-stat">
+        <span class="hero-stat-label">Uptime</span>
+        <span class="hero-stat-value" id="c-uptime">—</span>
+        <span class="hero-stat-sub" id="c-uptime-sub">—</span>
       </div>
     </div>
   </div>
 
-  <div class="panel">
-    <div class="row-head"><h2>Network</h2></div>
-    <div class="grid">
+  <div class="card">
+    <div class="card-header">
+      <h2 class="card-title">What's happening</h2>
+    </div>
+    <p style="margin: 0 0 1rem; color: var(--fg-soft); line-height: 1.6;">
+      Lantern is a small Filecoin node running on your computer. It verifies the network's
+      state cryptographically without trusting any single provider, and lets your wallet
+      send and receive FIL directly. No data center, no big disk, no waiting hours to sync.
+    </p>
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-label">F3 finality</div>
+        <div class="stat-value small" id="c-f3">—</div>
+        <div class="stat-sub">verified state height</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Bandwidth</div>
+        <div class="stat-value small" id="c-bw">—</div>
+        <div class="stat-sub" id="c-bw-sub">total used</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Disk size</div>
+        <div class="stat-value small">~39 MB</div>
+        <div class="stat-sub">binary footprint</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h2 class="card-title">Trust anchor</h2>
+    </div>
+    <p style="margin: 0 0 0.75rem; color: var(--fg-soft); font-size: 0.9rem;">
+      Lantern bootstraps trust by checking 5 independent sources agree on the same Filecoin
+      finality. From there, every byte of state is verified by cryptographic hash.
+    </p>
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-label">Anchor epoch</div>
+        <div class="stat-value small" id="c-anchor-epoch">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Anchor age</div>
+        <div class="stat-value small" id="c-anchor-age">—</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- =============================================================== -->
+<!-- SP MODE                                                         -->
+<!-- =============================================================== -->
+
+<div data-show="sp">
+
+  <div class="card">
+    <div class="card-header"><h2 class="card-title">Storage provider readiness</h2></div>
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-label">Block submit gate</div>
+        <div class="stat-value small" id="s-submit">—</div>
+        <div class="stat-sub">requires VM bridge</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">VM bridge</div>
+        <div class="stat-value small" id="s-bridge">—</div>
+        <div class="stat-sub">upstream FVM for state-root</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">RPC listen</div>
+        <div class="stat-value small" id="s-rpc">—</div>
+        <div class="stat-sub">Curio binds here</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Lag vs network</div>
+        <div class="stat-value small" id="s-lag">—</div>
+        <div class="stat-sub">behind expected head</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h2 class="card-title">Chain</h2>
+      <span class="card-meta" id="sp-refresh">—</span>
+    </div>
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-label">Chain head</div>
+        <div class="stat-value" id="s-head">—</div>
+        <div class="stat-sub" id="s-head-age">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Tipset blocks</div>
+        <div class="stat-value" id="s-tsblocks">—</div>
+        <div class="stat-sub">in current tipset</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">F3 finality</div>
+        <div class="stat-value" id="s-f3">—</div>
+        <div class="stat-sub" id="s-f3-sub">instance —</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Anchor age</div>
+        <div class="stat-value small" id="s-anchor">—</div>
+        <div class="stat-sub">since last quorum bootstrap</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h2 class="card-title">Network</h2></div>
+    <div class="stat-grid">
       <div class="stat">
         <div class="stat-label">Peers</div>
-        <div class="stat-value" id="o-peers">…</div>
-        <div class="stat-sub" id="o-peer-range">—</div>
+        <div class="stat-value" id="s-peers">—</div>
+        <div class="stat-sub" id="s-peer-range">—</div>
+        <svg class="spark" id="s-peers-spark" viewBox="0 0 200 36" preserveAspectRatio="none"></svg>
       </div>
       <div class="stat">
         <div class="stat-label">Bandwidth in</div>
-        <div class="stat-value small" id="o-bw-in">…</div>
-        <div class="stat-sub" id="o-bw-in-rate">—</div>
+        <div class="stat-value small" id="s-bw-in">—</div>
+        <div class="stat-sub" id="s-bw-in-rate">—</div>
+        <svg class="spark" id="s-bw-in-spark" viewBox="0 0 200 36" preserveAspectRatio="none"></svg>
       </div>
       <div class="stat">
         <div class="stat-label">Bandwidth out</div>
-        <div class="stat-value small" id="o-bw-out">…</div>
-        <div class="stat-sub" id="o-bw-out-rate">—</div>
+        <div class="stat-value small" id="s-bw-out">—</div>
+        <div class="stat-sub" id="s-bw-out-rate">—</div>
       </div>
       <div class="stat">
         <div class="stat-label">Reachability</div>
-        <div class="stat-value small" id="o-reach">…</div>
+        <div class="stat-value small" id="s-reach">—</div>
         <div class="stat-sub">AutoNAT</div>
       </div>
     </div>
   </div>
 
-  <div class="panel">
-    <div class="row-head"><h2>Daemon</h2></div>
-    <div class="grid">
-      <div class="stat">
-        <div class="stat-label">Uptime</div>
-        <div class="stat-value small" id="o-uptime">…</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">RPC listen</div>
-        <div class="stat-value small" id="o-rpc">…</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">VM bridge</div>
-        <div class="stat-value small" id="o-bridge">…</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">Block submit</div>
-        <div class="stat-value small" id="o-submit">…</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="tab" id="tab-peers">
-  <div class="panel">
-    <div class="row-head"><h2>Connected peers</h2><span class="refresh" id="peers-refreshed">—</span></div>
-    <div id="peers-summary" class="stat-sub" style="margin-bottom: 0.5rem;">—</div>
-    <table id="peers-table">
-      <thead><tr><th>Peer ID</th><th>Addresses</th></tr></thead>
-      <tbody><tr><td colspan="2" class="empty">loading…</td></tr></tbody>
-    </table>
-  </div>
-</div>
-
-<div class="tab" id="tab-sync">
-  <div class="panel">
-    <div class="row-head"><h2>Header store sync</h2><span class="refresh" id="sync-refreshed">—</span></div>
-    <div class="grid">
-      <div class="stat"><div class="stat-label">Polls</div><div class="stat-value small" id="s-polls">…</div></div>
-      <div class="stat"><div class="stat-label">Head advances</div><div class="stat-value small" id="s-advances">…</div></div>
-      <div class="stat"><div class="stat-label">Reorgs</div><div class="stat-value small" id="s-reorgs">…</div></div>
-      <div class="stat"><div class="stat-label">Headers added</div><div class="stat-value small" id="s-headers">…</div></div>
-      <div class="stat"><div class="stat-label">Last head epoch</div><div class="stat-value small" id="s-last">…</div></div>
-      <div class="stat"><div class="stat-label">Last error</div><div class="stat-value small" id="s-err">—</div></div>
-    </div>
-  </div>
-
-  <div class="panel">
-    <div class="row-head"><h2>Gossipsub block ingestor</h2></div>
-    <div class="grid">
-      <div class="stat"><div class="stat-label">Received</div><div class="stat-value small" id="g-rcv">…</div></div>
-      <div class="stat"><div class="stat-label">Installed</div><div class="stat-value small" id="g-installed">…</div></div>
-      <div class="stat"><div class="stat-label">Deduped</div><div class="stat-value small" id="g-dedup">…</div></div>
-      <div class="stat"><div class="stat-label">Skipped</div><div class="stat-value small" id="g-skipped">…</div></div>
-      <div class="stat"><div class="stat-label">Backfilled</div><div class="stat-value small" id="g-backfilled">…</div></div>
-      <div class="stat"><div class="stat-label">Last install epoch</div><div class="stat-value small" id="g-last">…</div></div>
-    </div>
-  </div>
-</div>
-
-<div class="tab" id="tab-quorum">
-  <div class="panel">
-    <div class="row-head"><h2>Bootstrap anchor</h2></div>
-    <div class="grid">
-      <div class="stat"><div class="stat-label">Epoch</div><div class="stat-value small" id="q-epoch">…</div></div>
-      <div class="stat"><div class="stat-label">Anchor age</div><div class="stat-value small" id="q-age">…</div></div>
-    </div>
-    <div style="margin-top: 1rem;">
-      <div class="stat-label" style="margin-bottom: 0.5rem;">State root</div>
-      <pre id="q-stateroot">…</pre>
-    </div>
-  </div>
-  <div class="panel">
-    <div class="row-head"><h2>Trust model note</h2></div>
-    <p style="color: var(--muted); font-size: 0.9rem; line-height: 1.5;">
-    The trust anchor was established at first run via the 5-of-N bootstrap quorum
-    (independent libp2p peers + independent HTTP archives must all agree on the
-    F3-finalized tipset). Everything you see in this dashboard is derived from
-    that anchor via content-addressed verification. Re-anchor via
-    <code>lantern doctor</code> and <code>lantern repair</code> when needed.
+  <div class="card">
+    <div class="card-header"><h2 class="card-title">Block source mix</h2></div>
+    <div class="bar-stack" id="s-fetcher-bar"></div>
+    <div class="bar-legend" id="s-fetcher-legend"></div>
+    <p style="margin: 1rem 0 0; color: var(--muted); font-size: 0.78rem;">
+      Distribution of IPLD blocks served by each tier. Cache hits don't need network round-trips;
+      gateway and Bitswap race in parallel for cold blocks.
     </p>
   </div>
+
 </div>
 
-<div class="tab" id="tab-fetcher">
-  <div class="panel">
-    <div class="row-head"><h2>IPLD block fetcher</h2><span class="refresh" id="fetcher-refreshed">—</span></div>
-    <table id="fetcher-table">
-      <thead><tr><th>Source</th><th>Hits</th></tr></thead>
-      <tbody><tr><td colspan="2" class="empty">loading…</td></tr></tbody>
+<!-- =============================================================== -->
+<!-- DEV MODE                                                        -->
+<!-- =============================================================== -->
+
+<div data-show="dev">
+
+  <div class="card">
+    <div class="card-header"><h2 class="card-title">Daemon</h2></div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-label">Version</div><div class="stat-value small" id="d-ver">—</div></div>
+      <div class="stat"><div class="stat-label">Uptime</div><div class="stat-value small" id="d-uptime">—</div></div>
+      <div class="stat"><div class="stat-label">RPC</div><div class="stat-value small" id="d-rpc">—</div></div>
+      <div class="stat"><div class="stat-label">Network</div><div class="stat-value small" id="d-network">—</div></div>
+      <div class="stat"><div class="stat-label">Block delay</div><div class="stat-value small" id="d-bdelay">—</div></div>
+      <div class="stat"><div class="stat-label">VM bridge</div><div class="stat-value small" id="d-bridge">—</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h2 class="card-title">Header store sync</h2></div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-label">Polls</div><div class="stat-value small" id="d-polls">—</div></div>
+      <div class="stat"><div class="stat-label">Advances</div><div class="stat-value small" id="d-adv">—</div></div>
+      <div class="stat"><div class="stat-label">Reorgs</div><div class="stat-value small" id="d-reorgs">—</div></div>
+      <div class="stat"><div class="stat-label">Headers added</div><div class="stat-value small" id="d-headers">—</div></div>
+      <div class="stat"><div class="stat-label">Last epoch</div><div class="stat-value small" id="d-last">—</div></div>
+      <div class="stat"><div class="stat-label">Last error</div><div class="stat-value small" id="d-err">—</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h2 class="card-title">Gossipsub block ingestor</h2></div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-label">Received</div><div class="stat-value small" id="d-g-rcv">—</div></div>
+      <div class="stat"><div class="stat-label">Installed</div><div class="stat-value small" id="d-g-ins">—</div></div>
+      <div class="stat"><div class="stat-label">Deduped</div><div class="stat-value small" id="d-g-dedup">—</div></div>
+      <div class="stat"><div class="stat-label">Skipped</div><div class="stat-value small" id="d-g-skip">—</div></div>
+      <div class="stat"><div class="stat-label">Backfilled</div><div class="stat-value small" id="d-g-back">—</div></div>
+      <div class="stat"><div class="stat-label">Backfill fail</div><div class="stat-value small" id="d-g-backfail">—</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h2 class="card-title">Quorum bootstrap anchor</h2></div>
+    <div class="stat-grid" style="margin-bottom: 1rem;">
+      <div class="stat"><div class="stat-label">Epoch</div><div class="stat-value small" id="d-q-epoch">—</div></div>
+      <div class="stat"><div class="stat-label">F3 instance</div><div class="stat-value small" id="d-q-f3i">—</div></div>
+      <div class="stat"><div class="stat-label">Anchor age</div><div class="stat-value small" id="d-q-age">—</div></div>
+    </div>
+    <div style="font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin-bottom: 0.5rem;">State root</div>
+    <div class="cid" id="d-q-stateroot" data-copy>—</div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h2 class="card-title">Connected peers</h2>
+      <span class="card-meta" id="d-peer-count">—</span>
+    </div>
+    <table>
+      <thead><tr><th>Peer ID</th><th>Addresses</th></tr></thead>
+      <tbody id="d-peer-tbody"><tr><td colspan="2" class="empty">loading…</td></tr></tbody>
     </table>
   </div>
+
+  <div class="card">
+    <div class="card-header"><h2 class="card-title">Block source counters</h2></div>
+    <table>
+      <thead><tr><th>Source</th><th>Hits</th></tr></thead>
+      <tbody id="d-fetcher-tbody"><tr><td colspan="2" class="empty">loading…</td></tr></tbody>
+    </table>
+  </div>
+
 </div>
 
 <div class="footer">
-  Lantern dashboard · refreshes every 5s · <span id="last-poll">—</span>
+  🪴 Lantern · refreshes every 5s · <span id="last-poll">—</span> · <a href="/metrics">Prometheus metrics</a>
 </div>
 
 <script>
 (() => {
-  const el = (id) => document.getElementById(id);
-  const fmt = {
-    int: (n) => n == null ? "—" : Number(n).toLocaleString(),
-    bytes: (n) => {
-      if (n == null || n === 0) return "0 B";
-      const units = ["B","KiB","MiB","GiB","TiB"];
-      let i = 0; let v = Number(n);
-      while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-      return v.toFixed(i === 0 ? 0 : 2) + " " + units[i];
-    },
-    rate: (n) => fmt.bytes(n) + "/s",
-    time: (ts) => {
-      if (!ts) return "—";
-      const d = new Date(ts * 1000);
-      return d.toISOString().replace("T", " ").slice(0, 19);
-    },
-    age: (sec) => {
-      if (sec == null) return "—";
-      const s = Math.floor(sec);
-      if (s < 60) return s + "s ago";
-      if (s < 3600) return Math.floor(s / 60) + "m ago";
-      if (s < 86400) return Math.floor(s / 3600) + "h ago";
-      return Math.floor(s / 86400) + "d ago";
-    },
-    cidShort: (c) => !c ? "—" : (c.length > 24 ? c.slice(0, 12) + "…" + c.slice(-6) : c),
-    nowHHMMSS: () => new Date().toTimeString().slice(0, 8),
-  };
+const $ = (id) => document.getElementById(id);
 
-  // ---- Tab switching ----
-  document.querySelectorAll(".tab-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-      btn.classList.add("active");
-      el("tab-" + btn.dataset.tab).classList.add("active");
-    });
+// ---- Mode switching with localStorage ----
+const body = document.body;
+const setMode = (m) => {
+  if (!["client","sp","dev"].includes(m)) m = "client";
+  body.dataset.mode = m;
+  document.querySelectorAll(".mode-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.mode === m);
   });
+  try { localStorage.setItem("lantern-mode", m); } catch(e) {}
+};
+const savedMode = (() => { try { return localStorage.getItem("lantern-mode"); } catch(e) { return null; } })();
+setMode(savedMode || "client");
+document.querySelectorAll(".mode-btn").forEach((btn) => btn.addEventListener("click", () => setMode(btn.dataset.mode)));
 
-  // ---- Fetch helpers ----
-  async function getJSON(path) {
-    const r = await fetch(path, { cache: "no-store" });
-    if (!r.ok) throw new Error(path + ": " + r.status);
-    return r.json();
+// ---- Formatters ----
+const fmt = {
+  int: (n) => n == null ? "—" : Number(n).toLocaleString(),
+  bytes: (n) => {
+    if (n == null) return "—";
+    if (n === 0) return "0 B";
+    const u = ["B","KB","MB","GB","TB"]; let i = 0; let v = Number(n);
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+    return v.toFixed(i === 0 ? 0 : (v >= 100 ? 0 : v >= 10 ? 1 : 2)) + " " + u[i];
+  },
+  rate: (n) => fmt.bytes(n) + "/s",
+  age: (sec) => {
+    if (sec == null) return "—";
+    const s = Math.floor(Math.abs(sec));
+    if (s < 60)   return s + "s";
+    if (s < 3600) return Math.floor(s / 60) + "m";
+    if (s < 86400) return Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m";
+    return Math.floor(s / 86400) + "d";
+  },
+  ageAgo: (sec) => sec == null ? "—" : fmt.age(sec) + " ago",
+  cidShort: (c) => !c ? "—" : (c.length > 24 ? c.slice(0, 10) + "…" + c.slice(-6) : c),
+  nowHHMMSS: () => new Date().toTimeString().slice(0, 8),
+};
+
+// ---- Health computation ----
+// Returns { tone: 'ok'|'warn'|'bad', sentence: human-readable for client mode }
+function computeHealth(overview, syncSnap) {
+  const peers = overview.peers ?? 0;
+  const minPeers = overview.peers_min ?? 50;
+  const lag = overview.head_timestamp ? Math.max(0, Math.floor((overview.now - overview.head_timestamp) / (overview.block_delay || 30))) : 0;
+  const headSet = (overview.head_epoch ?? 0) > 0;
+  const syncErr = syncSnap && syncSnap.last_error;
+
+  let tone = "ok";
+  let why = "";
+  if (!headSet) { tone = "bad"; why = "Lantern hasn't anchored a chain head yet"; }
+  else if (peers < 5) { tone = "bad"; why = "very few peers connected"; }
+  else if (lag >= 5) { tone = "bad"; why = "Lantern is more than a few epochs behind the network"; }
+  else if (peers < Math.max(20, Math.floor(minPeers / 2))) { tone = "warn"; why = "peer count is low but recovering"; }
+  else if (lag >= 2) { tone = "warn"; why = "Lantern is catching up to the network"; }
+  else if (syncErr) { tone = "warn"; why = "recent sync warning logged: " + syncErr; }
+
+  let sentence;
+  if (tone === "ok") {
+    sentence = "Lantern is connected to Filecoin and in sync. Everything looks good.";
+  } else if (tone === "warn") {
+    sentence = "Lantern is running, " + why + ".";
+  } else {
+    sentence = "Lantern needs attention: " + why + ".";
   }
+  return { tone, sentence, lag };
+}
 
-  function setStatus(ok) {
-    const p = el("status-pill");
-    p.className = "pill " + (ok ? "ok" : "bad");
-    p.textContent = ok ? "connected" : "disconnected";
+// ---- Sparkline ring buffer + render ----
+const sparkLen = 40;
+const sparks = {};
+function pushSpark(key, value) {
+  if (!sparks[key]) sparks[key] = [];
+  sparks[key].push(value);
+  while (sparks[key].length > sparkLen) sparks[key].shift();
+}
+function renderSpark(svgId, key) {
+  const svg = $(svgId);
+  if (!svg) return;
+  const data = sparks[key] || [];
+  if (data.length < 2) { svg.innerHTML = ""; return; }
+  const max = Math.max.apply(null, data);
+  const min = Math.min.apply(null, data);
+  const range = (max - min) || 1;
+  const stepX = 200 / (sparkLen - 1);
+  const pts = data.map((v, i) => {
+    const x = (i + (sparkLen - data.length)) * stepX;
+    const y = 32 - ((v - min) / range) * 28;
+    return x.toFixed(1) + "," + y.toFixed(1);
+  });
+  const linePath = "M" + pts.join(" L");
+  const fillPath = linePath + " L" + ((sparkLen - 1) * stepX) + ",36 L" + ((sparkLen - data.length) * stepX) + ",36 Z";
+  svg.innerHTML = '<path class="spark-fill" d="' + fillPath + '"/><path class="spark-line" d="' + linePath + '"/>';
+}
+
+// ---- Stacked bar ----
+const sourceColors = {
+  cache:   "#9ec5fe",
+  gateway: "#d97a1e",
+  bitswap: "#3fb950",
+  glif:    "#c5811a",
+  misses:  "#c2342e",
+};
+function renderFetcherBar(sources) {
+  const bar = $("s-fetcher-bar");
+  const leg = $("s-fetcher-legend");
+  if (!bar || !leg) return;
+  const entries = Object.entries(sources || {}).filter(([k]) => k !== "misses");
+  const total = entries.reduce((a,[,v]) => a + Number(v||0), 0);
+  if (total === 0) {
+    bar.innerHTML = '<div class="bar-seg" style="background: var(--border); width: 100%;"></div>';
+    leg.innerHTML = '<span style="color: var(--muted)">No data yet, daemon hasn\'t served any state reads.</span>';
+    return;
   }
+  bar.innerHTML = entries.map(([k,v]) => {
+    const pct = (Number(v) / total) * 100;
+    return '<div class="bar-seg" style="background: ' + (sourceColors[k] || "#888") + '; width: ' + pct.toFixed(2) + '%;" title="' + k + ': ' + Number(v).toLocaleString() + ' (' + pct.toFixed(1) + '%)"></div>';
+  }).join("");
+  leg.innerHTML = entries.map(([k,v]) => {
+    const pct = (Number(v) / total) * 100;
+    return '<span><span class="bar-legend-dot" style="background: ' + (sourceColors[k] || "#888") + '"></span>' + k + ' · ' + Number(v).toLocaleString() + ' (' + pct.toFixed(1) + '%)</span>';
+  }).join("");
+}
 
-  // ---- Renderers ----
-  function renderOverview(d) {
-    el("ver-tag").textContent = d.version || "";
-    el("o-head").textContent = fmt.int(d.head_epoch);
-    el("o-head-age").textContent = d.head_timestamp ? fmt.age(d.now - d.head_timestamp) + " (" + fmt.time(d.head_timestamp) + ")" : "—";
-    el("o-blocks").textContent = fmt.int(d.tipset_blocks);
-    el("o-tsk").textContent = d.tipset_key ? fmt.cidShort(d.tipset_key) : "—";
-    el("o-f3").textContent = d.f3_height != null ? fmt.int(d.f3_height) : "—";
-    el("o-f3-sub").textContent = d.f3_height != null ? "instance " + fmt.int(d.f3_instance) : "—";
-    el("o-network").textContent = d.network || "—";
-    el("o-bdelay").textContent = d.block_delay ? d.block_delay + "s blocks" : "—";
+// ---- Copy-to-clipboard for CIDs ----
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-copy]");
+  if (!t) return;
+  const txt = t.textContent.trim();
+  if (!txt || txt === "—") return;
+  navigator.clipboard?.writeText(txt).then(() => {
+    t.classList.add("copied");
+    setTimeout(() => t.classList.remove("copied"), 1200);
+  }).catch(() => {});
+});
 
-    el("o-peers").textContent = fmt.int(d.peers);
-    el("o-peer-range").textContent = d.peers_min != null ? "watermarks " + d.peers_min + "/" + d.peers_max : "—";
-    el("o-bw-in").textContent = fmt.bytes(d.bw_in);
-    el("o-bw-in-rate").textContent = fmt.rate(d.bw_in_rate || 0);
-    el("o-bw-out").textContent = fmt.bytes(d.bw_out);
-    el("o-bw-out-rate").textContent = fmt.rate(d.bw_out_rate || 0);
-    el("o-reach").textContent = d.reachability || "Unknown";
+// ---- Fetch ----
+async function getJSON(path) {
+  const r = await fetch(path, { cache: "no-store" });
+  if (!r.ok) throw new Error(path + ": " + r.status);
+  return r.json();
+}
 
-    el("o-uptime").textContent = d.uptime_seconds != null ? fmt.age(d.uptime_seconds).replace(" ago","") : "—";
-    el("o-rpc").textContent = d.rpc_addr || "—";
-    el("o-bridge").textContent = d.vm_bridge || "off";
-    el("o-submit").textContent = d.allow_block_submit ? "ALLOWED" : "gated";
+function setHealth(tone, label) {
+  const dot = $("health-dot");
+  const txt = $("health-text");
+  const heroDot = $("hero-dot");
+  dot.className = "health-dot " + tone;
+  heroDot.className = "health-dot " + tone;
+  txt.textContent = label;
+}
 
-    el("overview-refreshed").textContent = "refreshed " + fmt.nowHHMMSS();
-  }
+// ---- Renderers ----
+function renderClient(o, s, h) {
+  $("c-head").textContent = fmt.int(o.head_epoch);
+  $("c-head-sub").textContent = o.head_timestamp ? "updated " + fmt.ageAgo(o.now - o.head_timestamp) : "—";
+  $("c-peers").textContent = fmt.int(o.peers);
+  $("c-peers-sub").textContent = "of " + (o.peers_min || 50) + " target";
+  $("c-lag").textContent = h.lag + (h.lag === 1 ? " epoch" : " epochs");
+  $("c-uptime").textContent = fmt.age(o.uptime_seconds);
+  $("c-uptime-sub").textContent = "since boot";
+  $("c-f3").textContent = fmt.int(o.f3_height);
+  $("c-bw").textContent = fmt.bytes((o.bw_in || 0) + (o.bw_out || 0));
+  $("c-bw-sub").textContent = fmt.rate(o.bw_in_rate || 0) + " ↓ · " + fmt.rate(o.bw_out_rate || 0) + " ↑";
+  $("c-anchor-epoch").textContent = fmt.int(o.epoch);
+  $("c-anchor-age").textContent = o.anchor_age_seconds != null ? fmt.ageAgo(o.anchor_age_seconds) : "—";
+  $("hero-sentence").textContent = h.sentence;
+}
 
-  function renderPeers(d) {
-    el("peers-summary").textContent = (d.peers || []).length + " connected · last seen " + fmt.nowHHMMSS();
-    const body = el("peers-table").tBodies[0];
-    if (!d.peers || d.peers.length === 0) {
-      body.innerHTML = '<tr><td colspan="2" class="empty">no peers</td></tr>';
-      return;
-    }
-    body.innerHTML = d.peers.slice(0, 200).map((p) => {
+function renderSp(o, s, h, fetcher) {
+  $("s-submit").textContent = o.allow_block_submit ? "Allowed" : "Gated";
+  $("s-submit").className = "stat-value small " + (o.allow_block_submit ? "ok" : "");
+  $("s-bridge").textContent = o.vm_bridge ? "Wired" : "Off";
+  $("s-bridge").className = "stat-value small " + (o.vm_bridge ? "ok" : "");
+  $("s-rpc").textContent = o.rpc_addr || "—";
+  $("s-lag").textContent = h.lag + (h.lag === 1 ? " epoch" : " epochs");
+  $("s-lag").className = "stat-value small " + (h.lag <= 1 ? "ok" : h.lag <= 2 ? "" : "bad");
+
+  $("s-head").textContent = fmt.int(o.head_epoch);
+  $("s-head-age").textContent = o.head_timestamp ? "ts " + fmt.ageAgo(o.now - o.head_timestamp) : "—";
+  $("s-tsblocks").textContent = fmt.int(o.tipset_blocks);
+  $("s-f3").textContent = fmt.int(o.f3_height);
+  $("s-f3-sub").textContent = "instance " + fmt.int(o.f3_instance);
+  $("s-anchor").textContent = o.anchor_age_seconds != null ? fmt.ageAgo(o.anchor_age_seconds) : "—";
+
+  $("s-peers").textContent = fmt.int(o.peers);
+  $("s-peer-range").textContent = "watermarks " + (o.peers_min ?? "—") + " / " + (o.peers_max ?? "—");
+  $("s-bw-in").textContent = fmt.bytes(o.bw_in);
+  $("s-bw-in-rate").textContent = fmt.rate(o.bw_in_rate || 0);
+  $("s-bw-out").textContent = fmt.bytes(o.bw_out);
+  $("s-bw-out-rate").textContent = fmt.rate(o.bw_out_rate || 0);
+  $("s-reach").textContent = o.reachability || "Unknown";
+
+  pushSpark("peers", o.peers || 0);
+  pushSpark("bw_in", o.bw_in_rate || 0);
+  renderSpark("s-peers-spark", "peers");
+  renderSpark("s-bw-in-spark", "bw_in");
+
+  renderFetcherBar((fetcher || {}).sources || {});
+  $("sp-refresh").textContent = "refreshed " + fmt.nowHHMMSS();
+}
+
+function renderDev(o, s, peers, fetcher) {
+  $("d-ver").textContent = o.version || "—";
+  $("d-uptime").textContent = fmt.age(o.uptime_seconds);
+  $("d-rpc").textContent = o.rpc_addr || "—";
+  $("d-network").textContent = o.network || "—";
+  $("d-bdelay").textContent = (o.block_delay || 30) + "s";
+  $("d-bridge").textContent = o.vm_bridge || "off";
+
+  $("d-polls").textContent = fmt.int(s.polls);
+  $("d-adv").textContent = fmt.int(s.head_advances);
+  $("d-reorgs").textContent = fmt.int(s.reorgs);
+  $("d-headers").textContent = fmt.int(s.headers_added);
+  $("d-last").textContent = fmt.int(s.last_head_epoch);
+  $("d-err").textContent = s.last_error || "—";
+
+  const g = s.gossip || {};
+  $("d-g-rcv").textContent = fmt.int(g.received);
+  $("d-g-ins").textContent = fmt.int(g.installed);
+  $("d-g-dedup").textContent = fmt.int(g.dedup);
+  $("d-g-skip").textContent = fmt.int(g.skipped);
+  $("d-g-back").textContent = fmt.int(g.backfilled);
+  $("d-g-backfail").textContent = fmt.int(g.backfill_failed);
+
+  $("d-q-epoch").textContent = fmt.int(o.epoch);
+  $("d-q-f3i").textContent = fmt.int(o.f3_instance);
+  $("d-q-age").textContent = o.anchor_age_seconds != null ? fmt.ageAgo(o.anchor_age_seconds) : "—";
+  $("d-q-stateroot").textContent = o.state_root || "—";
+
+  const list = (peers && peers.peers) || [];
+  $("d-peer-count").textContent = list.length + " connected · click row to copy ID";
+  const body = $("d-peer-tbody");
+  if (list.length === 0) {
+    body.innerHTML = '<tr><td colspan="2" class="empty">no peers</td></tr>';
+  } else {
+    body.innerHTML = list.slice(0, 200).map((p) => {
       const addrs = (p.addrs || []).slice(0, 2).join("<br>") || "—";
-      return "<tr><td><code>" + p.id + "</code></td><td>" + addrs + "</td></tr>";
+      return '<tr><td><span class="cid" data-copy>' + p.id + '</span></td><td>' + addrs + '</td></tr>';
     }).join("");
-    el("peers-refreshed").textContent = "refreshed " + fmt.nowHHMMSS();
   }
 
-  function renderSync(d) {
-    el("s-polls").textContent = fmt.int(d.polls);
-    el("s-advances").textContent = fmt.int(d.head_advances);
-    el("s-reorgs").textContent = fmt.int(d.reorgs);
-    el("s-headers").textContent = fmt.int(d.headers_added);
-    el("s-last").textContent = fmt.int(d.last_head_epoch);
-    el("s-err").textContent = d.last_error || "—";
-
-    const g = d.gossip || {};
-    el("g-rcv").textContent = fmt.int(g.received);
-    el("g-installed").textContent = fmt.int(g.installed);
-    el("g-dedup").textContent = fmt.int(g.dedup);
-    el("g-skipped").textContent = fmt.int(g.skipped);
-    el("g-backfilled").textContent = fmt.int(g.backfilled);
-    el("g-last").textContent = fmt.int(g.last_install_epoch);
-
-    el("sync-refreshed").textContent = "refreshed " + fmt.nowHHMMSS();
+  const ft = $("d-fetcher-tbody");
+  const entries = Object.entries((fetcher || {}).sources || {}).sort((a,b) => b[1] - a[1]);
+  if (entries.length === 0) {
+    ft.innerHTML = '<tr><td colspan="2" class="empty">no data</td></tr>';
+  } else {
+    ft.innerHTML = entries.map(([k,v]) => '<tr><td>' + k + '</td><td>' + fmt.int(v) + '</td></tr>').join("");
   }
+}
 
-  function renderQuorum(d) {
-    el("q-epoch").textContent = fmt.int(d.epoch);
-    el("q-age").textContent = d.anchor_age_seconds != null ? fmt.age(d.anchor_age_seconds) : "—";
-    el("q-stateroot").textContent = d.state_root || "—";
+// ---- Poll loop ----
+async function pollAll() {
+  try {
+    const [overview, peers, syncSnap, fetcher] = await Promise.all([
+      getJSON("/api/dashboard/overview"),
+      getJSON("/api/dashboard/peers"),
+      getJSON("/api/dashboard/sync"),
+      getJSON("/api/dashboard/fetcher"),
+    ]);
+    const h = computeHealth(overview, syncSnap);
+    const verLabel = (overview.version || "").replace("v", "");
+    $("brand-ver").textContent = verLabel ? verLabel.replace("Lantern+", "· ") : "—";
+    setHealth(h.tone, h.tone === "ok" ? "all good" : h.tone === "warn" ? "catching up" : "needs attention");
+
+    renderClient(overview, syncSnap, h);
+    renderSp(overview, syncSnap, h, fetcher);
+    renderDev(overview, syncSnap, peers, fetcher);
+    $("last-poll").textContent = fmt.nowHHMMSS();
+  } catch (e) {
+    setHealth("bad", "disconnected");
+    console.error(e);
   }
+}
 
-  function renderFetcher(d) {
-    const body = el("fetcher-table").tBodies[0];
-    const entries = Object.entries(d.sources || {}).sort((a,b) => b[1] - a[1]);
-    if (entries.length === 0) {
-      body.innerHTML = '<tr><td colspan="2" class="empty">no data</td></tr>';
-    } else {
-      body.innerHTML = entries.map(([k,v]) => "<tr><td>" + k + "</td><td>" + fmt.int(v) + "</td></tr>").join("");
-    }
-    el("fetcher-refreshed").textContent = "refreshed " + fmt.nowHHMMSS();
-  }
-
-  // ---- Poll loop ----
-  async function pollAll() {
-    try {
-      const [overview, peers, sync, fetcher] = await Promise.all([
-        getJSON("/api/dashboard/overview"),
-        getJSON("/api/dashboard/peers"),
-        getJSON("/api/dashboard/sync"),
-        getJSON("/api/dashboard/fetcher"),
-      ]);
-      renderOverview(overview);
-      renderPeers(peers);
-      renderSync(sync);
-      renderQuorum(overview); // quorum reads same overview payload
-      renderFetcher(fetcher);
-      setStatus(true);
-      el("last-poll").textContent = fmt.nowHHMMSS();
-    } catch (e) {
-      setStatus(false);
-      console.error(e);
-    }
-  }
-
-  pollAll();
-  setInterval(pollAll, 5000);
+pollAll();
+setInterval(pollAll, 5000);
 })();
 </script>
 
