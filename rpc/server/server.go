@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -93,7 +94,9 @@ func New(cfg Config, node api.FullNode) (*Server, error) {
 		if r.Method == http.MethodPost && r.Body != nil {
 			buf, _ := io.ReadAll(r.Body)
 			r.Body = io.NopCloser(bytes.NewReader(buf))
-			var req struct{ Method string `json:"method"` }
+			var req struct {
+				Method string `json:"method"`
+			}
 			_ = json.Unmarshal(buf, &req)
 			if req.Method != "" {
 				required := methodPermission(req.Method)
@@ -189,8 +192,44 @@ type Auth struct {
 }
 
 // authPayload is the body of an issued JWT.
+//
+// Embeds gjwt.Payload (RFC 7519 standard claims) so we can ship exp/iat/jti
+// claims while staying wire-compatible with v1.2.1 tokens that only had the
+// Allow field. omitempty on every standard claim means a legacy token with
+// no exp deserializes cleanly and AuthVerify treats it as never-expiring
+// (logged but accepted; see #7 acceptance criteria around grace period).
 type authPayload struct {
+	gjwt.Payload
 	Allow []auth.Permission
+}
+
+// TTL for each issued JWT scope. Tighter on higher-trust scopes; admin
+// rotates monthly, read survives a year. See #7.
+var tokenTTLs = map[auth.Permission]time.Duration{
+	api.PermRead:  365 * 24 * time.Hour,
+	api.PermWrite: 180 * 24 * time.Hour,
+	api.PermSign:  90 * 24 * time.Hour,
+	api.PermAdmin: 30 * 24 * time.Hour,
+}
+
+// ttlFor picks the shortest TTL among the permissions a token claims.
+// A multi-scope token expires when the most-sensitive scope demands it.
+func ttlFor(perms []auth.Permission) time.Duration {
+	var ttl time.Duration
+	for _, p := range perms {
+		candidate, ok := tokenTTLs[p]
+		if !ok {
+			continue
+		}
+		if ttl == 0 || candidate < ttl {
+			ttl = candidate
+		}
+	}
+	if ttl == 0 {
+		// Unknown perm set: pick the strictest known TTL as a safe default.
+		ttl = tokenTTLs[api.PermAdmin]
+	}
+	return ttl
 }
 
 // LoadOrInitAuth loads jwt secret + pre-minted tokens from `dataDir`, or
@@ -247,9 +286,29 @@ func LoadOrInitAuth(dataDir string, seed []byte) (*Auth, error) {
 }
 
 // mint signs a new JWT with the given permission set.
+//
+// Issued tokens carry RFC 7519 exp/iat/jti claims (#7). Wire shape
+// remains compatible with v1.2.1 readers because the new fields are
+// omitempty additions on the same JSON object.
 func (a *Auth) mint(perms []auth.Permission) (string, error) {
+	now := time.Now()
+	ttl := ttlFor(perms)
+
+	var jti [16]byte
+	if _, err := rand.Read(jti[:]); err != nil {
+		return "", fmt.Errorf("mint: random jti: %w", err)
+	}
+
 	hs := gjwt.NewHS256(a.secret)
-	payload := authPayload{Allow: perms}
+	payload := authPayload{
+		Payload: gjwt.Payload{
+			Issuer:         "lantern",
+			IssuedAt:       gjwt.NumericDate(now),
+			ExpirationTime: gjwt.NumericDate(now.Add(ttl)),
+			JWTID:          hex.EncodeToString(jti[:]),
+		},
+		Allow: perms,
+	}
 	token, err := gjwt.Sign(payload, hs)
 	if err != nil {
 		return "", err
@@ -270,12 +329,117 @@ func (a *Auth) AuthNew(perms []auth.Permission) ([]byte, error) {
 }
 
 // AuthVerify validates a JWT and returns its claimed permissions.
+//
+// Tokens issued post-#7 carry an `exp` claim; we enforce it strictly:
+// expired tokens fail with a clear error so the operator knows to rotate.
+// Legacy tokens (v1.2.1 and earlier) have no exp claim; we accept them
+// with a warning-class log line so we don't break running deployments
+// during the one-release grace window.
 func (a *Auth) AuthVerify(token string) ([]auth.Permission, error) {
 	var p authPayload
+	// First pass: signature + structural verify with no claim validators.
+	// We need to know whether ExpirationTime is set before we can decide
+	// whether to enforce it (legacy-token grace path).
 	if _, err := gjwt.Verify([]byte(token), gjwt.NewHS256(a.secret), &p); err != nil {
 		return nil, err
 	}
+	if p.ExpirationTime == nil {
+		// Legacy token from before #7 shipped. Accept for one grace release.
+		logLegacyTokenOnce()
+		return p.Allow, nil
+	}
+	if time.Now().After(p.ExpirationTime.Time) {
+		return nil, fmt.Errorf("token expired (issued %s, expired %s); rotate with 'lantern auth rotate'",
+			formatTokenTime(p.IssuedAt), formatTokenTime(p.ExpirationTime))
+	}
 	return p.Allow, nil
+}
+
+// legacyTokenWarned ensures we log the legacy-token warning at most once
+// per daemon lifetime so we don't spam the operator.
+var legacyTokenWarned bool
+
+func logLegacyTokenOnce() {
+	if legacyTokenWarned {
+		return
+	}
+	legacyTokenWarned = true
+	fmt.Fprintln(os.Stderr, "WARN: accepting legacy JWT token without exp claim. Rotate with 'lantern auth rotate' to issue tokens with expiry.")
+}
+
+// TokenInfo describes an issued JWT for the auth-list command (#7).
+type TokenInfo struct {
+	File     string            // basename under dataDir (e.g. "token", "token-sign")
+	Perms    []auth.Permission // permission set granted by this token
+	IssuedAt time.Time         // when this token was minted
+	Expires  time.Time         // when this token stops being accepted
+	JTI      string            // unique token id (rotation evidence)
+	Legacy   bool              // true when the token has no exp claim
+}
+
+// Inspect parses a previously-issued token (signed by this Auth's secret)
+// and returns descriptive info for the operator. Used by `lantern auth list`.
+func (a *Auth) Inspect(token string) (TokenInfo, error) {
+	var p authPayload
+	if _, err := gjwt.Verify([]byte(token), gjwt.NewHS256(a.secret), &p); err != nil {
+		return TokenInfo{}, err
+	}
+	info := TokenInfo{Perms: p.Allow, JTI: p.JWTID}
+	if p.IssuedAt != nil {
+		info.IssuedAt = p.IssuedAt.Time
+	}
+	if p.ExpirationTime != nil {
+		info.Expires = p.ExpirationTime.Time
+	} else {
+		info.Legacy = true
+	}
+	return info, nil
+}
+
+// Rotate generates a fresh JWT secret and reissues all four scope tokens
+// under dataDir, invalidating every previously-issued token (#7).
+func (a *Auth) Rotate(dataDir string) error {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return fmt.Errorf("rotate: new secret: %w", err)
+	}
+	secretFile := filepath.Join(dataDir, "jwt-secret")
+	if err := os.WriteFile(secretFile, secret, 0o600); err != nil {
+		return fmt.Errorf("rotate: write secret: %w", err)
+	}
+	a.secret = secret
+	a.tokens = map[auth.Permission]string{}
+
+	scopes := map[string][]auth.Permission{
+		"token-read":  {api.PermRead},
+		"token-write": {api.PermRead, api.PermWrite},
+		"token-sign":  {api.PermRead, api.PermWrite, api.PermSign},
+		"token":       api.AllPerms,
+	}
+	for fname, perms := range scopes {
+		tok, err := a.mint(perms)
+		if err != nil {
+			return fmt.Errorf("rotate: mint %s: %w", fname, err)
+		}
+		for _, p := range perms {
+			cur, ok := a.tokens[p]
+			if !ok || strings.Count(tok, ".") >= strings.Count(cur, ".") {
+				a.tokens[p] = tok
+			}
+		}
+		if err := os.WriteFile(filepath.Join(dataDir, fname), []byte(tok), 0o600); err != nil {
+			return fmt.Errorf("rotate: write %s: %w", fname, err)
+		}
+	}
+	return nil
+}
+
+// formatTokenTime returns a human-readable timestamp for error messages.
+func formatTokenTime(t *gjwt.Time) string {
+	if t == nil {
+		return "unknown"
+	}
+	return t.Time.Format(time.RFC3339)
 }
 
 // handle parses the Authorization header (`Bearer <jwt>`) and returns a

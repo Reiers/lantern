@@ -107,6 +107,8 @@ func main() {
 		err = cmdState(rest)
 	case "info":
 		err = cmdInfo(rest)
+	case "auth":
+		err = cmdAuth(rest)
 	case "version", "--version", "-v":
 		fmt.Printf("lantern %s Lantern+%s (Phase 11 — installer + quorum bootstrap)\n",
 			buildinfo.BuildVersion(), buildinfo.Network())
