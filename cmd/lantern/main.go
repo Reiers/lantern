@@ -368,6 +368,7 @@ func cmdDaemon(args []string) error {
 	// AutoNAT state are captured by the BandwidthCounter and the
 	// AmbientAutoNAT subsystem on the host respectively.
 	var p2pHost *llibp2p.Host
+	var gossipIngestor *gossipBlockIngestor
 	if !*noLibp2p && *p2pListen != "" {
 		listeners := splitCSV(*p2pListen)
 		p2pHost, err = llibp2p.New(ctx, llibp2p.HostConfig{
@@ -408,9 +409,10 @@ func cmdDaemon(args []string) error {
 		// the full poll cycle).
 		if store != nil && p2pHost.PubSub != nil {
 			gossipSrc := glif.New("", 8*time.Second)
-			if _, _, gerr := startGossipBlocks(ctx, p2pHost.PubSub, store, gossipSrc); gerr != nil {
+			if ing, _, gerr := startGossipBlocks(ctx, p2pHost.PubSub, store, gossipSrc); gerr != nil {
 				fmt.Printf("  gossipsub-blocks: failed to start: %v (continuing without)\n", gerr)
 			} else {
+				gossipIngestor = ing
 				fmt.Printf("  gossipsub-blocks: subscribed to %s (ingestor active, inline backfill on)\n", build.MainnetGossipTopicBlocks)
 			}
 		}
@@ -454,9 +456,32 @@ func cmdDaemon(args []string) error {
 
 	// Phase 10 Part B: optional /metrics endpoint exposes per-source hit
 	// counts so operators can see Bitswap actually carrying load.
+	//
+	// Issue #5: when --metrics is set, also serve the operator dashboard
+	// at /dashboard on the same listener.
 	if *metricsListen != "" {
-		go serveMetrics(ctx, *metricsListen, fetcher, bsClient, p2pHost)
+		bridgeTag := ""
+		if chainAPI.Bridge != nil {
+			bridgeTag = chainAPI.Bridge.Provenance()
+		}
+		dash := &dashboardDeps{
+			tr:           tr,
+			store:        store,
+			sync:         sync,
+			host:         p2pHost,
+			bsClient:     bsClient,
+			fetcher:      fetcher,
+			ingestor:     gossipIngestor,
+			vmBridgeTag:  bridgeTag,
+			allowSubmit:  chainAPI.AllowBlockSubmit,
+			network:      "Lantern+mainnet",
+			rpcAddr:      *listen,
+			startedAt:    time.Now(),
+			headDelaySec: uint64(build.BlockDelaySecs),
+		}
+		go serveMetrics(ctx, *metricsListen, fetcher, bsClient, p2pHost, dash)
 		fmt.Printf("  metrics:  http://%s/metrics\n", *metricsListen)
+		fmt.Printf("  dashboard: http://%s/dashboard/\n", *metricsListen)
 	}
 
 	srv, err := server.New(server.Config{
