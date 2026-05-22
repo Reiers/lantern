@@ -48,6 +48,7 @@ import (
 	"github.com/Reiers/lantern/chain/types"
 	"github.com/Reiers/lantern/internal/buildinfo"
 	lbitswap "github.com/Reiers/lantern/net/bitswap"
+	"github.com/Reiers/lantern/net/chainxchg"
 	"github.com/Reiers/lantern/net/combined"
 	"github.com/Reiers/lantern/net/glif"
 	"github.com/Reiers/lantern/net/hello"
@@ -478,7 +479,9 @@ func cmdDaemon(args []string) error {
 	var p2pHost *llibp2p.Host
 	var gossipIngestor *gossipBlockIngestor
 	var helloSvc *hello.Service
+	var xchgSvc *chainxchg.Service
 	_ = helloSvc // kept around for future stats wiring; lifecycle is goroutine-managed
+	_ = xchgSvc
 	if !*noLibp2p && *p2pListen != "" {
 		listeners := splitCSV(*p2pListen)
 		p2pHost, err = llibp2p.New(ctx, llibp2p.HostConfig{
@@ -530,6 +533,14 @@ func cmdDaemon(args []string) error {
 		} else {
 			fmt.Printf("  hello:    DISABLED (genesis CID parse: %v)\n", perr)
 		}
+
+		// Issue #17: ChainExchange responder. Minimum-viable: answers
+		// 'NotFound' to every request. Being REACHABLE on the protocol
+		// is what removes the 'dead node' signal that triggers remote
+		// connmgr trim passes.
+		xchgSvc = chainxchg.NewService(p2pHost.H)
+		xchgSvc.Register()
+		fmt.Printf("  chainxchg: /fil/chain/xchg/0.0.1 active (NotFound responder)\n")
 
 		// Issue #1: subscribe to /fil/blocks/<network> on gossipsub so
 		// new heads land in the header store within ~1-3s of network
@@ -616,6 +627,7 @@ func cmdDaemon(args []string) error {
 			dataDirPath:  dataDir(),
 			gatewayURL:   *gw,
 			hello:        helloSvc,
+			xchg:         xchgSvc,
 		}
 		go serveMetrics(ctx, *metricsListen, fetcher, bsClient, p2pHost, dash)
 		fmt.Printf("  metrics:  http://%s/metrics\n", *metricsListen)
