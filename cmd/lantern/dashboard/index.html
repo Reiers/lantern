@@ -142,6 +142,9 @@ tr:last-child td { border-bottom: none; }
 .cid { font-family: var(--mono); font-size: 0.8rem; color: var(--fg-soft); cursor: pointer; user-select: all; padding: 2px 6px; border-radius: 4px; transition: background 0.15s; }
 .cid:hover { background: var(--accent-soft); color: var(--fg); }
 .cid.copied::after { content: " ✓"; color: var(--ok); }
+.ma { font-family: var(--mono); font-size: 0.78rem; color: var(--fg-soft); cursor: pointer; padding: 1px 4px; border-radius: 4px; transition: background 0.15s; word-break: break-all; display: inline-block; max-width: 100%; }
+.ma:hover { background: var(--accent-soft); color: var(--fg); }
+.ma.copied::after { content: " ✓"; color: var(--ok); }
 
 /* ---- Mode visibility ---- */
 [data-show] { display: none; }
@@ -465,6 +468,19 @@ const savedMode = (() => { try { return localStorage.getItem("lantern-mode"); } 
 setMode(savedMode || "client");
 document.querySelectorAll(".mode-btn").forEach((btn) => btn.addEventListener("click", () => setMode(btn.dataset.mode)));
 
+// ---- HTML attribute / text escaper ----
+// Defense against any future change where a peer multiaddr or peer ID
+// gains characters we'd otherwise inject raw into innerHTML.
+function esc(s) {
+  if (s == null) return "";
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 // ---- Formatters ----
 const fmt = {
   int: (n) => n == null ? "—" : Number(n).toLocaleString(),
@@ -486,6 +502,31 @@ const fmt = {
   },
   ageAgo: (sec) => sec == null ? "—" : fmt.age(sec) + " ago",
   cidShort: (c) => !c ? "—" : (c.length > 24 ? c.slice(0, 10) + "…" + c.slice(-6) : c),
+  // peerIDShort: peer IDs are typically 52 chars (Qm... or 12D3Koo...).
+  // Show first 10 and last 6, e.g. "12D3KooWMg…inEG" — readable enough to
+  // identify a known peer, click-to-copy reveals the full value.
+  peerIDShort: (id) => !id ? "—" : (id.length > 20 ? id.slice(0, 10) + "…" + id.slice(-6) : id),
+  // multiaddrShort: WebTransport / certhash multiaddrs can be 200+ chars
+  // and blow out table cells. Trim everything after the first /certhash/
+  // and append "…" so the protocol stack still reads but doesn't
+  // dominate the layout. Hover (title attr) reveals the full address.
+  multiaddrShort: (ma) => {
+    if (!ma) return "—";
+    const i = ma.indexOf("/certhash/");
+    if (i > 0) return ma.slice(0, i) + "/…";
+    if (ma.length > 60) return ma.slice(0, 56) + "…";
+    return ma;
+  },
+  // multiaddrScore: smaller = preferred for display. Plain TCP first,
+  // QUIC next, WebTransport last. Tie-break on shorter strings.
+  multiaddrScore: (ma) => {
+    if (!ma) return 9;
+    if (ma.includes("/webtransport")) return 4;
+    if (ma.includes("/quic-v1"))     return 2;
+    if (ma.includes("/quic"))         return 3;
+    if (ma.includes("/tcp/"))         return 1;
+    return 5;
+  },
   nowHHMMSS: () => new Date().toTimeString().slice(0, 8),
 };
 
@@ -589,11 +630,15 @@ function renderFetcherBar(sources) {
   }).join("");
 }
 
-// ---- Copy-to-clipboard for CIDs ----
+// ---- Copy-to-clipboard for CIDs / peer IDs / multiaddrs ----
+// data-copy reads its textContent; data-copy-value="..." overrides with
+// the full value when the visible text is a truncated display form
+// (issue #12: long peer IDs and WebTransport multiaddrs).
 document.addEventListener("click", (e) => {
   const t = e.target.closest("[data-copy]");
   if (!t) return;
-  const txt = t.textContent.trim();
+  const explicit = t.getAttribute("data-copy-value");
+  const txt = (explicit != null ? explicit : t.textContent).trim();
   if (!txt || txt === "—") return;
   navigator.clipboard?.writeText(txt).then(() => {
     t.classList.add("copied");
@@ -649,7 +694,11 @@ function renderSp(o, s, h, fetcher) {
   $("s-head-age").textContent = o.head_timestamp ? "ts " + fmt.ageAgo(o.now - o.head_timestamp) : "—";
   $("s-tsblocks").textContent = fmt.int(o.tipset_blocks);
   $("s-f3").textContent = fmt.int(o.f3_height);
-  $("s-f3-sub").textContent = "instance " + fmt.int(o.f3_instance);
+  // Honest F3 instance reporting: bare 0 reads as broken; show
+  // "awaiting first finality" until the daemon has captured one.
+  $("s-f3-sub").textContent = (o.f3_instance && o.f3_instance > 0)
+    ? ("instance " + fmt.int(o.f3_instance))
+    : "awaiting first finality";
   $("s-anchor").textContent = o.anchor_age_seconds != null ? fmt.ageAgo(o.anchor_age_seconds) : "—";
 
   $("s-peers").textContent = fmt.int(o.peers);
@@ -693,19 +742,39 @@ function renderDev(o, s, peers, fetcher) {
   $("d-g-backfail").textContent = fmt.int(g.backfill_failed);
 
   $("d-q-epoch").textContent = fmt.int(o.epoch);
-  $("d-q-f3i").textContent = fmt.int(o.f3_instance);
+  $("d-q-f3i").textContent = (o.f3_instance && o.f3_instance > 0) ? fmt.int(o.f3_instance) : "awaiting finality";
   $("d-q-age").textContent = o.anchor_age_seconds != null ? fmt.ageAgo(o.anchor_age_seconds) : "—";
   $("d-q-stateroot").textContent = o.state_root || "—";
 
+  // Connected peers table.
+  //
+  // Issue #12: peer IDs and multiaddrs are too long to render raw, so we
+  // display short forms with click-to-copy carrying the full value
+  // via data-copy-value. WebTransport addresses are truncated after
+  // /certhash/ and the full value is on the title attribute for hover.
+  // Addresses are sorted so TCP/QUIC show before WebTransport.
   const list = (peers && peers.peers) || [];
-  $("d-peer-count").textContent = list.length + " connected · click row to copy ID";
+  $("d-peer-count").textContent = list.length + " connected · click to copy";
   const body = $("d-peer-tbody");
   if (list.length === 0) {
     body.innerHTML = '<tr><td colspan="2" class="empty">no peers</td></tr>';
   } else {
     body.innerHTML = list.slice(0, 200).map((p) => {
-      const addrs = (p.addrs || []).slice(0, 2).join("<br>") || "—";
-      return '<tr><td><span class="cid" data-copy>' + p.id + '</span></td><td>' + addrs + '</td></tr>';
+      const id = p.id || "";
+      const idShort = esc(fmt.peerIDShort(id));
+      const idFull = esc(id);
+      const idCell = '<span class="cid" data-copy data-copy-value="' + idFull +
+                     '" title="' + idFull + '">' + idShort + '</span>';
+      const addrsRaw = (p.addrs || []).slice();
+      addrsRaw.sort((a, b) => fmt.multiaddrScore(a) - fmt.multiaddrScore(b));
+      const top = addrsRaw.slice(0, 2);
+      const addrsCell = top.length === 0 ? "—" : top.map((a) => {
+        const aFull = esc(a);
+        const aShort = esc(fmt.multiaddrShort(a));
+        return '<span class="ma" data-copy data-copy-value="' + aFull +
+               '" title="' + aFull + '">' + aShort + '</span>';
+      }).join("<br>");
+      return '<tr><td>' + idCell + '</td><td>' + addrsCell + '</td></tr>';
     }).join("");
   }
 
