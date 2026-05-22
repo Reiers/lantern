@@ -2,6 +2,43 @@
 
 All notable changes to Lantern.
 
+## v1.2.1 (in progress)
+
+The V1.2 trust-model completion: Lantern beacons can now answer F3
+cert-exchange queries, turning `LanternBeaconSource` from a stub into
+a live quorum source.
+
+### Added
+
+- **Beacon cert-exchange responder (B-11-01).** New package
+  `chain/f3/certexch` wraps `go-f3/certexchange.Server` around an
+  in-process `certstore.Store` seeded from the embedded F3 trust
+  anchor. A poll loop pulls verified certs forward from an upstream
+  Lotus-compatible JSON-RPC source (Glif by default) and inserts them
+  after `chain/f3.VerifyCertChain` validation. Wired into `lantern
+  beacon` so the responder shares the beacon's existing libp2p host;
+  controlled by `--certexch`, `--certexch-upstream`, `--certexch-poll`.
+- **`LanternBeaconSource` is live.** Replaces the V1.2.0
+  `ErrNoBeaconBackend` stub with a real `certexchange.Client` that
+  dials a beacon's peer over libp2p and returns a `Finality` shaped
+  to match the quorum's equality contract. Counts toward the quorum
+  by default (independent operators, not the project itself).
+- **`sources.DefaultLanternBeacons`.** Curated set of known-good
+  Lantern beacons that speak cert-exchange. Ships with the Hetzner
+  reference beacon. `BuildDefaultSources` wires this into the default
+  quorum source list when a libp2p host is available.
+- **Tests.** Unit test (`chain/bootstrap/sources/lantern_beacon_test.go`)
+  uses a mocknet + `certexchange.Server` to assert
+  `LanternBeaconSource.LatestFinality()` decodes a seeded cert into the
+  expected `Finality`. Integration test
+  (`chain/f3/certexch/server_test.go`) brings up the full responder +
+  source pair over an in-process libp2p mocknet and round-trips a cert.
+
+### Notes
+
+- No CGo, no new external dependencies beyond `go-f3` (already
+  pinned). 71/71 Curio FULLNODE_API method coverage unchanged.
+
 ## v1.2.0 (planned — Phase 11 / V1.2 GA)
 
 The headline V1.2 GA release: one-line install, multi-source trust
@@ -21,8 +58,8 @@ users.
   - `KindUser` (user-supplied `--peer URL`, same shape as Forest)
   - `KindLanternGateway` (Lantern's own gateway; **not counted by
     default**, see INSTALLER-SPEC §3)
-  - `KindLanternBeacon` (DHT-discovered Lantern beacons; stub for V1.2.1
-    until beacon cert-exchange ships)
+  - `KindLanternBeacon` (Lantern beacons over cert-exchange — stub in
+    V1.2.0, made live in V1.2.1 by B-11-01)
 - **`lantern doctor`**: re-runs the bootstrap quorum probe without
   writing anything; reports per-source health.
 - **`lantern repair`**: re-runs the quorum probe and overwrites the

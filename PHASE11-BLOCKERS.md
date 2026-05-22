@@ -56,8 +56,8 @@ Files:
 - `chain/bootstrap/sources/sources.go` — concrete `Source` impls:
   `ForestSource`, `LanternGatewaySource`, `UserPeerSource` (all
   Lotus-compatible JSON-RPC over HTTP), `Libp2pSource` (F3
-  `/f3/certexch/get/1/<nn>`), `LanternBeaconSource` (stub returning
-  `ErrNoBeaconBackend` until V1.2.1 ships cert-exchange-over-beacon).
+  `/f3/certexch/get/1/<nn>`), `LanternBeaconSource` (V1.2.1: real
+  cert-exchange client against the responder shipped in B-11-01).
 - `chain/bootstrap/sources/discover.go` — `BuildDefaultSources()`
   helper + `MainnetPublicForestURLs` constant (glif + chain.love).
 - `cmd/lantern/init.go` — `lantern init --bootstrap-quorum=N`
@@ -160,11 +160,14 @@ shipped status. See the relevant commit for details.
   finalized*, not the state root. The `PowerTable` CID is included in
   every F3 cert's `ECChain.Head()` and serves as a deterministic
   agreement digest. Documented in `sources.go` `finalityFromCert()`.
-- **`LanternBeaconSource` is a stub** that always returns
-  `ErrNoBeaconBackend`. Beacons today serve Bitswap but do not yet
-  implement cert-exchange or expose a JSON-RPC head endpoint. When
-  V1.2.1 ships beacon cert-exchange, this becomes a real source and
-  the quorum gains an additional independent class.
+- **`LanternBeaconSource` is live as of V1.2.1.** Lantern beacons now
+  run `chain/f3/certexch.Responder`, which wraps
+  `go-f3/certexchange.Server` and shares the beacon's existing libp2p
+  host. `LanternBeaconSource` dials the beacon over
+  `/f3/certexch/get/1/<network>` and returns a `Finality` shaped to
+  match the quorum equality contract. The Hetzner reference beacon
+  (`/ip4/157.180.16.39/tcp/4001/p2p/12D3KooWHUD3zzdQQavMbkrUjM1JFhTMB3s745KsziKu26tPRY13`)
+  is wired into `sources.DefaultLanternBeacons` and counted by default.
 - **Default quorum is 5** (per INSTALLER-SPEC.md §3). Lower with
   `--bootstrap-quorum N`; the minimum sensible value is 3 (still
   beats every "single trusted RPC" deployment in the Filecoin
@@ -184,18 +187,30 @@ shipped status. See the relevant commit for details.
 
 ## What Phase 11 did NOT ship (open items)
 
-### B-11-01 — Beacon cert-exchange
+### B-11-01 — Beacon cert-exchange ✅
 
-- **Severity:** medium — affects `LanternBeaconSource` only.
-- **What's missing:** Lantern beacons (the `lantern beacon`
-  subcommand) need a cert-exchange responder so other clients can
-  ask them for the latest F3 finality. Today the beacon serves
-  Bitswap and announces under `lantern/beacon/v1` rendezvous, but
-  doesn't speak F3 cert-exchange.
-- **Plan:** wire `go-f3/certexchange.Server` into `cmd/lantern/beacon.go`,
-  using the beacon's existing libp2p host. The data source is the
-  beacon's own `chain/f3/subscriber.State()` (the certs it has
-  already verified). Ship in V1.2.1.
+- **Status:** shipped in V1.2.1.
+- **What was done:** `chain/f3/certexch` (new package) wraps
+  `go-f3/certexchange.Server` around an in-process `certstore.Store`
+  seeded from `chain/f3/anchor.Embedded("mainnet")`. A poll loop
+  pulls verified certs forward from a configurable upstream
+  Lotus-compatible JSON-RPC source (Glif by default), validates them
+  via `chain/f3.VerifyCertChain`, and inserts them into the certstore.
+  The responder shares the beacon's existing libp2p host (no second
+  port, no second peer ID) and registers under
+  `/f3/certexch/get/1/<networkName>`. Boot log emits one line
+  confirming the protocol id + peer id + upstream URL.
+- **Client side:** `LanternBeaconSource` in
+  `chain/bootstrap/sources/sources.go` is now a real cert-exchange
+  client. `BuildDefaultSources` wires `DefaultLanternBeacons` (which
+  ships with the Hetzner reference beacon) into the quorum by default.
+  `KindLanternBeacon` counts toward the quorum because beacons are
+  independent operators, not the project (the gateway, run by the
+  project, is still opt-in via `--count-gateway`).
+- **Tests:** unit test in `chain/bootstrap/sources/` (mock
+  cert-exchange server, asserts `Finality` round-trip equality) plus
+  integration test in `chain/f3/certexch/` (in-process responder +
+  source, real F3 cert round-trip).
 
 ### B-11-02 — Quorum status endpoint for Mac app
 
@@ -285,7 +300,7 @@ zero regressions from Phase 10.
 | Release workflow / signed binaries           | 🟡 workflow committed; first tagged release pending (Nicklas) |
 | Reproducible-build recipe                    | ✅ documented + verified |
 | Native Mac menu-bar app (MVP)                | ✅ |
-| Beacon cert-exchange                         | 🟡 V1.2.1 (B-11-01) |
+| Beacon cert-exchange                         | ✅ shipped in V1.2.1 (B-11-01) |
 | `get.lantern.reiers.io` install URL          | 🟡 trivial DNS/worker setup (B-11-06) |
 | Documentation                                | ✅ |
 

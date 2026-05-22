@@ -198,6 +198,14 @@ The swarm architecture makes Lantern strictly more robust without weakening any 
 - DHT beacon rendezvous (`lantern/beacon/v1`) (Part C)
 - Live libp2p stats exposed via Curio webui (Part A, Part D)
 
+**V1.2.1 — SHIPPED:**
+- Beacon **F3 cert-exchange responder** (B-11-01). `lantern beacon`
+  shares its libp2p host with `chain/f3/certexch.Responder`, which
+  wraps `go-f3/certexchange.Server` and serves
+  `/f3/certexch/get/1/<networkName>` from a verified in-process
+  certstore. `LanternBeaconSource` in the bootstrap quorum now counts
+  Lantern beacons as first-class independent sources.
+
 **V1.3 (Phase 11) — next:**
 - Client-side DHT beacon discovery (auto-populate `--bitswap-peers` from the DHT rendezvous)
 - Beacon backfill: hook into upstream Bitswap wantlist to pull missing CIDs from the gateway proactively
