@@ -23,6 +23,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -149,7 +150,12 @@ COMMANDS
 
 ENVIRONMENT
   LANTERN_HOME    Data directory (default: ~/.lantern)
-  LANTERN_PASS    Keystore passphrase (default: empty; prompts on init)`)
+  LANTERN_PASS    Keystore passphrase. When unset and stdin is a TTY,
+                  Lantern prompts interactively. When unset on a non-TTY
+                  process (e.g. a systemd service) Lantern refuses to
+                  start; set LANTERN_PASS via an EnvironmentFile=. To
+                  deliberately run with an unencrypted keystore, set
+                  LANTERN_PASS='' (explicit empty).`)
 }
 
 // --- helpers ---
@@ -174,16 +180,80 @@ func dataDir() string {
 	return filepath.Join(home, ".lantern")
 }
 
-func passphrase() string {
-	if p := os.Getenv("LANTERN_PASS"); p != "" {
-		return p
+// resolvePassphrase decides what passphrase to use to unlock (or create)
+// the keystore at dir. Resolution order:
+//
+//  1. LANTERN_PASS env var, when set and non-empty.
+//  2. Explicit LANTERN_PASS="" (set but empty) -> unencrypted keystore,
+//     with a stderr warning so misconfig is loud.
+//  3. Interactive TTY prompt. When the keystore directory already exists
+//     with key files, prompts once; when initializing a fresh keystore,
+//     prompts twice (confirm matches).
+//  4. No TTY and no env var -> hard error pointing at the EnvironmentFile
+//     pattern for systemd / launchd.
+//
+// Issue #2: previously fell back silently to the empty string. That left
+// keystores AES-GCM-encrypted with a known empty passphrase, effectively
+// unencrypted to anyone with file read access on the box.
+func resolvePassphrase(dir string) (string, error) {
+	env, envSet := os.LookupEnv("LANTERN_PASS")
+	if envSet && env != "" {
+		return env, nil
 	}
-	return ""
+	if envSet && env == "" {
+		// Operator explicitly opted out of encryption.
+		fmt.Fprintln(os.Stderr, "\033[33m  warning: LANTERN_PASS is set but empty - keystore will be unencrypted\033[0m")
+		return "", nil
+	}
+
+	// No env var. Need either a TTY or a clear error.
+	if !isInteractive() {
+		return "", fmt.Errorf("LANTERN_PASS is not set and stdin is not a TTY. " +
+			"Set LANTERN_PASS for non-interactive runs. For systemd: use " +
+			"EnvironmentFile=/etc/lantern/passphrase (chmod 600). " +
+			"To deliberately use an unencrypted keystore set LANTERN_PASS='' (explicit empty)")
+	}
+
+	hasKeys := keystoreHasKeys(dir)
+	if hasKeys {
+		fmt.Fprint(os.Stderr, "Lantern keystore passphrase: ")
+		p, err := readPassword()
+		if err != nil {
+			return "", fmt.Errorf("read passphrase: %w", err)
+		}
+		return p, nil
+	}
+
+	// Fresh keystore. Prompt twice and require a match.
+	fmt.Fprintln(os.Stderr, "No existing Lantern keystore at", dir)
+	fmt.Fprintln(os.Stderr, "Set a passphrase to encrypt local keys. Press enter without a value to opt out (NOT recommended).")
+	fmt.Fprint(os.Stderr, "New passphrase: ")
+	p1, err := readPassword()
+	if err != nil {
+		return "", fmt.Errorf("read passphrase: %w", err)
+	}
+	if p1 == "" {
+		fmt.Fprintln(os.Stderr, "\033[33m  warning: keystore will be unencrypted\033[0m")
+		return "", nil
+	}
+	fmt.Fprint(os.Stderr, "Confirm passphrase: ")
+	p2, err := readPassword()
+	if err != nil {
+		return "", fmt.Errorf("read passphrase: %w", err)
+	}
+	if p1 != p2 {
+		return "", errors.New("passphrases did not match")
+	}
+	return p1, nil
 }
 
 func openWallet() (*wallet.Wallet, error) {
 	dir := filepath.Join(dataDir(), "keystore")
-	return wallet.New(context.Background(), dir, passphrase())
+	p, err := resolvePassphrase(dir)
+	if err != nil {
+		return nil, err
+	}
+	return wallet.New(context.Background(), dir, p)
 }
 
 // gatewayClient builds the (cache + gateway + glif fallback) BlockGetter
