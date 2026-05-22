@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lantern</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --border: #2d333b;
+    --fg: #e6edf3;
+    --muted: #7d8590;
+    --accent: #e8a86b;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 1rem; }
+  h1 { font-size: 1.4rem; font-weight: 600; margin: 0; }
+  h1 .brand { color: var(--accent); }
+  h1 .version { color: var(--muted); font-weight: 400; font-size: 0.9rem; font-family: var(--mono); margin-left: 0.5rem; }
+  nav { display: flex; gap: 0.25rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  nav button { background: var(--panel); border: 1px solid var(--border); color: var(--muted); padding: 0.5rem 1rem; font-size: 0.875rem; cursor: pointer; border-radius: 6px; font-family: inherit; }
+  nav button:hover { color: var(--fg); }
+  nav button.active { background: var(--bg); color: var(--accent); border-color: var(--accent); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1.25rem; margin-bottom: 1rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+  .stat { padding: 0.75rem 0; }
+  .stat-label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat-value { font-size: 1.5rem; font-weight: 600; font-family: var(--mono); margin-top: 0.25rem; }
+  .stat-value.small { font-size: 1rem; }
+  .stat-value.ok { color: var(--ok); }
+  .stat-value.warn { color: var(--warn); }
+  .stat-value.bad { color: var(--bad); }
+  .stat-sub { color: var(--muted); font-size: 0.8rem; margin-top: 0.25rem; font-family: var(--mono); }
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.85rem; }
+  th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
+  tr:last-child td { border-bottom: none; }
+  .footer { color: var(--muted); font-size: 0.75rem; text-align: center; margin-top: 2rem; font-family: var(--mono); }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-family: var(--mono); }
+  .pill.ok { background: rgba(63, 185, 80, 0.15); color: var(--ok); }
+  .pill.warn { background: rgba(210, 153, 34, 0.15); color: var(--warn); }
+  .pill.bad { background: rgba(248, 81, 73, 0.15); color: var(--bad); }
+  .empty { color: var(--muted); padding: 1rem 0; text-align: center; font-style: italic; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+  pre { background: var(--bg); border: 1px solid var(--border); padding: 0.75rem; border-radius: 6px; overflow-x: auto; font-size: 0.8rem; }
+  .row-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 0.5rem; }
+  .row-head h2 { margin: 0; font-size: 1rem; font-weight: 500; color: var(--muted); }
+  .row-head .refresh { color: var(--muted); font-size: 0.75rem; font-family: var(--mono); }
+  code { font-family: var(--mono); font-size: 0.85em; color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span class="brand">🪴 Lantern</span><span class="version" id="ver-tag">…</span></h1>
+  <div id="status-indicator"><span class="pill ok" id="status-pill">connected</span></div>
+</header>
+
+<nav>
+  <button class="tab-btn active" data-tab="overview">Overview</button>
+  <button class="tab-btn" data-tab="peers">Peers</button>
+  <button class="tab-btn" data-tab="sync">Sync</button>
+  <button class="tab-btn" data-tab="quorum">Quorum</button>
+  <button class="tab-btn" data-tab="fetcher">Fetcher</button>
+</nav>
+
+<div class="tab active" id="tab-overview">
+  <div class="panel">
+    <div class="row-head"><h2>Chain</h2><span class="refresh" id="overview-refreshed">—</span></div>
+    <div class="grid">
+      <div class="stat">
+        <div class="stat-label">Chain head</div>
+        <div class="stat-value" id="o-head">…</div>
+        <div class="stat-sub" id="o-head-age">…</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Tipset blocks</div>
+        <div class="stat-value" id="o-blocks">…</div>
+        <div class="stat-sub" id="o-tsk">…</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">F3 finality</div>
+        <div class="stat-value" id="o-f3">…</div>
+        <div class="stat-sub" id="o-f3-sub">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Network</div>
+        <div class="stat-value small" id="o-network">…</div>
+        <div class="stat-sub" id="o-bdelay">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row-head"><h2>Network</h2></div>
+    <div class="grid">
+      <div class="stat">
+        <div class="stat-label">Peers</div>
+        <div class="stat-value" id="o-peers">…</div>
+        <div class="stat-sub" id="o-peer-range">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Bandwidth in</div>
+        <div class="stat-value small" id="o-bw-in">…</div>
+        <div class="stat-sub" id="o-bw-in-rate">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Bandwidth out</div>
+        <div class="stat-value small" id="o-bw-out">…</div>
+        <div class="stat-sub" id="o-bw-out-rate">—</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Reachability</div>
+        <div class="stat-value small" id="o-reach">…</div>
+        <div class="stat-sub">AutoNAT</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row-head"><h2>Daemon</h2></div>
+    <div class="grid">
+      <div class="stat">
+        <div class="stat-label">Uptime</div>
+        <div class="stat-value small" id="o-uptime">…</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">RPC listen</div>
+        <div class="stat-value small" id="o-rpc">…</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">VM bridge</div>
+        <div class="stat-value small" id="o-bridge">…</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Block submit</div>
+        <div class="stat-value small" id="o-submit">…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="tab" id="tab-peers">
+  <div class="panel">
+    <div class="row-head"><h2>Connected peers</h2><span class="refresh" id="peers-refreshed">—</span></div>
+    <div id="peers-summary" class="stat-sub" style="margin-bottom: 0.5rem;">—</div>
+    <table id="peers-table">
+      <thead><tr><th>Peer ID</th><th>Addresses</th></tr></thead>
+      <tbody><tr><td colspan="2" class="empty">loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="tab" id="tab-sync">
+  <div class="panel">
+    <div class="row-head"><h2>Header store sync</h2><span class="refresh" id="sync-refreshed">—</span></div>
+    <div class="grid">
+      <div class="stat"><div class="stat-label">Polls</div><div class="stat-value small" id="s-polls">…</div></div>
+      <div class="stat"><div class="stat-label">Head advances</div><div class="stat-value small" id="s-advances">…</div></div>
+      <div class="stat"><div class="stat-label">Reorgs</div><div class="stat-value small" id="s-reorgs">…</div></div>
+      <div class="stat"><div class="stat-label">Headers added</div><div class="stat-value small" id="s-headers">…</div></div>
+      <div class="stat"><div class="stat-label">Last head epoch</div><div class="stat-value small" id="s-last">…</div></div>
+      <div class="stat"><div class="stat-label">Last error</div><div class="stat-value small" id="s-err">—</div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row-head"><h2>Gossipsub block ingestor</h2></div>
+    <div class="grid">
+      <div class="stat"><div class="stat-label">Received</div><div class="stat-value small" id="g-rcv">…</div></div>
+      <div class="stat"><div class="stat-label">Installed</div><div class="stat-value small" id="g-installed">…</div></div>
+      <div class="stat"><div class="stat-label">Deduped</div><div class="stat-value small" id="g-dedup">…</div></div>
+      <div class="stat"><div class="stat-label">Skipped</div><div class="stat-value small" id="g-skipped">…</div></div>
+      <div class="stat"><div class="stat-label">Backfilled</div><div class="stat-value small" id="g-backfilled">…</div></div>
+      <div class="stat"><div class="stat-label">Last install epoch</div><div class="stat-value small" id="g-last">…</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="tab" id="tab-quorum">
+  <div class="panel">
+    <div class="row-head"><h2>Bootstrap anchor</h2></div>
+    <div class="grid">
+      <div class="stat"><div class="stat-label">Epoch</div><div class="stat-value small" id="q-epoch">…</div></div>
+      <div class="stat"><div class="stat-label">Anchor age</div><div class="stat-value small" id="q-age">…</div></div>
+    </div>
+    <div style="margin-top: 1rem;">
+      <div class="stat-label" style="margin-bottom: 0.5rem;">State root</div>
+      <pre id="q-stateroot">…</pre>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="row-head"><h2>Trust model note</h2></div>
+    <p style="color: var(--muted); font-size: 0.9rem; line-height: 1.5;">
+    The trust anchor was established at first run via the 5-of-N bootstrap quorum
+    (independent libp2p peers + independent HTTP archives must all agree on the
+    F3-finalized tipset). Everything you see in this dashboard is derived from
+    that anchor via content-addressed verification. Re-anchor via
+    <code>lantern doctor</code> and <code>lantern repair</code> when needed.
+    </p>
+  </div>
+</div>
+
+<div class="tab" id="tab-fetcher">
+  <div class="panel">
+    <div class="row-head"><h2>IPLD block fetcher</h2><span class="refresh" id="fetcher-refreshed">—</span></div>
+    <table id="fetcher-table">
+      <thead><tr><th>Source</th><th>Hits</th></tr></thead>
+      <tbody><tr><td colspan="2" class="empty">loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="footer">
+  Lantern dashboard · refreshes every 5s · <span id="last-poll">—</span>
+</div>
+
+<script>
+(() => {
+  const el = (id) => document.getElementById(id);
+  const fmt = {
+    int: (n) => n == null ? "—" : Number(n).toLocaleString(),
+    bytes: (n) => {
+      if (n == null || n === 0) return "0 B";
+      const units = ["B","KiB","MiB","GiB","TiB"];
+      let i = 0; let v = Number(n);
+      while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+      return v.toFixed(i === 0 ? 0 : 2) + " " + units[i];
+    },
+    rate: (n) => fmt.bytes(n) + "/s",
+    time: (ts) => {
+      if (!ts) return "—";
+      const d = new Date(ts * 1000);
+      return d.toISOString().replace("T", " ").slice(0, 19);
+    },
+    age: (sec) => {
+      if (sec == null) return "—";
+      const s = Math.floor(sec);
+      if (s < 60) return s + "s ago";
+      if (s < 3600) return Math.floor(s / 60) + "m ago";
+      if (s < 86400) return Math.floor(s / 3600) + "h ago";
+      return Math.floor(s / 86400) + "d ago";
+    },
+    cidShort: (c) => !c ? "—" : (c.length > 24 ? c.slice(0, 12) + "…" + c.slice(-6) : c),
+    nowHHMMSS: () => new Date().toTimeString().slice(0, 8),
+  };
+
+  // ---- Tab switching ----
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+      btn.classList.add("active");
+      el("tab-" + btn.dataset.tab).classList.add("active");
+    });
+  });
+
+  // ---- Fetch helpers ----
+  async function getJSON(path) {
+    const r = await fetch(path, { cache: "no-store" });
+    if (!r.ok) throw new Error(path + ": " + r.status);
+    return r.json();
+  }
+
+  function setStatus(ok) {
+    const p = el("status-pill");
+    p.className = "pill " + (ok ? "ok" : "bad");
+    p.textContent = ok ? "connected" : "disconnected";
+  }
+
+  // ---- Renderers ----
+  function renderOverview(d) {
+    el("ver-tag").textContent = d.version || "";
+    el("o-head").textContent = fmt.int(d.head_epoch);
+    el("o-head-age").textContent = d.head_timestamp ? fmt.age(d.now - d.head_timestamp) + " (" + fmt.time(d.head_timestamp) + ")" : "—";
+    el("o-blocks").textContent = fmt.int(d.tipset_blocks);
+    el("o-tsk").textContent = d.tipset_key ? fmt.cidShort(d.tipset_key) : "—";
+    el("o-f3").textContent = d.f3_height != null ? fmt.int(d.f3_height) : "—";
+    el("o-f3-sub").textContent = d.f3_height != null ? "instance " + fmt.int(d.f3_instance) : "—";
+    el("o-network").textContent = d.network || "—";
+    el("o-bdelay").textContent = d.block_delay ? d.block_delay + "s blocks" : "—";
+
+    el("o-peers").textContent = fmt.int(d.peers);
+    el("o-peer-range").textContent = d.peers_min != null ? "watermarks " + d.peers_min + "/" + d.peers_max : "—";
+    el("o-bw-in").textContent = fmt.bytes(d.bw_in);
+    el("o-bw-in-rate").textContent = fmt.rate(d.bw_in_rate || 0);
+    el("o-bw-out").textContent = fmt.bytes(d.bw_out);
+    el("o-bw-out-rate").textContent = fmt.rate(d.bw_out_rate || 0);
+    el("o-reach").textContent = d.reachability || "Unknown";
+
+    el("o-uptime").textContent = d.uptime_seconds != null ? fmt.age(d.uptime_seconds).replace(" ago","") : "—";
+    el("o-rpc").textContent = d.rpc_addr || "—";
+    el("o-bridge").textContent = d.vm_bridge || "off";
+    el("o-submit").textContent = d.allow_block_submit ? "ALLOWED" : "gated";
+
+    el("overview-refreshed").textContent = "refreshed " + fmt.nowHHMMSS();
+  }
+
+  function renderPeers(d) {
+    el("peers-summary").textContent = (d.peers || []).length + " connected · last seen " + fmt.nowHHMMSS();
+    const body = el("peers-table").tBodies[0];
+    if (!d.peers || d.peers.length === 0) {
+      body.innerHTML = '<tr><td colspan="2" class="empty">no peers</td></tr>';
+      return;
+    }
+    body.innerHTML = d.peers.slice(0, 200).map((p) => {
+      const addrs = (p.addrs || []).slice(0, 2).join("<br>") || "—";
+      return "<tr><td><code>" + p.id + "</code></td><td>" + addrs + "</td></tr>";
+    }).join("");
+    el("peers-refreshed").textContent = "refreshed " + fmt.nowHHMMSS();
+  }
+
+  function renderSync(d) {
+    el("s-polls").textContent = fmt.int(d.polls);
+    el("s-advances").textContent = fmt.int(d.head_advances);
+    el("s-reorgs").textContent = fmt.int(d.reorgs);
+    el("s-headers").textContent = fmt.int(d.headers_added);
+    el("s-last").textContent = fmt.int(d.last_head_epoch);
+    el("s-err").textContent = d.last_error || "—";
+
+    const g = d.gossip || {};
+    el("g-rcv").textContent = fmt.int(g.received);
+    el("g-installed").textContent = fmt.int(g.installed);
+    el("g-dedup").textContent = fmt.int(g.dedup);
+    el("g-skipped").textContent = fmt.int(g.skipped);
+    el("g-backfilled").textContent = fmt.int(g.backfilled);
+    el("g-last").textContent = fmt.int(g.last_install_epoch);
+
+    el("sync-refreshed").textContent = "refreshed " + fmt.nowHHMMSS();
+  }
+
+  function renderQuorum(d) {
+    el("q-epoch").textContent = fmt.int(d.epoch);
+    el("q-age").textContent = d.anchor_age_seconds != null ? fmt.age(d.anchor_age_seconds) : "—";
+    el("q-stateroot").textContent = d.state_root || "—";
+  }
+
+  function renderFetcher(d) {
+    const body = el("fetcher-table").tBodies[0];
+    const entries = Object.entries(d.sources || {}).sort((a,b) => b[1] - a[1]);
+    if (entries.length === 0) {
+      body.innerHTML = '<tr><td colspan="2" class="empty">no data</td></tr>';
+    } else {
+      body.innerHTML = entries.map(([k,v]) => "<tr><td>" + k + "</td><td>" + fmt.int(v) + "</td></tr>").join("");
+    }
+    el("fetcher-refreshed").textContent = "refreshed " + fmt.nowHHMMSS();
+  }
+
+  // ---- Poll loop ----
+  async function pollAll() {
+    try {
+      const [overview, peers, sync, fetcher] = await Promise.all([
+        getJSON("/api/dashboard/overview"),
+        getJSON("/api/dashboard/peers"),
+        getJSON("/api/dashboard/sync"),
+        getJSON("/api/dashboard/fetcher"),
+      ]);
+      renderOverview(overview);
+      renderPeers(peers);
+      renderSync(sync);
+      renderQuorum(overview); // quorum reads same overview payload
+      renderFetcher(fetcher);
+      setStatus(true);
+      el("last-poll").textContent = fmt.nowHHMMSS();
+    } catch (e) {
+      setStatus(false);
+      console.error(e);
+    }
+  }
+
+  pollAll();
+  setInterval(pollAll, 5000);
+})();
+</script>
+
+</body>
+</html>

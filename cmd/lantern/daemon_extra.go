@@ -61,7 +61,11 @@ func rebindBlockGetter(c *handlers.ChainAPI, bg hamt.BlockGetter) {
 // serveMetrics exposes per-source fetch hit counts + bitswap stats + libp2p
 // peer count on a Prometheus-style /metrics endpoint. Format is text
 // exposition (no client_golang dependency).
-func serveMetrics(ctx context.Context, addr string, f *combined.Fetcher, bs *lbitswap.Client, host *llibp2p.Host) {
+//
+// When `dash` is non-nil (issue #5) the same listener also serves the
+// operator dashboard at /dashboard/ + JSON endpoints under
+// /api/dashboard/*. Pass nil to disable the dashboard.
+func serveMetrics(ctx context.Context, addr string, f *combined.Fetcher, bs *lbitswap.Client, host *llibp2p.Host, dash *dashboardDeps) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
@@ -101,6 +105,19 @@ func serveMetrics(ctx context.Context, addr string, f *combined.Fetcher, bs *lbi
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte("ok\n"))
+	})
+
+	// Issue #5: operator dashboard, opt-in by passing dash != nil.
+	registerDashboard(mux, dash)
+
+	// Bare-root convenience: if someone hits http://addr/ they probably
+	// want the dashboard, not a 404.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" && dash != nil {
+			http.Redirect(w, r, "/dashboard/", http.StatusSeeOther)
+			return
+		}
+		http.NotFound(w, r)
 	})
 
 	ln, err := net.Listen("tcp", addr)
