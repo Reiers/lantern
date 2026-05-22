@@ -522,7 +522,7 @@ func cmdDaemon(args []string) error {
 		}); err != nil {
 			fmt.Printf("  libp2p: EnableDHT failed: %v (continuing without DHT discovery)\n", err)
 		} else {
-			fmt.Printf("  libp2p: DHT discovery on (target peers >= 50, hwm 200)\n")
+			fmt.Printf("  libp2p: DHT discovery on (target peers >= %d, hwm %d)\n", p2pHost.MinPeers(), p2pHost.MaxPeers())
 		}
 
 		// Issue #16: speak /fil/hello/1.0.0 so remote Filecoin peers'
