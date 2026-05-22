@@ -173,8 +173,136 @@ func (h *Host) EnableDHT(ctx context.Context, opts DHTOptions) error {
 	refreshCtx, cancel := context.WithCancel(ctx)
 	h.AddCleanup(cancel)
 	go h.dhtRefreshLoop(refreshCtx, opts)
+	go h.keepaliveLoop(refreshCtx, opts)
 	h.RunDHTDiscovery(refreshCtx, d, opts)
 	return nil
+}
+
+// KeepaliveStats reports observable activity from the keepalive loop.
+// Exposed so the dashboard / lantern info can show whether the loop is
+// actively topping up peer count.
+type KeepaliveStats struct {
+	Cycles        uint64 // total keepalive ticks
+	Triggered     uint64 // cycles where we were below MinPeers and acted
+	BootstrapDial uint64 // cumulative bootstrap-peer dials
+	RoutingDial   uint64 // cumulative routing-table-walk dials
+	LastPeerCount int    // peer count observed at the last tick
+}
+
+// KeepaliveStats returns a snapshot of keepalive activity counters.
+func (h *Host) KeepaliveStats() KeepaliveStats {
+	return KeepaliveStats{
+		Cycles:        h.kaCycles.Load(),
+		Triggered:     h.kaTriggered.Load(),
+		BootstrapDial: h.kaBootDial.Load(),
+		RoutingDial:   h.kaRouteDial.Load(),
+		LastPeerCount: int(h.kaLastCount.Load()),
+	}
+}
+
+// keepaliveLoop is the 30s tight redial loop that maintains MinPeers.
+//
+// Issue #9: the 5-minute dhtRefreshLoop is too slow to catch decay; peer
+// count routinely drifted from 50 down to ~15 within a few minutes after
+// boot. This loop fires every 30s. When the count is below MinPeers, it
+// (a) re-dials all bootstrap peers, then (b) walks the DHT routing
+// table and dials up to N=10 unconnected peers, and (c) pushes
+// everything that successfully connects back into the routing table.
+//
+// When at or above MinPeers, the loop does nothing -- no churn, no dials,
+// no log spam. connmgr's grace period protects fresh connections from
+// being immediately re-trimmed.
+func (h *Host) keepaliveLoop(ctx context.Context, opts DHTOptions) {
+	const keepaliveInterval = 30 * time.Second
+	const maxRoutingDialsPerCycle = 10
+
+	// Wait a short while after boot before starting; gives the host's
+	// own bootstrap dials a chance to land first.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(15 * time.Second):
+	}
+
+	min := h.MinPeers()
+	if min <= 0 {
+		min = 50 // defensive default; should never hit because Host.MinPeers always returns the configured value
+	}
+
+	tick := time.NewTicker(keepaliveInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			h.runKeepalive(ctx, opts, min, maxRoutingDialsPerCycle)
+		}
+	}
+}
+
+// runKeepalive is one tick of the keepalive loop, broken out for clarity
+// and testability.
+func (h *Host) runKeepalive(ctx context.Context, opts DHTOptions, minPeers, maxRoutingDials int) {
+	h.kaCycles.Add(1)
+	count := h.PeerCount()
+	h.kaLastCount.Store(int64(count))
+
+	if count >= minPeers {
+		return // healthy, no work to do
+	}
+	h.kaTriggered.Add(1)
+
+	// a) Re-dial bootstrap peers. Cheap, bounded (~7 dials).
+	for _, p := range opts.BootstrapPeers {
+		ai, err := parseAddrInfo(p)
+		if err != nil {
+			continue
+		}
+		// Skip if already connected.
+		if h.H.Network().Connectedness(ai.ID) == network.Connected {
+			continue
+		}
+		dctx, dcancel := context.WithTimeout(ctx, 6*time.Second)
+		if err := h.H.Connect(dctx, ai); err == nil {
+			h.kaBootDial.Add(1)
+			if h.kdht != nil {
+				_, _ = h.kdht.RoutingTable().TryAddPeer(ai.ID, true, false)
+			}
+		}
+		dcancel()
+	}
+
+	// b) Walk the routing table for unconnected peers and dial up to
+	//    maxRoutingDials of them. This is what brings the count back
+	//    up after bootstrap-only-redial isn't enough.
+	if h.kdht == nil {
+		return
+	}
+	candidates := h.kdht.RoutingTable().ListPeers()
+	dialed := 0
+	for _, pid := range candidates {
+		if dialed >= maxRoutingDials {
+			break
+		}
+		// Stop if we crossed the floor mid-walk.
+		if h.PeerCount() >= minPeers {
+			break
+		}
+		if h.H.Network().Connectedness(pid) == network.Connected {
+			continue
+		}
+		ai := h.H.Peerstore().PeerInfo(pid)
+		if len(ai.Addrs) == 0 {
+			continue
+		}
+		dctx, dcancel := context.WithTimeout(ctx, 6*time.Second)
+		if err := h.H.Connect(dctx, ai); err == nil {
+			h.kaRouteDial.Add(1)
+			dialed++
+		}
+		dcancel()
+	}
 }
 
 // seedRoutingTable explicitly pushes every connected peer plus every

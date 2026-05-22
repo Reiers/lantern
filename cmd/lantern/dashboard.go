@@ -188,6 +188,16 @@ func (d *dashboardDeps) syncSnapshot() map[string]any {
 			"last_install_epoch": int64(s.LastInstallEpoch),
 		}
 	}
+	if d.host != nil {
+		ks := d.host.KeepaliveStats()
+		out["keepalive"] = map[string]any{
+			"cycles":          ks.Cycles,
+			"triggered":       ks.Triggered,
+			"bootstrap_dials": ks.BootstrapDial,
+			"routing_dials":   ks.RoutingDial,
+			"last_peer_count": ks.LastPeerCount,
+		}
+	}
 	return out
 }
 
