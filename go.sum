@@ -122,6 +122,8 @@ github.com/filecoin-project/go-amt-ipld/v4 v4.4.0 h1:6kvvMeSpIy4GTU5t3vPHZgWYIMR
 github.com/filecoin-project/go-amt-ipld/v4 v4.4.0/go.mod h1:msgmUxTyRBZ6iXt+5dnUDnIb7SEFqdPsbB1wyo/G3ts=
 github.com/filecoin-project/go-bitfield v0.2.4 h1:uZ7MeE+XfM5lqrHJZ93OnhQKc/rveW8p9au0C68JPgk=
 github.com/filecoin-project/go-bitfield v0.2.4/go.mod h1:CNl9WG8hgR5mttCnUErjcQjGvuiZjRqK9rHVBsQF4oM=
+github.com/filecoin-project/go-cbor-util v0.0.2 h1:vljF+a+NBwv89VfPvy5lJEtrZWe8k4nizgaqWhf6Ro8=
+github.com/filecoin-project/go-cbor-util v0.0.2/go.mod h1:96OIHk38Y1IV+KCXkGjE2WjjIxfpIanz2rWIIy5kKkQ=
 github.com/filecoin-project/go-clock v0.1.0 h1:SFbYIM75M8NnFm1yMHhN9Ahy3W5bEZV9gd6MPfXbKVU=
 github.com/filecoin-project/go-clock v0.1.0/go.mod h1:4uB/O4PvOjlx1VCMdZ9MyDZXRm//gkj1ELEbxfI1AZs=
 github.com/filecoin-project/go-crypto v0.1.0 h1:Pob2MphoipMbe/ksxZOMcQvmBHAd3sI/WEqcbpIsGI0=

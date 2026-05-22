@@ -56,6 +56,7 @@ require (
 	github.com/drand/kyber-bls12381 v0.3.4 // indirect
 	github.com/dunglas/httpsfv v1.1.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/filecoin-project/go-cbor-util v0.0.2 // indirect
 	github.com/filecoin-project/go-clock v0.1.0 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/gammazero/chanqueue v1.1.2 // indirect

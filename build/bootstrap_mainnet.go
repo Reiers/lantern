@@ -31,3 +31,12 @@ const MainnetGossipTopicBlocks = "/fil/blocks/testnetnet"
 // MainnetNetworkName is the wire-name string Filecoin libp2p protocols
 // expect.
 const MainnetNetworkName = "testnetnet"
+
+// MainnetGenesisCID is the CID of block 0 of Filecoin mainnet, returned by
+// Filecoin.ChainGetGenesis on any healthy node. Used by the /fil/hello/1.0.0
+// protocol (issue #16) to identify our network to peers: nodes on different
+// chains close the Hello stream on genesis mismatch.
+//
+// Source: queried Filecoin.ChainGetGenesis against api.node.glif.io,
+// 2026-05-22; matches the Lotus mainnet GenesisFile.
+const MainnetGenesisCID = "bafy2bzacecnamqgqmifpluoeldx7zzglxcljo6oja4vrmtj7432rphldpdmm2"

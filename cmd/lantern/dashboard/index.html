@@ -471,6 +471,15 @@ body[data-mode="dev"]    [data-show~="dev"].flex-show { display: flex; }
   </div>
 
   <div class="card">
+    <div class="card-header"><h2 class="card-title">Filecoin Hello (/fil/hello/1.0.0)</h2></div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-label">Sent</div><div class="stat-value small" id="d-hello-sent">—</div></div>
+      <div class="stat"><div class="stat-label">Received</div><div class="stat-value small" id="d-hello-recv">—</div></div>
+      <div class="stat"><div class="stat-label">Rejected</div><div class="stat-value small" id="d-hello-rej">—</div></div>
+    </div>
+  </div>
+
+  <div class="card">
     <div class="card-header"><h2 class="card-title">Block source counters</h2></div>
     <table>
       <thead><tr><th>Source</th><th>Hits</th></tr></thead>
@@ -680,6 +689,27 @@ document.addEventListener("click", (e) => {
   }).catch(() => {});
 });
 
+// formatBrandSubtitle parses the daemon's reported version string into a
+// '<version> · <network-name>' subtitle for the brand mark. Handles the
+// two real-world shapes: 'v1.2.1 Lantern+mainnet' and 'dev Lantern+mainnet'.
+function formatBrandSubtitle(raw) {
+  if (!raw) return "—";
+  const parts = String(raw).split(" ");
+  const version = parts[0] || "";
+  let net = parts.slice(1).join(" ");
+  // Strip the 'Lantern+' prefix and the surface-level word for known nets.
+  net = net.replace(/^Lantern\+/, "");
+  const pretty = {
+    mainnet:    "Filecoin Mainnet",
+    calibration:"Filecoin Calibration",
+    butterfly:  "Filecoin Butterfly",
+    "":         "",
+  }[net] || ("Filecoin " + net.charAt(0).toUpperCase() + net.slice(1));
+  if (!version) return pretty;
+  if (!pretty)  return version;
+  return version + " · " + pretty;
+}
+
 // ---- Issue #14: action buttons (Renew anchor, Find more peers) ----
 //
 // Both POST JSON endpoints behind a same-origin guard (X-Lantern-Origin
@@ -869,6 +899,13 @@ function renderDev(o, s, peers, fetcher) {
   $("d-ka-stuck").textContent = fmt.int(ka.stuck);
   $("d-ka-walks").textContent = fmt.int(ka.closest_walks);
 
+  // Filecoin Hello (issue #16): observability for the protocol that
+  // keeps remote Filecoin nodes from trimming us.
+  const hello = (s && s.hello) || {};
+  $("d-hello-sent").textContent = fmt.int(hello.sent);
+  $("d-hello-recv").textContent = fmt.int(hello.received);
+  $("d-hello-rej").textContent = fmt.int(hello.rejected);
+
   // Connected peers table.
   //
   // Issue #12: peer IDs and multiaddrs are too long to render raw, so we
@@ -920,8 +957,12 @@ async function pollAll() {
       getJSON("/api/dashboard/fetcher"),
     ]);
     const h = computeHealth(overview, syncSnap);
-    const verLabel = (overview.version || "").replace("v", "");
-    $("brand-ver").textContent = verLabel ? verLabel.replace("Lantern+", "· ") : "—";
+    // Subtitle under the brand mark. The wire format is
+    // '<version> Lantern+<network>' (e.g. 'v1.2.1 Lantern+mainnet' or
+    // 'dev Lantern+mainnet'). Render as '<version> · Filecoin Mainnet'.
+    // The previous logic did a naive .replace('v', '') which stripped the
+    // 'v' from 'dev' too, producing 'de · mainnet'.
+    $("brand-ver").textContent = formatBrandSubtitle(overview.version);
     setHealth(h.tone, h.pillLabel);
 
     renderClient(overview, syncSnap, h);

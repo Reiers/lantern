@@ -50,6 +50,7 @@ import (
 	lbitswap "github.com/Reiers/lantern/net/bitswap"
 	"github.com/Reiers/lantern/net/combined"
 	"github.com/Reiers/lantern/net/glif"
+	"github.com/Reiers/lantern/net/hello"
 	"github.com/Reiers/lantern/net/hsync"
 	llibp2p "github.com/Reiers/lantern/net/libp2p"
 	"github.com/Reiers/lantern/rpc/handlers"
@@ -476,6 +477,8 @@ func cmdDaemon(args []string) error {
 	// AmbientAutoNAT subsystem on the host respectively.
 	var p2pHost *llibp2p.Host
 	var gossipIngestor *gossipBlockIngestor
+	var helloSvc *hello.Service
+	_ = helloSvc // kept around for future stats wiring; lifecycle is goroutine-managed
 	if !*noLibp2p && *p2pListen != "" {
 		listeners := splitCSV(*p2pListen)
 		p2pHost, err = llibp2p.New(ctx, llibp2p.HostConfig{
@@ -501,6 +504,31 @@ func cmdDaemon(args []string) error {
 			fmt.Printf("  libp2p: EnableDHT failed: %v (continuing without DHT discovery)\n", err)
 		} else {
 			fmt.Printf("  libp2p: DHT discovery on (target peers >= 50, hwm 200)\n")
+		}
+
+		// Issue #16: speak /fil/hello/1.0.0 so remote Filecoin peers'
+		// connmgr scores us positively and stops trimming us within 30s.
+		// Also tags inbound peers as "fcpeer" in our own connmgr so we
+		// don't trim them.
+		if genCID, perr := cid.Parse(build.MainnetGenesisCID); perr == nil {
+			head := func() ([]cid.Cid, int64, string) {
+				if store != nil {
+					if ts := store.Head(); ts != nil {
+						return ts.Cids(), int64(ts.Height()), ts.ParentWeight().String()
+					}
+				}
+				// Fallback: trusted root's tipset key.
+				if tr != nil {
+					return tr.TipSetKey.Cids(), int64(tr.Epoch), tr.ParentWeight.String()
+				}
+				return nil, 0, "0"
+			}
+			helloSvc = hello.NewService(p2pHost.H, genCID, head)
+			helloSvc.Register()
+			go helloSvc.WatchNewConns(ctx)
+			fmt.Printf("  hello:    /fil/hello/1.0.0 active (genesis %s)\n", build.MainnetGenesisCID[:18]+"…")
+		} else {
+			fmt.Printf("  hello:    DISABLED (genesis CID parse: %v)\n", perr)
 		}
 
 		// Issue #1: subscribe to /fil/blocks/<network> on gossipsub so
@@ -587,6 +615,7 @@ func cmdDaemon(args []string) error {
 			headDelaySec: uint64(build.BlockDelaySecs),
 			dataDirPath:  dataDir(),
 			gatewayURL:   *gw,
+			hello:        helloSvc,
 		}
 		go serveMetrics(ctx, *metricsListen, fetcher, bsClient, p2pHost, dash)
 		fmt.Printf("  metrics:  http://%s/metrics\n", *metricsListen)
