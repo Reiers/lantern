@@ -30,10 +30,14 @@ import (
 // the beacons in this list are operated separately and count toward the
 // trust quorum by default. New beacons are added here as operators
 // volunteer them.
-var DefaultLanternBeacons = []string{
-	// Hetzner-hosted reference beacon (see docs/phase10-live-beacon-deployment.md).
-	"/ip4/157.180.16.39/tcp/4001/p2p/12D3KooWHUD3zzdQQavMbkrUjM1JFhTMB3s745KsziKu26tPRY13",
-}
+// Intentionally empty. Operators add Lantern beacons via the
+// --lantern-beacon multiaddr flag (or via SourceSetConfig.LanternBeacons
+// when embedding the library). Shipping a curated list of named beacons
+// here would (a) leak operational topology of whoever runs the beacons,
+// (b) put the project in a curator role we don't want, and (c) go
+// stale every time a beacon rotates its libp2p peer ID. A future
+// release may publish a community-maintained list at a separate URL.
+var DefaultLanternBeacons = []string{}
 
 // MainnetPublicForestURLs is the mainnet-only subset of the public
 // JSON-RPC endpoints. Use this when bootstrapping a mainnet node.

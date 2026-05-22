@@ -145,7 +145,7 @@ type ErrUnsupportedVersion struct {
 }
 
 func (e ErrUnsupportedVersion) Error() string {
-	return fmt.Sprintf("lantern: %s actor v%d not yet supported in V1 (only v17/v18). See PHASE5-BLOCKERS.md", e.Kind, e.Version)
+	return fmt.Sprintf("lantern: %s actor v%d not yet supported (only v17/v18)", e.Kind, e.Version)
 }
 
 // LoadMiner fetches the actor's head state and returns a versioned wrapper.
