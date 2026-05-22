@@ -146,6 +146,20 @@ tr:last-child td { border-bottom: none; }
 .ma:hover { background: var(--accent-soft); color: var(--fg); }
 .ma.copied::after { content: " ✓"; color: var(--ok); }
 
+/* Issue #14: action buttons in client mode (Renew anchor, Find more peers). */
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--bg-soft); color: var(--accent); font-family: inherit; font-size: 0.85rem; font-weight: 500; cursor: pointer; transition: background 0.12s, transform 0.06s; }
+.btn:hover { background: var(--accent-soft); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+.btn.btn-busy::after { content: "…"; }
+.btn-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+
+/* Toast: a small status pill that fades in below an action button. */
+.toast { display: inline-block; padding: 6px 12px; border-radius: 6px; font-size: 0.82rem; margin-top: 8px; opacity: 0; transition: opacity 0.2s; max-width: 100%; word-break: break-word; }
+.toast.show { opacity: 1; }
+.toast.ok  { background: rgba(0, 144, 255, 0.08); color: var(--accent); border: 1px solid var(--accent-soft); }
+.toast.err { background: rgba(220, 38, 38, 0.07); color: var(--bad); border: 1px solid rgba(220, 38, 38, 0.2); }
+
 /* ---- Mode visibility ---- */
 [data-show] { display: none; }
 body[data-mode="client"] [data-show~="client"],
@@ -207,6 +221,10 @@ body[data-mode="dev"]    [data-show~="dev"].flex-show { display: flex; }
         <span class="hero-stat-label">Peers</span>
         <span class="hero-stat-value" id="c-peers">—</span>
         <span class="hero-stat-sub" id="c-peers-sub">—</span>
+        <div id="c-peers-actions" style="display:none;margin-top:8px;">
+          <button class="btn" id="c-btn-findpeers" type="button">Find more peers</button>
+          <div class="toast" id="c-toast-findpeers" role="status" aria-live="polite"></div>
+        </div>
       </div>
       <div class="hero-stat">
         <span class="hero-stat-label">Status</span>
@@ -267,6 +285,10 @@ body[data-mode="dev"]    [data-show~="dev"].flex-show { display: flex; }
         <div class="stat-value small" id="c-anchor-age">—</div>
       </div>
     </div>
+    <div class="btn-row">
+      <button class="btn" id="c-btn-renew" type="button">Renew anchor</button>
+    </div>
+    <div class="toast" id="c-toast-renew" role="status" aria-live="polite"></div>
   </div>
 
 </div>
@@ -658,6 +680,74 @@ document.addEventListener("click", (e) => {
   }).catch(() => {});
 });
 
+// ---- Issue #14: action buttons (Renew anchor, Find more peers) ----
+//
+// Both POST JSON endpoints behind a same-origin guard (X-Lantern-Origin
+// must equal 'dashboard'). The browser refuses to set custom headers via
+// CSRF vectors so this is enough for a local-bound listener.
+
+function showToast(id, status, message) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = "toast " + (status === "ok" ? "ok" : "err") + " show";
+  el.textContent = message || "";
+  // Auto-hide after 6 seconds.
+  clearTimeout(el._hideT);
+  el._hideT = setTimeout(() => { el.className = "toast"; el.textContent = ""; }, 6000);
+}
+
+async function postAction(path) {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: { "X-Lantern-Origin": "dashboard", "Content-Type": "application/json" },
+  });
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    throw new Error("HTTP " + r.status + ": " + (body || r.statusText));
+  }
+  return r.json();
+}
+
+async function onRenewAnchorClick() {
+  const btn = document.getElementById("c-btn-renew");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add("btn-busy");
+  showToast("c-toast-renew", "ok", "running 5-of-N bootstrap quorum probe (up to 90s)…");
+  try {
+    const res = await postAction("/api/dashboard/actions/renew-anchor");
+    showToast("c-toast-renew", res.status, res.message || "done");
+  } catch (e) {
+    showToast("c-toast-renew", "error", "failed: " + e.message);
+  } finally {
+    btn.classList.remove("btn-busy");
+    // Re-enable after 5s; quorum is a heavy operation, don't let users
+    // hammer it.
+    setTimeout(() => { btn.disabled = false; }, 5000);
+  }
+}
+
+async function onFindPeersClick() {
+  const btn = document.getElementById("c-btn-findpeers");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add("btn-busy");
+  showToast("c-toast-findpeers", "ok", "dialing bootstrap + walking routing table…");
+  try {
+    const res = await postAction("/api/dashboard/actions/find-peers");
+    showToast("c-toast-findpeers", res.status, res.message || "done");
+  } catch (e) {
+    showToast("c-toast-findpeers", "error", "failed: " + e.message);
+  } finally {
+    btn.classList.remove("btn-busy");
+    // 30s cooldown per issue spec.
+    setTimeout(() => { btn.disabled = false; }, 30000);
+  }
+}
+
+document.getElementById("c-btn-renew")?.addEventListener("click", onRenewAnchorClick);
+document.getElementById("c-btn-findpeers")?.addEventListener("click", onFindPeersClick);
+
 // ---- Fetch ----
 async function getJSON(path) {
   const r = await fetch(path, { cache: "no-store" });
@@ -680,6 +770,17 @@ function renderClient(o, s, h) {
   $("c-head-sub").textContent = o.head_timestamp ? "updated " + fmt.ageAgo(o.now - o.head_timestamp) : "—";
   $("c-peers").textContent = fmt.int(o.peers);
   $("c-peers-sub").textContent = "connected to the network";
+  // Issue #14: surface the 'Find more peers' button only when we're
+  // actually under the configured MinPeers floor. Avoids visual
+  // clutter for the happy path.
+  const actionsEl = $("c-peers-actions");
+  if (actionsEl) {
+    const below = (o.peers_min != null) && (o.peers != null) && (o.peers < o.peers_min);
+    actionsEl.style.display = below ? "" : "none";
+    if (below) {
+      $("c-peers-sub").textContent = "connected (below target of " + o.peers_min + ")";
+    }
+  }
   $("c-sync").textContent = h.syncLabel;
   $("c-sync").className = "hero-stat-value" + (h.tone === "ok" ? " ok" : "");
   $("c-sync-sub").textContent = h.syncSub;

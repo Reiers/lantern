@@ -19,12 +19,18 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
+	"sync"
 	"time"
 
+	"github.com/Reiers/lantern/build"
+	"github.com/Reiers/lantern/chain/bootstrap"
 	"github.com/Reiers/lantern/chain/header/store"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/internal/buildinfo"
@@ -53,6 +59,15 @@ type dashboardDeps struct {
 	rpcAddr      string
 	startedAt    time.Time
 	headDelaySec uint64
+
+	// Issue #14: action handlers need to know the data directory (to
+	// write the refreshed bootstrap-anchor.json) and the default gateway
+	// (passed to runBootstrapQuorum). They're also coordinated by
+	// actionsMu so concurrent button presses can't run two quorum probes
+	// at once.
+	dataDirPath string
+	gatewayURL  string
+	actionsMu   sync.Mutex
 }
 
 // registerDashboard attaches /dashboard and /api/dashboard/* to the mux.
@@ -91,7 +106,161 @@ func registerDashboard(mux *http.ServeMux, deps *dashboardDeps) {
 	mux.HandleFunc("/api/dashboard/fetcher", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, deps.fetcherSnapshot())
 	})
+
+	// Issue #14: operator action endpoints. These mutate node state and
+	// must therefore be POST-only with same-origin guard. The dashboard
+	// JS sets X-Lantern-Origin to 'dashboard' on every action POST.
+	mux.HandleFunc("/api/dashboard/actions/find-peers", func(w http.ResponseWriter, r *http.Request) {
+		if !actionPreflight(w, r) {
+			return
+		}
+		writeJSON(w, deps.actionFindPeers(r.Context()))
+	})
+	mux.HandleFunc("/api/dashboard/actions/renew-anchor", func(w http.ResponseWriter, r *http.Request) {
+		if !actionPreflight(w, r) {
+			return
+		}
+		writeJSON(w, deps.actionRenewAnchor(r.Context()))
+	})
 }
+
+// actionPreflight enforces POST + same-origin header on every dashboard
+// action endpoint. Returns true when the request may proceed.
+//
+// Same-origin guard: we require the X-Lantern-Origin header to equal
+// 'dashboard'. Browsers refuse to set custom headers via simple form
+// submission or <img>/<script> CSRF vectors; only XHR/fetch from a page
+// served from this same daemon can set it. This is the same CSRF
+// defense lots of small services use. It does NOT protect against an
+// attacker with local-shell access (they can curl), but the dashboard
+// listener is 127.0.0.1-bound; if you have local-shell access you
+// already own the node.
+func actionPreflight(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method must be POST", http.StatusMethodNotAllowed)
+		return false
+	}
+	if r.Header.Get("X-Lantern-Origin") != "dashboard" {
+		http.Error(w, "missing X-Lantern-Origin", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+// actionResult is the wire shape every action handler returns.
+type actionResult struct {
+	Status  string         `json:"status"` // "ok" or "error"
+	Message string         `json:"message"`
+	Detail  map[string]any `json:"detail,omitempty"`
+}
+
+// actionFindPeers exposes Host.TriggerKeepalive as a click-to-fire button.
+// Returns peer count before/after and the keepalive counters so the UI can
+// show the operator what just happened.
+func (d *dashboardDeps) actionFindPeers(ctx context.Context) actionResult {
+	d.actionsMu.Lock()
+	defer d.actionsMu.Unlock()
+	if d.host == nil {
+		return actionResult{Status: "error", Message: "libp2p host not running"}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	before, after, err := d.host.TriggerKeepalive(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dashboard action find-peers: %v\n", err)
+		return actionResult{Status: "error", Message: err.Error()}
+	}
+	ks := d.host.KeepaliveStats()
+	fmt.Fprintf(os.Stderr, "dashboard action find-peers: peers %d -> %d (dialed %d this cycle, %d cumulative routing dials)\n",
+		before, after, after-before, ks.RoutingDial)
+	msg := fmt.Sprintf("%d peers → %d peers", before, after)
+	if after > before {
+		msg = fmt.Sprintf("+%d peer connections (%d → %d)", after-before, before, after)
+	} else if after == before {
+		msg = fmt.Sprintf("no change (%d peers; dials attempted, none stuck this cycle)", after)
+	}
+	return actionResult{
+		Status:  "ok",
+		Message: msg,
+		Detail: map[string]any{
+			"peers_before": before,
+			"peers_after":  after,
+			"keepalive":    map[string]any{"cycles": ks.Cycles, "triggered": ks.Triggered, "routing_dials": ks.RoutingDial, "bootstrap_dials": ks.BootstrapDial, "stuck": ks.Stuck},
+		},
+	}
+}
+
+// actionRenewAnchor re-runs the bootstrap quorum probe and overwrites
+// ~/.lantern/bootstrap-anchor.json on success. Same flow as
+// 'lantern repair'. Refuses to overwrite when quorum isn't reached.
+func (d *dashboardDeps) actionRenewAnchor(ctx context.Context) actionResult {
+	d.actionsMu.Lock()
+	defer d.actionsMu.Unlock()
+	if d.dataDirPath == "" {
+		return actionResult{Status: "error", Message: "data directory not configured"}
+	}
+	gw := d.gatewayURL
+	if gw == "" {
+		gw = defaultGateway
+	}
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	fmt.Fprintln(os.Stderr, "dashboard action renew-anchor: running 5-of-N bootstrap quorum probe...")
+	var progressLog []string
+	fin, err := runBootstrapQuorum(ctx, bootstrapParams{
+		Quorum:       5,
+		Timeout:      60 * time.Second,
+		Gateway:      gw,
+		CountGateway: false,
+		NoLibp2p:     false,
+		Libp2pSettle: 8 * time.Second,
+		NetworkName:  "filecoin",
+		Progress: func(sr bootstrap.SourceResult) {
+			status := "ok"
+			if sr.Error != nil {
+				status = sr.Error.Error()
+			} else if !sr.OK() {
+				status = "no finality"
+			}
+			progressLog = append(progressLog, fmt.Sprintf("%s: %s", sr.Name, status))
+		},
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dashboard action renew-anchor: quorum failed: %v\n", err)
+		return actionResult{
+			Status:  "error",
+			Message: "quorum probe failed: " + err.Error(),
+			Detail:  map[string]any{"sources": progressLog},
+		}
+	}
+	if err := writeBootstrapAnchor(d.dataDirPath, fin); err != nil {
+		fmt.Fprintf(os.Stderr, "dashboard action renew-anchor: anchor write failed: %v\n", err)
+		return actionResult{Status: "error", Message: "failed to write anchor: " + err.Error()}
+	}
+	// Best-effort: refresh in-memory TrustedRoot.AcceptedAt so the UI's
+	// anchor-age starts counting from the renewal moment. Full re-load
+	// would require recomputing AncestorRoots; defer that to next daemon
+	// restart.
+	if d.tr != nil {
+		d.tr.AcceptedAt = time.Now().UTC()
+		d.tr.F3Instance = fin.Instance
+	}
+	fmt.Fprintf(os.Stderr, "dashboard action renew-anchor: epoch=%d state_root=%s\n", fin.Epoch, fin.StateRoot)
+	return actionResult{
+		Status:  "ok",
+		Message: fmt.Sprintf("trust anchor refreshed at epoch %d", fin.Epoch),
+		Detail: map[string]any{
+			"epoch":      fin.Epoch,
+			"state_root": fin.StateRoot.String(),
+			"instance":   fin.Instance,
+			"sources":    progressLog,
+		},
+	}
+}
+
+// silence the linter when build is unused (it's used through bootstrapParams).
+var _ = build.MainnetNetworkName
 
 // ---- payload builders ----
 

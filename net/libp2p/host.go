@@ -126,6 +126,14 @@ type Host struct {
 	kaPrevDialed    map[peer.ID]struct{}  // peers we dialed on the previous tick
 	kaLastAttemptMu sync.Mutex            // covers kaLastAttempt
 	kaLastAttempt   map[peer.ID]time.Time // when did we last try to dial each peer
+
+	// Issue #14: dashboard action handlers need access to the bootstrap
+	// peer list + network config to manually trigger keepalive cycles
+	// from the operator UI. EnableDHT snapshots its options here so the
+	// handlers don't need a second copy of the configuration plumbed
+	// through.
+	dhtOpts   DHTOptions
+	dhtOptsOK atomic.Bool
 }
 
 // MinPeers returns the configured connection-manager low-water-mark.

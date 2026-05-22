@@ -585,6 +585,8 @@ func cmdDaemon(args []string) error {
 			rpcAddr:      *listen,
 			startedAt:    time.Now(),
 			headDelaySec: uint64(build.BlockDelaySecs),
+			dataDirPath:  dataDir(),
+			gatewayURL:   *gw,
 		}
 		go serveMetrics(ctx, *metricsListen, fetcher, bsClient, p2pHost, dash)
 		fmt.Printf("  metrics:  http://%s/metrics\n", *metricsListen)
