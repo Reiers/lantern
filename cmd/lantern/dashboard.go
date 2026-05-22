@@ -36,6 +36,7 @@ import (
 	"github.com/Reiers/lantern/internal/buildinfo"
 	lbitswap "github.com/Reiers/lantern/net/bitswap"
 	"github.com/Reiers/lantern/net/combined"
+	"github.com/Reiers/lantern/net/hello"
 	llibp2p "github.com/Reiers/lantern/net/libp2p"
 )
 
@@ -68,6 +69,9 @@ type dashboardDeps struct {
 	dataDirPath string
 	gatewayURL  string
 	actionsMu   sync.Mutex
+
+	// Issue #16: Hello service activity (received / sent / rejected).
+	hello *hello.Service
 }
 
 // registerDashboard attaches /dashboard and /api/dashboard/* to the mux.
@@ -367,6 +371,14 @@ func (d *dashboardDeps) syncSnapshot() map[string]any {
 			"stuck":           ks.Stuck,
 			"closest_walks":   ks.ClosestWalks,
 			"last_peer_count": ks.LastPeerCount,
+		}
+	}
+	if d.hello != nil {
+		hs := d.hello.Stats()
+		out["hello"] = map[string]any{
+			"received": hs.Received,
+			"sent":     hs.Sent,
+			"rejected": hs.Rejected,
 		}
 	}
 	return out
