@@ -55,3 +55,33 @@ func TestEnableDHT_NoPeers(t *testing.T) {
 	err = h.EnableDHT(ctx, llibp2p.DHTOptions{})
 	require.Error(t, err)
 }
+
+// Issue #9: KeepaliveStats should exist and be readable as a snapshot
+// after EnableDHT, even when no bootstrap peers respond. Doesn't assert
+// non-zero cycle counts because the keepalive loop has a 15s startup
+// delay; we just verify the surface is wired and returns zero values.
+func TestKeepaliveStats_Surface(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	h, err := llibp2p.New(ctx, llibp2p.HostConfig{
+		ListenAddrs: []string{"/ip4/127.0.0.1/tcp/0"},
+	})
+	require.NoError(t, err)
+	defer h.Close()
+
+	err = h.EnableDHT(ctx, llibp2p.DHTOptions{})
+	require.NoError(t, err)
+
+	s := h.KeepaliveStats()
+	// All counters are zero immediately after EnableDHT (the keepalive
+	// loop has a 15s startup delay before its first tick).
+	require.Equal(t, uint64(0), s.Cycles)
+	require.Equal(t, uint64(0), s.Triggered)
+	require.Equal(t, uint64(0), s.BootstrapDial)
+	require.Equal(t, uint64(0), s.RoutingDial)
+	require.Equal(t, 0, s.LastPeerCount)
+}

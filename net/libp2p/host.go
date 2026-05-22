@@ -101,6 +101,16 @@ type Host struct {
 	// stop dialing once we're comfortably above MinPeers.
 	cfgMin int
 	cfgMax int
+
+	// Issue #9: keepalive loop counters. The 30s redial loop in dht.go
+	// publishes its activity here so the dashboard / lantern info can
+	// surface 'is the loop actively topping up peer count' without
+	// having to grep logs.
+	kaCycles    atomic.Uint64
+	kaTriggered atomic.Uint64
+	kaBootDial  atomic.Uint64
+	kaRouteDial atomic.Uint64
+	kaLastCount atomic.Int64
 }
 
 // MinPeers returns the configured connection-manager low-water-mark.
