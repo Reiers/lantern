@@ -437,6 +437,18 @@ body[data-mode="dev"]    [data-show~="dev"].flex-show { display: flex; }
   </div>
 
   <div class="card">
+    <div class="card-header"><h2 class="card-title">Peer keepalive</h2></div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-label">Cycles</div><div class="stat-value small" id="d-ka-cycles">—</div></div>
+      <div class="stat"><div class="stat-label">Triggered</div><div class="stat-value small" id="d-ka-trig">—</div></div>
+      <div class="stat"><div class="stat-label">Bootstrap dials</div><div class="stat-value small" id="d-ka-boot">—</div></div>
+      <div class="stat"><div class="stat-label">Routing dials</div><div class="stat-value small" id="d-ka-route">—</div></div>
+      <div class="stat"><div class="stat-label">Stuck</div><div class="stat-value small" id="d-ka-stuck">—</div></div>
+      <div class="stat"><div class="stat-label">Closest walks</div><div class="stat-value small" id="d-ka-walks">—</div></div>
+    </div>
+  </div>
+
+  <div class="card">
     <div class="card-header"><h2 class="card-title">Block source counters</h2></div>
     <table>
       <thead><tr><th>Source</th><th>Hits</th></tr></thead>
@@ -745,6 +757,16 @@ function renderDev(o, s, peers, fetcher) {
   $("d-q-f3i").textContent = (o.f3_instance && o.f3_instance > 0) ? fmt.int(o.f3_instance) : "awaiting finality";
   $("d-q-age").textContent = o.anchor_age_seconds != null ? fmt.ageAgo(o.anchor_age_seconds) : "—";
   $("d-q-stateroot").textContent = o.state_root || "—";
+
+  // Peer keepalive panel. Issue #9 follow-up adds stuck + closest-walk
+  // counters so we can see whether routing-table dials are sticking.
+  const ka = (s && s.keepalive) || {};
+  $("d-ka-cycles").textContent = fmt.int(ka.cycles);
+  $("d-ka-trig").textContent = fmt.int(ka.triggered);
+  $("d-ka-boot").textContent = fmt.int(ka.bootstrap_dials);
+  $("d-ka-route").textContent = fmt.int(ka.routing_dials);
+  $("d-ka-stuck").textContent = fmt.int(ka.stuck);
+  $("d-ka-walks").textContent = fmt.int(ka.closest_walks);
 
   // Connected peers table.
   //

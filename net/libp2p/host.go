@@ -111,6 +111,21 @@ type Host struct {
 	kaBootDial  atomic.Uint64
 	kaRouteDial atomic.Uint64
 	kaLastCount atomic.Int64
+
+	// Issue #9 follow-up: track whether dials we made on the previous
+	// cycle resulted in a connection that's still alive at the current
+	// cycle. kaStuck increments when a previous-cycle dial peer is no
+	// longer connected (i.e., the dial "didn't stick"). Combined with
+	// kaRouteDial + kaBootDial, this lets us diagnose the
+	// dialed-but-immediately-dropped pattern, which is the most likely
+	// reason the keepalive loop appears to do work but the count keeps
+	// drifting (issue #9 comment chain on live mainnet data).
+	kaStuck         atomic.Uint64
+	kaClosestWalks  atomic.Uint64 // aggressive closest-walks fired by keepalive (not by the periodic 5min loop)
+	kaPrevDialedMu  sync.Mutex
+	kaPrevDialed    map[peer.ID]struct{}  // peers we dialed on the previous tick
+	kaLastAttemptMu sync.Mutex            // covers kaLastAttempt
+	kaLastAttempt   map[peer.ID]time.Time // when did we last try to dial each peer
 }
 
 // MinPeers returns the configured connection-manager low-water-mark.
