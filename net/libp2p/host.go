@@ -24,13 +24,16 @@ import (
 
 	libp2p "github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	connmgr "github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	"github.com/multiformats/go-multiaddr"
+
+	"github.com/Reiers/lantern/internal/buildinfo"
 )
 
 // HostConfig configures the Lantern libp2p node.
@@ -39,9 +42,21 @@ type HostConfig struct {
 	ListenAddrs []string
 	// BootstrapPeers is the list of multiaddrs to dial on startup.
 	BootstrapPeers []string
-	// MaxPeers caps the connection-manager peer count. Default 50.
+	// MaxPeers is the connection-manager *high-water-mark*: when peer
+	// count exceeds this, connmgr starts trimming the lowest-tagged
+	// connections after the grace period. Default 200 (V1.2.1 lift;
+	// previously 50 hard cap).
 	MaxPeers int
-	// UserAgent overrides the libp2p User-Agent. Default "lantern/0.1".
+	// MinPeers is the connection-manager *low-water-mark*: connmgr keeps
+	// at least this many peers around even under trim pressure, and the
+	// DHT discovery loop targets this number when dialing fresh peers.
+	// Default 50.
+	MinPeers int
+	// ConnMgrGrace is how long a new connection is protected from trim.
+	// Default 20 seconds.
+	ConnMgrGrace time.Duration
+	// UserAgent overrides the libp2p User-Agent. Default is derived from
+	// internal/buildinfo so the wire identifier tracks the release tag.
 	UserAgent string
 	// DisableBandwidthCounter skips the metrics.BandwidthCounter wiring.
 	// Used by tests that don't want to allocate the counter.
@@ -74,7 +89,18 @@ type Host struct {
 	// the host's event bus; we mirror the latest value here so callers don't
 	// need to plumb the event bus through the RPC stack.
 	reachability atomic.Int32 // network.Reachability
+
+	// V1.2.1: cached connmgr watermarks so the DHT discovery loop can
+	// stop dialing once we're comfortably above MinPeers.
+	cfgMin int
+	cfgMax int
 }
+
+// MinPeers returns the configured connection-manager low-water-mark.
+func (h *Host) MinPeers() int { return h.cfgMin }
+
+// MaxPeers returns the configured connection-manager high-water-mark.
+func (h *Host) MaxPeers() int { return h.cfgMax }
 
 // New constructs and starts a libp2p Host and a GossipSub PubSub on it.
 // The caller is responsible for calling Close().
@@ -86,12 +112,23 @@ func New(ctx context.Context, cfg HostConfig) (*Host, error) {
 		}
 	}
 	if cfg.MaxPeers == 0 {
-		cfg.MaxPeers = 50
+		cfg.MaxPeers = 200
+	}
+	if cfg.MinPeers == 0 {
+		cfg.MinPeers = 50
+	}
+	if cfg.MinPeers > cfg.MaxPeers {
+		// Defensive: keep the watermarks well-ordered. connmgr panics
+		// otherwise.
+		cfg.MinPeers = cfg.MaxPeers / 2
+	}
+	if cfg.ConnMgrGrace == 0 {
+		cfg.ConnMgrGrace = 20 * time.Second
 	}
 
 	ua := cfg.UserAgent
 	if ua == "" {
-		ua = "lantern/0.1"
+		ua = buildinfo.UserAgent()
 	}
 
 	// Phase 10: a BandwidthCounter installed via libp2p.BandwidthReporter
@@ -101,12 +138,25 @@ func New(ctx context.Context, cfg HostConfig) (*Host, error) {
 		bw = metrics.NewBandwidthCounter()
 	}
 
+	// V1.2.1: explicit connection manager with a low watermark so the
+	// host actively maintains MinPeers rather than drifting to whatever
+	// the bootstrap dials happen to land on. High watermark + grace
+	// period gate the trim path; low watermark is what the DHT loop
+	// in dht.go targets when ranking outbound dials.
+	cm, cmErr := connmgr.NewConnManager(cfg.MinPeers, cfg.MaxPeers,
+		connmgr.WithGracePeriod(cfg.ConnMgrGrace))
+	if cmErr != nil {
+		return nil, fmt.Errorf("connmgr.NewConnManager(%d,%d): %w",
+			cfg.MinPeers, cfg.MaxPeers, cmErr)
+	}
+
 	opts := []libp2p.Option{
 		libp2p.ListenAddrStrings(cfg.ListenAddrs...),
 		libp2p.DefaultTransports,
 		libp2p.DefaultSecurity,
 		libp2p.DefaultMuxers,
 		libp2p.UserAgent(ua),
+		libp2p.ConnectionManager(cm),
 	}
 	if bw != nil {
 		opts = append(opts, libp2p.BandwidthReporter(bw))
@@ -122,7 +172,13 @@ func New(ctx context.Context, cfg HostConfig) (*Host, error) {
 		return nil, fmt.Errorf("pubsub.NewGossipSub: %w", err)
 	}
 
-	out := &Host{H: h, PubSub: ps, BW: bw}
+	out := &Host{
+		H:      h,
+		PubSub: ps,
+		BW:     bw,
+		cfgMax: cfg.MaxPeers,
+		cfgMin: cfg.MinPeers,
+	}
 	out.reachability.Store(int32(network.ReachabilityUnknown))
 
 	// Subscribe to libp2p's AutoNAT reachability events so NetAutoNatStatus
