@@ -21,6 +21,20 @@ import (
 	"github.com/Reiers/lantern/chain/bootstrap"
 )
 
+// DefaultLanternBeacons is the curated set of known-good Lantern beacons
+// that run cert-exchange (V1.2.1, B-11-01). Quorum probes dial these
+// over libp2p and count them as independent KindLanternBeacon sources.
+//
+// These are independent operators — not the Lantern project. The
+// gateway is at gateway.lantern.reiers.io and is run by the project;
+// the beacons in this list are operated separately and count toward the
+// trust quorum by default. New beacons are added here as operators
+// volunteer them.
+var DefaultLanternBeacons = []string{
+	// Hetzner-hosted reference beacon (see docs/phase10-live-beacon-deployment.md).
+	"/ip4/157.180.16.39/tcp/4001/p2p/12D3KooWHUD3zzdQQavMbkrUjM1JFhTMB3s745KsziKu26tPRY13",
+}
+
 // MainnetPublicForestURLs is the mainnet-only subset of the public
 // JSON-RPC endpoints. Use this when bootstrapping a mainnet node.
 //
@@ -72,6 +86,10 @@ type SourceSetConfig struct {
 	LanternGatewayURL string
 	// UserPeerURLs is the list of user-supplied --peer URLs.
 	UserPeerURLs []string
+	// LanternBeacons is the multiaddr list of known Lantern beacons that
+	// speak cert-exchange. If nil, DefaultLanternBeacons is used. Set to
+	// a non-nil empty slice to disable.
+	LanternBeacons []string
 	// NetworkName is the F3 manifest network name (e.g. "filecoin").
 	NetworkName gpbft.NetworkName
 	// SourceTimeout is the per-source RPC/protocol deadline. Default 20s.
@@ -92,6 +110,9 @@ func BuildDefaultSources(cfg SourceSetConfig) []bootstrap.Source {
 	}
 	if len(cfg.PublicForestURLs) == 0 {
 		cfg.PublicForestURLs = MainnetPublicForestURLs
+	}
+	if cfg.LanternBeacons == nil {
+		cfg.LanternBeacons = DefaultLanternBeacons
 	}
 
 	var out []bootstrap.Source
@@ -140,7 +161,24 @@ func BuildDefaultSources(cfg SourceSetConfig) []bootstrap.Source {
 		out = append(out, NewUserPeerSource("", u, token, cfg.SourceTimeout))
 	}
 
-	// 4. Lantern gateway (always last, never counted by default).
+	// 4. Lantern beacons over cert-exchange (V1.2.1, B-11-01). Requires
+	// a libp2p host; without one the beacon source can't dial.
+	if cfg.Host != nil {
+		for _, ma := range cfg.LanternBeacons {
+			ma = strings.TrimSpace(ma)
+			if ma == "" {
+				continue
+			}
+			pi, err := addrInfoFromString(ma)
+			if err != nil || pi.ID == "" {
+				continue
+			}
+			cfg.Host.Peerstore().AddAddrs(pi.ID, pi.Addrs, time.Hour)
+			out = append(out, NewLanternBeaconSource(cfg.Host, pi, cfg.NetworkName, cfg.SourceTimeout))
+		}
+	}
+
+	// 5. Lantern gateway (always last, never counted by default).
 	if g := strings.TrimSpace(cfg.LanternGatewayURL); g != "" {
 		out = append(out, NewLanternGatewaySource("", g, cfg.SourceTimeout))
 	}

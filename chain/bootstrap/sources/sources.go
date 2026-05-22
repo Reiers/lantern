@@ -285,30 +285,99 @@ func (s *Libp2pSource) LatestFinality(ctx context.Context) (bootstrap.Finality, 
 	return finalityFromCert(cert)
 }
 
-// ---------- DHT-discovered Lantern beacon source ----------
+// ---------- Lantern beacon source (cert-exchange over libp2p) ----------
 
-// ErrNoBeaconBackend is returned by LanternBeaconSource when no beacon
-// JSON-RPC endpoint can be reached. Phase 11 beacons serve Bitswap +
-// libp2p DHT but do not yet expose cert-exchange or a JSON-RPC head
-// endpoint. When V1.2.1 ships beacon cert-exchange, this stub becomes
-// the real implementation.
-var ErrNoBeaconBackend = errors.New("lantern beacon: cert-exchange not implemented (V1.2.1)")
+// ErrNoBeaconBackend is retained for backwards compatibility with V1.2.0
+// callers that constructed a LanternBeaconSource without a host. In
+// V1.2.1 (B-11-01) Lantern beacons serve cert-exchange over libp2p, so
+// a properly constructed LanternBeaconSource via NewLanternBeaconSource
+// returns real results; only the zero-value source emits this error.
+var ErrNoBeaconBackend = errors.New("lantern beacon: source not configured with libp2p host")
 
-// LanternBeaconSource is a placeholder for DHT-discovered Lantern
-// beacons. Today it always returns ErrNoBeaconBackend; quorum probes
-// will see it as a failed source.
+// LanternBeaconSource queries a Lantern beacon over the F3
+// cert-exchange protocol. As of V1.2.1 (B-11-01) beacons run a
+// responder backed by their own verified-cert store, so this is a
+// first-class quorum source.
+//
+// KindLanternBeacon counts toward the quorum by default. These are
+// independent operators — not the project itself — so the trust model
+// treats them like any other libp2p source. (Contrast with
+// KindLanternGateway which is opt-in via --count-gateway because the
+// project itself runs the gateway.)
 type LanternBeaconSource struct {
-	peer peer.ID
+	host    host.Host
+	info    peer.AddrInfo
+	network gpbft.NetworkName
+	timeout time.Duration
 }
 
-// NewLanternBeaconSource returns a Source representing a DHT-discovered
-// Lantern beacon.
-func NewLanternBeaconSource(p peer.ID) bootstrap.Source {
-	return &LanternBeaconSource{peer: p}
+// NewLanternBeaconSource returns a Source that asks a Lantern beacon
+// for its latest F3 finality over cert-exchange.
+//
+// The beacon's full peer.AddrInfo is required so the source can dial
+// even when the host hasn't already met the beacon via DHT. Pass the
+// libp2p host that should perform the dial; nil host returns a source
+// that always fails with ErrNoBeaconBackend (preserved for callers that
+// still construct a placeholder).
+func NewLanternBeaconSource(h host.Host, info peer.AddrInfo, network gpbft.NetworkName, timeout time.Duration) bootstrap.Source {
+	return &LanternBeaconSource{host: h, info: info, network: network, timeout: timeout}
 }
 
-func (s *LanternBeaconSource) Name() string         { return "lantern-beacon:" + s.peer.String() }
+func (s *LanternBeaconSource) Name() string {
+	return "lantern-beacon:" + s.info.ID.String()
+}
 func (s *LanternBeaconSource) Kind() bootstrap.Kind { return bootstrap.KindLanternBeacon }
+
 func (s *LanternBeaconSource) LatestFinality(ctx context.Context) (bootstrap.Finality, error) {
-	return bootstrap.Finality{}, ErrNoBeaconBackend
+	if s.host == nil {
+		return bootstrap.Finality{}, ErrNoBeaconBackend
+	}
+	if s.info.ID == "" {
+		return bootstrap.Finality{}, errors.New("lantern beacon: empty peer ID")
+	}
+	timeout := s.timeout
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	// Pre-populate the peerstore so certexchange.Client can dial without
+	// a separate Connect round-trip. No-op if the host already knows
+	// this peer.
+	if len(s.info.Addrs) > 0 {
+		s.host.Peerstore().AddAddrs(s.info.ID, s.info.Addrs, time.Hour)
+	}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	c := certexchange.Client{
+		Host:           s.host,
+		NetworkName:    s.network,
+		RequestTimeout: timeout,
+	}
+	rh, _, err := c.Request(cctx, s.info.ID, &certexchange.Request{FirstInstance: 0, Limit: 0})
+	if err != nil {
+		return bootstrap.Finality{}, fmt.Errorf("lantern beacon certexch head: %w", err)
+	}
+	if rh == nil || rh.PendingInstance == 0 {
+		return bootstrap.Finality{}, errors.New("lantern beacon: peer reports no finalized instances")
+	}
+	latest := rh.PendingInstance - 1
+
+	_, ch, err := c.Request(cctx, s.info.ID, &certexchange.Request{FirstInstance: latest, Limit: 1})
+	if err != nil {
+		return bootstrap.Finality{}, fmt.Errorf("lantern beacon certexch fetch %d: %w", latest, err)
+	}
+	if ch == nil {
+		return bootstrap.Finality{}, fmt.Errorf("lantern beacon: nil channel for cert %d", latest)
+	}
+	var cert *certs.FinalityCertificate
+	for c := range ch {
+		if c != nil && c.GPBFTInstance == latest {
+			cert = c
+			break
+		}
+	}
+	if cert == nil {
+		return bootstrap.Finality{}, fmt.Errorf("lantern beacon: peer did not deliver cert %d", latest)
+	}
+	return finalityFromCert(cert)
 }
