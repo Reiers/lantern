@@ -167,6 +167,8 @@ func (h *Host) EnableDHT(ctx context.Context, opts DHTOptions) error {
 
 	h.mu.Lock()
 	h.kdht = d
+	h.dhtOpts = opts
+	h.dhtOptsOK.Store(true)
 	h.mu.Unlock()
 
 	// Background loops: refresh + V1.2.1 discovery walks. All loops
@@ -211,6 +213,38 @@ func (h *Host) KeepaliveStats() KeepaliveStats {
 		ClosestWalks:  h.kaClosestWalks.Load(),
 		LastPeerCount: int(h.kaLastCount.Load()),
 	}
+}
+
+// TriggerKeepalive runs a single keepalive cycle synchronously and returns
+// the peer count observed before and after. Issue #14 exposes this so the
+// dashboard 'Find more peers' button can manually fire the loop instead of
+// waiting up to 30s for the periodic tick.
+//
+// Safe to call from HTTP handlers: bounded by the ctx timeout, no
+// long-running side effects, no goroutine leaks. Returns the same
+// counters runKeepalive bumps so the caller can include them in the
+// response.
+func (h *Host) TriggerKeepalive(ctx context.Context) (before, after int, err error) {
+	if !h.dhtOptsOK.Load() {
+		return 0, 0, fmt.Errorf("DHT not enabled")
+	}
+	h.mu.Lock()
+	opts := h.dhtOpts
+	h.mu.Unlock()
+
+	before = h.PeerCount()
+	const maxRoutingDials = 15 // a bit more aggressive than the periodic loop
+	min := h.MinPeers()
+	if min == 0 {
+		min = 30
+	}
+	// runKeepalive's first action is to audit previous-tick dials and to
+	// no-op when count >= min. For the manual trigger we want to do work
+	// even when we're already at MinPeers, since the operator clicked the
+	// button for a reason. Bypass the >=min gate by passing min+1.
+	h.runKeepalive(ctx, opts, min+1, maxRoutingDials)
+	after = h.PeerCount()
+	return before, after, nil
 }
 
 // keepaliveLoop is the 30s tight redial loop that maintains MinPeers.
