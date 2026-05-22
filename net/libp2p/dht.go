@@ -37,7 +37,10 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/multiformats/go-multiaddr"
+
+	"github.com/Reiers/lantern/build"
 )
 
 // DHTOptions configures the Kademlia client.
@@ -45,6 +48,17 @@ type DHTOptions struct {
 	// BootstrapPeers seeds the DHT routing table. Reuse the libp2p
 	// host's bootstrap list for simplicity.
 	BootstrapPeers []string
+	// NetworkName is the Filecoin network identifier used to construct
+	// the DHT protocol ID. Defaults to build.MainnetNetworkName.
+	//
+	// Why this matters: Filecoin's DHT protocol is
+	// /fil/kad/<network>/kad/1.0.0 (e.g. /fil/kad/testnetnet/kad/1.0.0
+	// on mainnet). A bare /fil/kad/1.0.0 client cannot peer with any
+	// real Filecoin node — the protocol negotiation fails and the peer
+	// gets evicted from the routing table. We pass
+	// build.MainnetNetworkName here to match what Lotus and Forest
+	// advertise.
+	NetworkName string
 	// RefreshInterval controls how often the background loop refreshes
 	// the DHT routing table + reconnects to bootstrap peers if peer
 	// count fell. Default 5 minutes.
@@ -73,6 +87,9 @@ type DHTOptions struct {
 }
 
 func (opts *DHTOptions) applyDefaults() {
+	if opts.NetworkName == "" {
+		opts.NetworkName = build.MainnetNetworkName
+	}
 	if opts.RefreshInterval == 0 {
 		opts.RefreshInterval = 5 * time.Minute
 	}
@@ -109,30 +126,43 @@ func (h *Host) EnableDHT(ctx context.Context, opts DHTOptions) error {
 	opts.applyDefaults()
 
 	// Client mode: we participate in queries but don't serve them.
+	//
+	// Protocol ID must match the Filecoin network's DHT protocol:
+	// /fil/kad/<networkName>/kad/1.0.0 (e.g. on mainnet:
+	// /fil/kad/testnetnet/kad/1.0.0). A naked /fil/kad/1.0.0 talks to
+	// nobody and the routing table evicts every peer that fails the
+	// handshake. Verified against a live Lotus NetPeerInfo on mainnet:
+	// Filecoin nodes advertise /fil/kad/testnetnet/kad/1.0.0.
+	prefix := protocol.ID(fmt.Sprintf("/fil/kad/%s", opts.NetworkName))
 	d, err := dht.New(ctx, h.H,
 		dht.Mode(dht.ModeClient),
-		dht.ProtocolPrefix("/fil"),
+		dht.ProtocolPrefix(prefix),
 	)
 	if err != nil {
 		return fmt.Errorf("dht.New: %w", err)
 	}
+	fmt.Printf("libp2p[dht]: protocol=%s/kad/1.0.0 mode=client\n", prefix)
 
-	// Wire bootstrap peers into the DHT routing table.
-	for _, p := range opts.BootstrapPeers {
-		ai, err := parseAddrInfo(p)
-		if err != nil {
-			continue
-		}
-		// Connect first (DHT needs an open stream to populate the
-		// routing table), then let DHT bootstrap discover the rest.
-		dctx, dcancel := context.WithTimeout(ctx, 10*time.Second)
-		_ = h.H.Connect(dctx, ai)
-		dcancel()
-	}
+	// IMPORTANT: dht.New attaches a Notifiee to the host that listens
+	// for new connections and runs the DHT protocol handshake against
+	// each one. Peers that speak /fil/kad/1.0.0 then get added to the
+	// routing table. That works for fresh dials AFTER dht.New has
+	// returned, but the libp2p Host's New() above already kicked off
+	// connectBootstrap as a goroutine, and several of those bootstrap
+	// dials almost always complete BEFORE we get here. h.H.Connect is
+	// idempotent: re-calling it on an already-connected peer doesn't
+	// re-fire the notifiee, so those bootstrap peers never get into
+	// the routing table on their own. We fix this by explicitly
+	// pushing every currently-connected peer (and every bootstrap peer
+	// as we re-dial it below) into the routing table.
+	seedRoutingTable(ctx, h, d, opts.BootstrapPeers)
+
 	if err := d.Bootstrap(ctx); err != nil {
 		// Bootstrap is best-effort; log + continue.
 		fmt.Printf("libp2p: dht.Bootstrap returned %v (continuing)\n", err)
 	}
+	fmt.Printf("libp2p[dht]: routing table seeded rt_size=%d connected=%d\n",
+		d.RoutingTable().Size(), h.PeerCount())
 
 	h.mu.Lock()
 	h.kdht = d
@@ -145,6 +175,51 @@ func (h *Host) EnableDHT(ctx context.Context, opts DHTOptions) error {
 	go h.dhtRefreshLoop(refreshCtx, opts)
 	h.RunDHTDiscovery(refreshCtx, d, opts)
 	return nil
+}
+
+// seedRoutingTable explicitly pushes every connected peer plus every
+// (parseable) bootstrap peer into the DHT routing table. This is the
+// only reliable way to recover from the dht.New-after-connectBootstrap
+// ordering race: by the time dht.New attaches its protocol-negotiation
+// notifiee, several bootstrap dials have usually already completed, and
+// h.H.Connect is idempotent so re-calling it doesn't fire the notifiee.
+//
+// TryAddPeer is the documented kad-dht entry point for "I know this
+// peer speaks the DHT protocol; add it to my routing table." The
+// `queryPeer=true` flag marks the peer as known-good for queries; we
+// only call this for peers we're confident speak /fil/kad/1.0.0
+// (already-connected Filecoin bootstrap nodes).
+func seedRoutingTable(ctx context.Context, h *Host, d *dht.IpfsDHT, bootstrapPeers []string) {
+	rt := d.RoutingTable()
+
+	// 1) Already-connected peers from the host's network. Most of the
+	// connectBootstrap dials land here by the time we get called.
+	for _, pid := range h.H.Network().Peers() {
+		if _, err := rt.TryAddPeer(pid, true, false); err != nil {
+			// TryAddPeer can refuse (table full, peer-too-far, etc.).
+			// That's fine; we tried.
+			_ = err
+		}
+	}
+
+	// 2) Bootstrap peers we haven't yet finished dialing. Connect and
+	// then TryAddPeer. The Connect is bounded by a per-peer timeout
+	// so a slow bootstrap doesn't block startup.
+	for _, p := range bootstrapPeers {
+		ai, err := parseAddrInfo(p)
+		if err != nil {
+			continue
+		}
+		dctx, dcancel := context.WithTimeout(ctx, 10*time.Second)
+		if err := h.H.Connect(dctx, ai); err != nil {
+			dcancel()
+			continue
+		}
+		dcancel()
+		if _, err := rt.TryAddPeer(ai.ID, true, false); err != nil {
+			_ = err
+		}
+	}
 }
 
 // RunDHTDiscovery starts the V1.2.1 closest-walk + dial-walk loops on
@@ -175,21 +250,27 @@ func (h *Host) dhtRefreshLoop(ctx context.Context, opts DHTOptions) {
 			n := h.PeerCount()
 			atomic.StoreInt64(&h.peerHWM, int64(n))
 			if n < opts.TargetPeers {
-				// Re-bootstrap: dial bootstrap peers + ask DHT to
-				// refresh.
-				for _, p := range opts.BootstrapPeers {
-					ai, err := parseAddrInfo(p)
-					if err != nil {
-						continue
-					}
-					dctx, dcancel := context.WithTimeout(ctx, 8*time.Second)
-					_ = h.H.Connect(dctx, ai)
-					dcancel()
-				}
+				// Re-seed: re-dial bootstrap peers AND push them
+				// into the routing table. Plain Connect is
+				// idempotent so we have to TryAddPeer ourselves;
+				// otherwise the routing table stays empty even when
+				// the libp2p connection count looks fine.
 				if h.kdht != nil {
+					seedRoutingTable(ctx, h, h.kdht, opts.BootstrapPeers)
 					rctx, rcancel := context.WithTimeout(ctx, 20*time.Second)
 					_ = h.kdht.Bootstrap(rctx)
 					rcancel()
+				} else {
+					// No DHT (e.g. startup race): just dial.
+					for _, p := range opts.BootstrapPeers {
+						ai, err := parseAddrInfo(p)
+						if err != nil {
+							continue
+						}
+						dctx, dcancel := context.WithTimeout(ctx, 8*time.Second)
+						_ = h.H.Connect(dctx, ai)
+						dcancel()
+					}
 				}
 			}
 		}
@@ -243,6 +324,15 @@ func (h *Host) runClosestWalk(ctx context.Context, d *dht.IpfsDHT) {
 	if err != nil {
 		fmt.Printf("libp2p[dht]: closest-walk peers=%d rt_size=%d connected=%d err=%v\n",
 			len(peers), rt, h.PeerCount(), err)
+		// If the table is empty the walk has nothing to walk. Re-seed
+		// from already-connected peers and bootstrap multiaddrs so the
+		// next tick has something to work with. Cheaper than waiting
+		// for the 5-minute refresh loop to figure it out.
+		if rt == 0 {
+			seedRoutingTable(ctx, h, d, nil)
+			fmt.Printf("libp2p[dht]: closest-walk auto-reseed rt_size=%d\n",
+				d.RoutingTable().Size())
+		}
 		return
 	}
 	fmt.Printf("libp2p[dht]: closest-walk peers=%d rt_size=%d connected=%d\n",
