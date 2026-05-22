@@ -146,4 +146,3 @@ func (c *Config) VerifyEntries(entries []ltypes.BeaconEntry, prevSig []byte) err
 func (c *Config) EqualHash(h []byte) bool {
 	return bytes.Equal(c.Hash, h)
 }
-

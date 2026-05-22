@@ -55,9 +55,9 @@ type Pool struct {
 
 	mu       sync.Mutex
 	pending  map[cid.Cid]*ltypes.SignedMessage // our published CIDs
-	received uint64                              // total messages observed
-	rejected uint64                              // failed superficial validation
-	publishd uint64                              // total published
+	received uint64                            // total messages observed
+	rejected uint64                            // failed superficial validation
+	publishd uint64                            // total published
 }
 
 // New starts a Pool: joins the topic, subscribes, and (if OnMessage is set)

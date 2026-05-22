@@ -195,9 +195,9 @@ func (c *Client) GetMany(ctx context.Context, ks []cid.Cid) (map[cid.Cid][]byte,
 	out := make(map[cid.Cid][]byte, len(ks))
 	session := c.bs.NewSession(ctx)
 	type result struct {
-		k    cid.Cid
-		blk  blocks.Block
-		err  error
+		k   cid.Cid
+		blk blocks.Block
+		err error
 	}
 	ch := make(chan result, len(ks))
 	var wg sync.WaitGroup

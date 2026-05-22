@@ -35,13 +35,13 @@ type PowerClaim struct {
 
 // PowerTotals is a snapshot of the network's aggregate power.
 type PowerTotals struct {
-	RawBytePower         abi.StoragePower
-	QualityAdjPower      abi.StoragePower
-	MinerCount           int64
-	MinerAboveMinCount   int64
-	ThisEpochRawByte     abi.StoragePower
-	ThisEpochQualityAdj  abi.StoragePower
-	ThisEpochPledge      abi.TokenAmount
+	RawBytePower        abi.StoragePower
+	QualityAdjPower     abi.StoragePower
+	MinerCount          int64
+	MinerAboveMinCount  int64
+	ThisEpochRawByte    abi.StoragePower
+	ThisEpochQualityAdj abi.StoragePower
+	ThisEpochPledge     abi.TokenAmount
 }
 
 // PowerState is the version-agnostic interface for the power actor.

@@ -2,23 +2,23 @@
 // chain/bootstrap quorum:
 //
 //   - ForestSource:   any Lotus-compatible JSON-RPC endpoint (e.g.
-//                     forest-archive.chainsafe.dev). Calls
-//                     Filecoin.F3GetLatestCertificate.
+//     forest-archive.chainsafe.dev). Calls
+//     Filecoin.F3GetLatestCertificate.
 //   - GatewaySource:  the Lantern project's HTTPS gateway. Same wire
-//                     protocol as ForestSource but tagged
-//                     KindLanternGateway so quorum policy can exclude it
-//                     by default.
+//     protocol as ForestSource but tagged
+//     KindLanternGateway so quorum policy can exclude it
+//     by default.
 //   - UserPeerSource: a user-supplied --peer URL. Uses the same
-//                     Lotus-compatible JSON-RPC protocol.
+//     Lotus-compatible JSON-RPC protocol.
 //   - Libp2pSource:   a single libp2p peer queried via the F3
-//                     cert-exchange protocol (/f3/certexch/get/1/<nn>).
+//     cert-exchange protocol (/f3/certexch/get/1/<nn>).
 //   - LanternBeaconSource: a DHT-discovered Lantern beacon. Lantern
-//                     beacons today serve Bitswap but do not yet
-//                     implement cert-exchange; this source is a stub
-//                     that returns ErrNoBeaconBackend so quorum probes
-//                     don't panic on it. When V1.2.1 ships beacon
-//                     cert-exchange, this becomes the real
-//                     implementation.
+//     beacons today serve Bitswap but do not yet
+//     implement cert-exchange; this source is a stub
+//     that returns ErrNoBeaconBackend so quorum probes
+//     don't panic on it. When V1.2.1 ships beacon
+//     cert-exchange, this becomes the real
+//     implementation.
 //
 // Source implementations live here instead of next to bootstrap.go to
 // keep the bootstrap driver dependency-free (no libp2p, no HTTP) so it

@@ -129,12 +129,18 @@ func glifChainHead(t *testing.T) (int64, cid.Cid, cid.Cid, string, []any) {
 	dec := json.NewDecoder(bytes.NewReader(all))
 	var out struct {
 		Result struct {
-			Cids   []struct{ Slash string `json:"/"` } `json:"Cids"`
+			Cids []struct {
+				Slash string `json:"/"`
+			} `json:"Cids"`
 			Height int64 `json:"Height"`
 			Blocks []struct {
-				ParentStateRoot       struct{ Slash string `json:"/"` } `json:"ParentStateRoot"`
-				ParentMessageReceipts struct{ Slash string `json:"/"` } `json:"ParentMessageReceipts"`
-				ParentWeight          string `json:"ParentWeight"`
+				ParentStateRoot struct {
+					Slash string `json:"/"`
+				} `json:"ParentStateRoot"`
+				ParentMessageReceipts struct {
+					Slash string `json:"/"`
+				} `json:"ParentMessageReceipts"`
+				ParentWeight string `json:"ParentWeight"`
 			} `json:"Blocks"`
 		} `json:"result"`
 	}
@@ -153,10 +159,13 @@ func glifChainHead(t *testing.T) (int64, cid.Cid, cid.Cid, string, []any) {
 // TestAccessor_MainnetActors is the canonical integration test that
 // (a) builds a TrustedRoot from a recent mainnet head via Glif,
 // (b) uses the accessor to walk the state tree to the StorageMarket actor
-//     (f05) and the Init actor (f01),
+//
+//	(f05) and the Init actor (f01),
+//
 // (c) cross-checks each result against Glif's StateGetActor RPC,
 // (d) caches every fetched block into testdata/ as a side effect, so future
-//     runs can replay offline.
+//
+//	runs can replay offline.
 //
 // The test is skipped if LANTERN_OFFLINE=1 or if Glif is unreachable.
 func TestAccessor_MainnetActors(t *testing.T) {
@@ -275,7 +284,9 @@ type glifActorJSON struct {
 type cidJSON cid.Cid
 
 func (c *cidJSON) UnmarshalJSON(b []byte) error {
-	var x struct{ Slash string `json:"/"` }
+	var x struct {
+		Slash string `json:"/"`
+	}
 	if err := json.Unmarshal(b, &x); err != nil {
 		return err
 	}
@@ -287,7 +298,7 @@ func (c *cidJSON) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func (c cidJSON) String() string { return cid.Cid(c).String() }
+func (c cidJSON) String() string        { return cid.Cid(c).String() }
 func (c cidJSON) Equals(o cid.Cid) bool { return cid.Cid(c).Equals(o) }
 
 // Provide compatibility with the test expecting actor Code/Head as cid.Cid.

@@ -15,10 +15,10 @@ import (
 	"github.com/filecoin-project/go-jsonrpc/auth"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
+	verifreg "github.com/filecoin-project/go-state-types/builtin/v9/verifreg"
 	gscrypto "github.com/filecoin-project/go-state-types/crypto"
 	"github.com/filecoin-project/go-state-types/dline"
 	"github.com/filecoin-project/go-state-types/network"
-	verifreg "github.com/filecoin-project/go-state-types/builtin/v9/verifreg"
 	"github.com/ipfs/go-cid"
 
 	"github.com/Reiers/lantern/chain/types"
@@ -233,9 +233,9 @@ type Partition struct {
 
 // MinerSectors mirrors api.MinerSectors.
 type MinerSectors struct {
-	Live    uint64
-	Active  uint64
-	Faulty  uint64
+	Live   uint64
+	Active uint64
+	Faulty uint64
 }
 
 // SectorPreCommitInfo mirrors miner.SectorPreCommitInfo (parameter type).
@@ -367,7 +367,7 @@ type ChannelAvailableFunds struct {
 
 // VoucherCreateResult mirrors paychapi.VoucherCreateResult.
 type VoucherCreateResult struct {
-	Voucher *PaychSignedVoucher
+	Voucher   *PaychSignedVoucher
 	Shortfall big.Int
 }
 

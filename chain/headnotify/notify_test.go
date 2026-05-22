@@ -9,10 +9,10 @@ import (
 	abi "github.com/filecoin-project/go-state-types/abi"
 	"github.com/ipfs/go-cid"
 
-	gscrypto "github.com/filecoin-project/go-state-types/crypto"
-	"github.com/filecoin-project/go-state-types/proof"
 	addr "github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/big"
+	gscrypto "github.com/filecoin-project/go-state-types/crypto"
+	"github.com/filecoin-project/go-state-types/proof"
 
 	"github.com/Reiers/lantern/api"
 	hstore "github.com/Reiers/lantern/chain/header/store"

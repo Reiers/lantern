@@ -56,10 +56,10 @@ type Distributor struct {
 }
 
 type subscriber struct {
-	id       uint64
-	ch       chan []api.HeadChange
-	closed   atomic.Bool
-	dropped  atomic.Uint64
+	id      uint64
+	ch      chan []api.HeadChange
+	closed  atomic.Bool
+	dropped atomic.Uint64
 }
 
 // New returns a Distributor backed by the given header store. The

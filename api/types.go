@@ -42,10 +42,10 @@ type Version struct {
 
 // MsgLookup is the result of Filecoin.StateWaitMsg / StateSearchMsg.
 type MsgLookup struct {
-	Message   cid.Cid                  // the message CID we searched for
-	Receipt   types.MessageReceipt     // execution receipt
-	ReturnDec interface{}              // decoded return value (nil for Lantern V1)
-	TipSet    types.TipSetKey          // tipset the message was included in
+	Message   cid.Cid              // the message CID we searched for
+	Receipt   types.MessageReceipt // execution receipt
+	ReturnDec interface{}          // decoded return value (nil for Lantern V1)
+	TipSet    types.TipSetKey      // tipset the message was included in
 	Height    abi.ChainEpoch
 }
 

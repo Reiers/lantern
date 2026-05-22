@@ -41,12 +41,12 @@ type rpcResp[T any] struct {
 
 func main() {
 	var (
-		network    = flag.String("network", "mainnet", "network name (mainnet|calibnet)")
-		out        = flag.String("out", "", "output JSON path")
-		url        = flag.String("url", os.Getenv("FOREST_URL"), "Forest/Lotus RPC URL")
-		token      = flag.String("token", os.Getenv("FOREST_TOKEN"), "RPC bearer token")
-		instance   = flag.Uint64("instance", 0, "GPBFT instance to anchor to (0 = latest - 100, gives the subscriber a small backlog to verify)")
-		lagBehind  = flag.Uint64("lag", 100, "when -instance is 0, anchor at latest minus this many instances")
+		network   = flag.String("network", "mainnet", "network name (mainnet|calibnet)")
+		out       = flag.String("out", "", "output JSON path")
+		url       = flag.String("url", os.Getenv("FOREST_URL"), "Forest/Lotus RPC URL")
+		token     = flag.String("token", os.Getenv("FOREST_TOKEN"), "RPC bearer token")
+		instance  = flag.Uint64("instance", 0, "GPBFT instance to anchor to (0 = latest - 100, gives the subscriber a small backlog to verify)")
+		lagBehind = flag.Uint64("lag", 100, "when -instance is 0, anchor at latest minus this many instances")
 	)
 	flag.Parse()
 	if *out == "" || *url == "" || *token == "" {

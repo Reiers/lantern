@@ -375,7 +375,7 @@ func glifRandomness(ctx context.Context, url, method string, pers gscrypto.Domai
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(all))
 	}
 	var env struct {
-		Result string `json:"result"`
+		Result string                    `json:"result"`
 		Error  *struct{ Message string } `json:"error"`
 	}
 	if err := json.Unmarshal(all, &env); err != nil {

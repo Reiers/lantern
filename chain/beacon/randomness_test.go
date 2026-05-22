@@ -56,9 +56,10 @@ func TestDrawRandomnessFromBaseHashesFirst(t *testing.T) {
 // At Filecoin epoch 6035749 (a recent mainnet head observed during demo),
 // the canonical tipset carried BeaconEntries with Round = 28858492.
 // Formula:
-//   latestTs = 6035749 * 30 + 1598306400 - 30 = 1779378840
-//   fromGenesis = 1779378840 - 1692803367 = 86575473
-//   round = 86575473/3 + 1 = 28858491 + 1 = 28858492
+//
+//	latestTs = 6035749 * 30 + 1598306400 - 30 = 1779378840
+//	fromGenesis = 1779378840 - 1692803367 = 86575473
+//	round = 86575473/3 + 1 = 28858491 + 1 = 28858492
 func TestMaxBeaconRoundForEpoch_Mainnet(t *testing.T) {
 	p := beacon.MainnetQuicknetParams()
 	got := p.MaxBeaconRoundForEpoch(6035749)

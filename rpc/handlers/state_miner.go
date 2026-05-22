@@ -308,8 +308,8 @@ func (c *ChainAPI) StateMinerSectorCount(ctx context.Context, a address.Address,
 	activeCount, _ := active.Count()
 	faultyCount, _ := faulty.Count()
 	return api.MinerSectors{
-		Live:    liveCount,
-		Active:  activeCount,
-		Faulty:  faultyCount,
+		Live:   liveCount,
+		Active: activeCount,
+		Faulty: faultyCount,
 	}, nil
 }

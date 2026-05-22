@@ -84,10 +84,12 @@ func LoadAccount(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGet
 }
 
 type accountV17 struct{ s *account17.State }
+
 func (a *accountV17) Version() int                   { return 17 }
 func (a *accountV17) PubkeyAddress() address.Address { return a.s.Address }
 
 type accountV18 struct{ s *account18.State }
+
 func (a *accountV18) Version() int                   { return 18 }
 func (a *accountV18) PubkeyAddress() address.Address { return a.s.Address }
 
@@ -234,8 +236,8 @@ type verifregV18 struct {
 	store adt18.Store
 }
 
-func (v *verifregV18) Version() int                { return 18 }
-func (v *verifregV18) RootKey() address.Address    { return v.s.RootKey }
+func (v *verifregV18) Version() int             { return 18 }
+func (v *verifregV18) RootKey() address.Address { return v.s.RootKey }
 
 func (v *verifregV18) FindAllocation(ctx context.Context, clientID address.Address, allocID uint64) (*Allocation, bool, error) {
 	a, ok, err := v.s.FindAllocation(v.store, clientID, verifreg18.AllocationId(allocID))
@@ -442,7 +444,7 @@ type datacapV17 struct {
 	store adt17.Store
 }
 
-func (d *datacapV17) Version() int { return 17 }
+func (d *datacapV17) Version() int              { return 17 }
 func (d *datacapV17) Governor() address.Address { return d.s.Governor }
 
 func (d *datacapV17) Balance(ctx context.Context, client address.Address) (abi.StoragePower, error) {
@@ -476,7 +478,7 @@ type datacapV18 struct {
 	store adt18.Store
 }
 
-func (d *datacapV18) Version() int { return 18 }
+func (d *datacapV18) Version() int              { return 18 }
 func (d *datacapV18) Governor() address.Address { return d.s.Governor }
 
 func (d *datacapV18) Balance(ctx context.Context, client address.Address) (abi.StoragePower, error) {
@@ -550,25 +552,27 @@ func LoadReward(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGett
 }
 
 type rewardV17 struct{ s *reward17.State }
-func (r *rewardV17) Version() int                              { return 17 }
-func (r *rewardV17) ThisEpochBaselinePower() abi.StoragePower  { return r.s.ThisEpochBaselinePower }
-func (r *rewardV17) ThisEpochReward() abi.TokenAmount          { return r.s.ThisEpochReward }
+
+func (r *rewardV17) Version() int                             { return 17 }
+func (r *rewardV17) ThisEpochBaselinePower() abi.StoragePower { return r.s.ThisEpochBaselinePower }
+func (r *rewardV17) ThisEpochReward() abi.TokenAmount         { return r.s.ThisEpochReward }
 func (r *rewardV17) ThisEpochRewardSmoothed() (big.Int, big.Int) {
 	return r.s.ThisEpochRewardSmoothed.PositionEstimate, r.s.ThisEpochRewardSmoothed.VelocityEstimate
 }
-func (r *rewardV17) CumsumRealized() big.Int           { return r.s.CumsumRealized }
-func (r *rewardV17) CumsumBaseline() big.Int           { return r.s.CumsumBaseline }
+func (r *rewardV17) CumsumRealized() big.Int              { return r.s.CumsumRealized }
+func (r *rewardV17) CumsumBaseline() big.Int              { return r.s.CumsumBaseline }
 func (r *rewardV17) EffectiveNetworkTime() abi.ChainEpoch { return r.s.EffectiveNetworkTime }
 
 type rewardV18 struct{ s *reward18.State }
-func (r *rewardV18) Version() int                              { return 18 }
-func (r *rewardV18) ThisEpochBaselinePower() abi.StoragePower  { return r.s.ThisEpochBaselinePower }
-func (r *rewardV18) ThisEpochReward() abi.TokenAmount          { return r.s.ThisEpochReward }
+
+func (r *rewardV18) Version() int                             { return 18 }
+func (r *rewardV18) ThisEpochBaselinePower() abi.StoragePower { return r.s.ThisEpochBaselinePower }
+func (r *rewardV18) ThisEpochReward() abi.TokenAmount         { return r.s.ThisEpochReward }
 func (r *rewardV18) ThisEpochRewardSmoothed() (big.Int, big.Int) {
 	return r.s.ThisEpochRewardSmoothed.PositionEstimate, r.s.ThisEpochRewardSmoothed.VelocityEstimate
 }
-func (r *rewardV18) CumsumRealized() big.Int           { return r.s.CumsumRealized }
-func (r *rewardV18) CumsumBaseline() big.Int           { return r.s.CumsumBaseline }
+func (r *rewardV18) CumsumRealized() big.Int              { return r.s.CumsumRealized }
+func (r *rewardV18) CumsumBaseline() big.Int              { return r.s.CumsumBaseline }
 func (r *rewardV18) EffectiveNetworkTime() abi.ChainEpoch { return r.s.EffectiveNetworkTime }
 
 // ----- Multisig -----
@@ -621,24 +625,24 @@ func LoadMultisig(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGe
 
 type multisigV17 struct{ s *multisig17.State }
 
-func (m *multisigV17) Version() int                       { return 17 }
-func (m *multisigV17) Signers() []address.Address         { return m.s.Signers }
-func (m *multisigV17) Threshold() uint64                  { return m.s.NumApprovalsThreshold }
-func (m *multisigV17) UnlockDuration() abi.ChainEpoch     { return m.s.UnlockDuration }
-func (m *multisigV17) StartEpoch() abi.ChainEpoch         { return m.s.StartEpoch }
-func (m *multisigV17) InitialBalance() abi.TokenAmount    { return m.s.InitialBalance }
+func (m *multisigV17) Version() int                    { return 17 }
+func (m *multisigV17) Signers() []address.Address      { return m.s.Signers }
+func (m *multisigV17) Threshold() uint64               { return m.s.NumApprovalsThreshold }
+func (m *multisigV17) UnlockDuration() abi.ChainEpoch  { return m.s.UnlockDuration }
+func (m *multisigV17) StartEpoch() abi.ChainEpoch      { return m.s.StartEpoch }
+func (m *multisigV17) InitialBalance() abi.TokenAmount { return m.s.InitialBalance }
 func (m *multisigV17) LockedBalance(curr abi.ChainEpoch) abi.TokenAmount {
 	return m.s.AmountLocked(curr - m.s.StartEpoch)
 }
 
 type multisigV18 struct{ s *multisig18.State }
 
-func (m *multisigV18) Version() int                       { return 18 }
-func (m *multisigV18) Signers() []address.Address         { return m.s.Signers }
-func (m *multisigV18) Threshold() uint64                  { return m.s.NumApprovalsThreshold }
-func (m *multisigV18) UnlockDuration() abi.ChainEpoch     { return m.s.UnlockDuration }
-func (m *multisigV18) StartEpoch() abi.ChainEpoch         { return m.s.StartEpoch }
-func (m *multisigV18) InitialBalance() abi.TokenAmount    { return m.s.InitialBalance }
+func (m *multisigV18) Version() int                    { return 18 }
+func (m *multisigV18) Signers() []address.Address      { return m.s.Signers }
+func (m *multisigV18) Threshold() uint64               { return m.s.NumApprovalsThreshold }
+func (m *multisigV18) UnlockDuration() abi.ChainEpoch  { return m.s.UnlockDuration }
+func (m *multisigV18) StartEpoch() abi.ChainEpoch      { return m.s.StartEpoch }
+func (m *multisigV18) InitialBalance() abi.TokenAmount { return m.s.InitialBalance }
 func (m *multisigV18) LockedBalance(curr abi.ChainEpoch) abi.TokenAmount {
 	return m.s.AmountLocked(curr - m.s.StartEpoch)
 }
@@ -685,9 +689,11 @@ func LoadSystem(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGett
 }
 
 type systemV17 struct{ s *system17.State }
-func (s *systemV17) Version() int          { return 17 }
+
+func (s *systemV17) Version() int           { return 17 }
 func (s *systemV17) BuiltinActors() cid.Cid { return s.s.BuiltinActors }
 
 type systemV18 struct{ s *system18.State }
-func (s *systemV18) Version() int          { return 18 }
+
+func (s *systemV18) Version() int           { return 18 }
 func (s *systemV18) BuiltinActors() cid.Cid { return s.s.BuiltinActors }

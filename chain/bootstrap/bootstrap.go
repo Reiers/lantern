@@ -224,9 +224,9 @@ func Quorum(ctx context.Context, sources []Source, opts QuorumOptions) (*QuorumR
 	}
 	if countable < opts.Quorum {
 		return &QuorumResult{
-			Required: opts.Quorum,
-		}, fmt.Errorf("%w: have %d countable sources, need %d",
-			ErrInsufficientSources, countable, opts.Quorum)
+				Required: opts.Quorum,
+			}, fmt.Errorf("%w: have %d countable sources, need %d",
+				ErrInsufficientSources, countable, opts.Quorum)
 	}
 
 	start := time.Now()

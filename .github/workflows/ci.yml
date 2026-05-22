@@ -1,0 +1,66 @@
+# Per-push CI for Lantern (closes #15).
+#
+# Runs on every push to main + every PR. Validates the four things we
+# already run manually before every commit:
+#
+#   - go build ./...   (cross-compile cleanly)
+#   - go test ./...    (full suite, race detector on)
+#   - go vet ./...
+#   - gofmt -l         (no formatting drift)
+#
+# Runner choice: ubuntu-latest (GitHub-hosted). The original issue
+# wanted self-hosted on the lex server, but the lex Actions infra is
+# already running 15 runners for the prova-network org under a different
+# identity. Adding a Reiers-org runner there is a coordination cost
+# that's bigger than the GitHub-hosted runner queue cost for our
+# current push cadence. We're a small repo with infrequent pushes;
+# ubuntu-latest is 30-60s per run with no queue. Revisit if push
+# volume grows past ~10 PRs/day or if we need integration tests that
+# require mainnet access from the runner.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    name: build + test + vet + fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        env:
+          CGO_ENABLED: '0'
+        run: go build ./...
+
+      - name: go test (race detector)
+        env:
+          CGO_ENABLED: '1' # race detector needs cgo
+        run: go test -race -timeout 5m ./...
+
+      - name: gofmt
+        run: |
+          set -e
+          drift="$(gofmt -l .)"
+          if [ -n "$drift" ]; then
+            echo "::error::gofmt drift detected in:"
+            echo "$drift"
+            echo ""
+            echo "Run 'gofmt -w .' locally and re-commit."
+            exit 1
+          fi
