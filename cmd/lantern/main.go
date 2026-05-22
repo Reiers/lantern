@@ -41,6 +41,7 @@ import (
 	"github.com/ipfs/go-cid"
 
 	"github.com/Reiers/lantern/build"
+	"github.com/Reiers/lantern/chain/f3/subscriber"
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	headnotify "github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
@@ -274,7 +275,20 @@ func gatewayClient(gw string) (hamt.BlockGetter, *combined.Fetcher) {
 // fetchTrustedHead probes the primary gateway's /state/root endpoint,
 // falling back to Glif's Filecoin.ChainHead when the gateway is down.
 // Both responses are CID-verified before becoming a TrustedRoot.
+//
+// Issue #12: AcceptedAt is stamped on every TrustedRoot we hand out so
+// the dashboard's "Anchor age" stat actually populates. This is the
+// honest meaning of anchor age for a daemon that anchors on every boot:
+// "we accepted this chain head at daemon start." The genuine
+// long-lived anchor lives in bootstrap-anchor.json (written by 'lantern
+// init') and carries its own AcceptedAt; this fallback is for daemons
+// running on the embedded anchor without a separate init step.
+//
+// We also attempt a best-effort F3 latest-cert probe so F3Instance is
+// populated when the dashboard renders. Failure is non-fatal: F3 is
+// observability, not consensus, at this layer.
 func fetchTrustedHead(ctx context.Context, gw string) (*trustedroot.TrustedRoot, error) {
+	now := time.Now().UTC()
 	hc := hsync.NewClient([]string{gw}, 5*time.Second)
 	head, err := hc.GetStateHead(ctx)
 	if err == nil {
@@ -287,12 +301,15 @@ func fetchTrustedHead(ctx context.Context, gw string) (*trustedroot.TrustedRoot,
 				}
 			}
 			pw, _ := big.FromString(head.ParentWeight)
-			return &trustedroot.TrustedRoot{
+			tr := &trustedroot.TrustedRoot{
 				Epoch:        abi.ChainEpoch(head.Epoch),
 				StateRoot:    stateRoot,
 				TipSetKey:    types.NewTipSetKey(tskCids...),
 				ParentWeight: pw,
-			}, nil
+				AcceptedAt:   now,
+			}
+			attachF3Latest(ctx, tr)
+			return tr, nil
 		}
 	}
 	// Fallback to Glif.
@@ -302,13 +319,31 @@ func fetchTrustedHead(ctx context.Context, gw string) (*trustedroot.TrustedRoot,
 	if err != nil {
 		return nil, fmt.Errorf("both gateway and Glif failed: %w", err)
 	}
-	return &trustedroot.TrustedRoot{
+	tr := &trustedroot.TrustedRoot{
 		Epoch:                 gh.Epoch,
 		StateRoot:             gh.StateRoot,
 		TipSetKey:             gh.TipSetKey,
 		ParentWeight:          gh.ParentWeight,
 		ParentMessageReceipts: gh.ParentMessageReceipts,
-	}, nil
+		AcceptedAt:            now,
+	}
+	attachF3Latest(ctx, tr)
+	return tr, nil
+}
+
+// attachF3Latest does a best-effort Filecoin.F3GetLatestCertificate probe
+// against Glif so the dashboard can render F3 instance. Failures are
+// silent; this is observability, not chain consensus.
+func attachF3Latest(ctx context.Context, tr *trustedroot.TrustedRoot) {
+	probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	src := subscriber.NewJSONRPCSource("https://api.node.glif.io/rpc/v1")
+	cert, err := src.GetLatest(probeCtx)
+	if err != nil || cert == nil {
+		return
+	}
+	tr.F3Instance = cert.GPBFTInstance
+	tr.F3Cert = cert
 }
 
 // --- daemon ---
