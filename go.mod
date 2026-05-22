@@ -24,6 +24,7 @@ require (
 	github.com/ipfs/go-cid v0.6.1
 	github.com/ipfs/go-datastore v0.9.1
 	github.com/ipfs/go-ipld-cbor v0.2.1
+	github.com/ipfs/go-ipld-format v0.6.3
 	github.com/ipfs/go-log/v2 v2.9.2
 	github.com/libp2p/go-libp2p v0.48.0
 	github.com/libp2p/go-libp2p-kad-dht v0.40.0
@@ -34,6 +35,7 @@ require (
 	github.com/whyrusleeping/cbor-gen v0.3.1
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.51.0
+	golang.org/x/term v0.43.0
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da
 )
 
@@ -72,7 +74,6 @@ require (
 	github.com/ipfs/go-cidutil v0.1.1 // indirect
 	github.com/ipfs/go-dsqueue v0.2.0 // indirect
 	github.com/ipfs/go-ipfs-pq v0.0.4 // indirect
-	github.com/ipfs/go-ipld-format v0.6.3 // indirect
 	github.com/ipfs/go-metrics-interface v0.3.0 // indirect
 	github.com/ipfs/go-peertaskqueue v0.8.3 // indirect
 	github.com/ipld/go-ipld-prime v0.23.0 // indirect
