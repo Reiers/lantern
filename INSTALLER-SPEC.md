@@ -199,7 +199,7 @@ The default quorum candidates, baked into the binary, ranked by independence:
 
 1. **libp2p mainnet bootstrap peers** — the same list every Lotus, Forest, and Curio uses. We query ≥5 of them directly via libp2p; if they all respond with the same head, that's already a real quorum from independent operators (the bootstrap list spans Protocol Labs, ChainSafe, Glif, and others, on geographically diverse infra).
 2. **`forest-archive.chainsafe.dev`** — ChainSafe's public Forest archive, completely independent operator from us.
-3. **DHT-discovered Lantern beacons** under `lantern/beacon/v1` rendezvous — ad-hoc community state-serving nodes. Counted in the quorum once we have a healthy ecosystem of beacons; today, treated as a bonus source.
+3. **Lantern beacons over F3 cert-exchange** — independent operators running `lantern beacon`. As of V1.2.1 (B-11-01) beacons answer `/f3/certexch/get/1/<networkName>`, and `sources.DefaultLanternBeacons` ships with the Hetzner reference beacon. **Counted in the quorum by default** because beacons are independent of the project.
 4. **User-configured `--peer` flags** — the user's own Forest / Lotus / RPC endpoint(s). Counted toward quorum.
 5. **`gateway.lantern.reiers.io`** — our gateway. **NOT counted in the quorum by default.** If the user already trusts us they trust the binary; the quorum's value comes from independent operators. The gateway is still used as a fast fallback for raw IPLD block fetches *after* the trust anchor is established — just not part of the bootstrap consensus.
 
