@@ -484,10 +484,26 @@ func cmdDaemon(args []string) error {
 	_ = xchgSvc
 	if !*noLibp2p && *p2pListen != "" {
 		listeners := splitCSV(*p2pListen)
+		// Peer count sizing for issue #16/#18 follow-up:
+		// Lantern is a light client. Its load-bearing fetch paths are
+		//   (a) HTTP gateway for chain head + state reads
+		//   (b) Bitswap fast-stage against the preferred beacon peer
+		//   (c) Bitswap full-stage against a handful of swarm peers
+		// The gossipsub block topic needs the default mesh size (D_lo=4,
+		// D=6), so ~6 peers in the mesh is the functional minimum for
+		// real-time head propagation. Add a safety margin for churn:
+		//
+		//   MinPeers = 20
+		//   MaxPeers = 200 (room for ad-hoc Bitswap providers)
+		//
+		// We previously ran MinPeers=50 inherited from Lotus. Real Lotus
+		// nodes need 50+ because they serve chain to others, participate
+		// in F3 voting, and make deals. Lantern does none of those. The
+		// honest floor for a light client is ~20.
 		p2pHost, err = llibp2p.New(ctx, llibp2p.HostConfig{
 			ListenAddrs:    listeners,
 			BootstrapPeers: build.MainnetBootstrapPeers,
-			MinPeers:       50,
+			MinPeers:       20,
 			MaxPeers:       200,
 		})
 		if err != nil {

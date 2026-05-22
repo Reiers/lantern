@@ -24,6 +24,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/Reiers/lantern/build"
 	ltypes "github.com/Reiers/lantern/chain/types"
@@ -47,6 +48,7 @@ type Config struct {
 type Publisher struct {
 	topic *pubsub.Topic
 	sub   *pubsub.Subscription
+	ps    *pubsub.PubSub // retained for validator unregister on Close
 	cfg   Config
 
 	mu        sync.Mutex
@@ -58,27 +60,75 @@ type Publisher struct {
 // New joins the block topic and (if OnBlock is set) starts the read
 // loop. Subscribe is unconditional so we can count inbound traffic
 // even without a handler.
+//
+// Issue #18: also registers a TopicValidator so gossipsub's peer-score
+// machinery sees us as an active participant in the mesh, not a passive
+// sink. Without a validator, gossipsub never credits us with
+// first-message-delivery (P2) score against peers that forwarded
+// us valid blocks, and the remote peers' score machinery eventually
+// downgrades us. The validator does the SAME superficiallyValid check
+// the read-loop does; the difference is gossipsub now ATTRIBUTES the
+// accept/reject decision to the source peer's score.
 func New(ctx context.Context, ps *pubsub.PubSub, cfg Config) (*Publisher, error) {
 	if cfg.Topic == "" {
 		cfg.Topic = build.MainnetGossipTopicBlocks
 	}
+
+	// Register the validator BEFORE Join so the first inbound message
+	// triggers it. Idempotent registration: if a validator already exists
+	// for the topic (shouldn't happen, but defense in depth), gossipsub
+	// returns an error which we surface to the caller.
+	if err := ps.RegisterTopicValidator(cfg.Topic, blockTopicValidator); err != nil {
+		return nil, fmt.Errorf("blockpub: register validator for %s: %w", cfg.Topic, err)
+	}
+
 	t, err := ps.Join(cfg.Topic)
 	if err != nil {
+		_ = ps.UnregisterTopicValidator(cfg.Topic)
 		return nil, fmt.Errorf("blockpub: join topic %s: %w", cfg.Topic, err)
 	}
 	sub, err := t.Subscribe()
 	if err != nil {
 		_ = t.Close()
+		_ = ps.UnregisterTopicValidator(cfg.Topic)
 		return nil, fmt.Errorf("blockpub: subscribe %s: %w", cfg.Topic, err)
 	}
-	p := &Publisher{topic: t, sub: sub, cfg: cfg}
+	p := &Publisher{topic: t, sub: sub, cfg: cfg, ps: ps}
 	go p.readLoop(ctx)
 	return p, nil
 }
 
-// Close stops the subscription.
+// blockTopicValidator is the gossipsub validator function registered on
+// the block topic. Returns ValidationAccept for blocks that pass our
+// shape check; ValidationReject for blocks that don't decode or fail
+// shape validation; ValidationIgnore for ambiguous cases.
+//
+// Why this matters for issue #18: gossipsub uses these decisions to
+// credit peers in its peer-score machinery. Accept on a fresh message
+// gives 'first-delivery' credit to the peer that forwarded it to us,
+// which raises their score (and by symmetry, raises OUR score in the
+// view of peers we forward to). Without a validator, gossipsub treats
+// us as a passive consumer and we get nothing.
+func blockTopicValidator(_ context.Context, _ peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+	if msg == nil || len(msg.Data) == 0 {
+		return pubsub.ValidationReject
+	}
+	blk := new(ltypes.BlockMsg)
+	if err := blk.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
+		return pubsub.ValidationReject
+	}
+	if !superficiallyValid(blk) {
+		return pubsub.ValidationReject
+	}
+	return pubsub.ValidationAccept
+}
+
+// Close stops the subscription and unregisters the topic validator.
 func (p *Publisher) Close() error {
 	p.sub.Cancel()
+	if p.ps != nil {
+		_ = p.ps.UnregisterTopicValidator(p.cfg.Topic)
+	}
 	return p.topic.Close()
 }
 
