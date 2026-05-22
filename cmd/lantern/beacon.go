@@ -33,6 +33,7 @@ import (
 	ipld "github.com/ipfs/go-ipld-format"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	"github.com/multiformats/go-multihash"
 
@@ -110,10 +111,20 @@ func cmdBeacon(args []string) error {
 	}
 
 	// 3) DHT (server mode so we contribute routing).
-	kdht, err := dht.New(ctx, host.H, dht.Mode(dht.ModeServer))
+	//
+	// Must use the Filecoin mainnet DHT protocol prefix so we peer
+	// with real Filecoin nodes; default /ipfs prefix talks to nobody
+	// in the Filecoin swarm and the routing table evicts every peer
+	// that fails the handshake.
+	dhtPrefix := protocol.ID(fmt.Sprintf("/fil/kad/%s", build.MainnetNetworkName))
+	kdht, err := dht.New(ctx, host.H,
+		dht.Mode(dht.ModeServer),
+		dht.ProtocolPrefix(dhtPrefix),
+	)
 	if err != nil {
 		return fmt.Errorf("start DHT: %w", err)
 	}
+	fmt.Printf("DHT:          protocol=%s/kad/1.0.0 mode=server\n", dhtPrefix)
 	defer kdht.Close()
 	if err := kdht.Bootstrap(ctx); err != nil {
 		return fmt.Errorf("dht bootstrap: %w", err)
