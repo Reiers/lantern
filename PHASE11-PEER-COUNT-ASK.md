@@ -1,5 +1,10 @@
 # Phase 11 sub-agent: peer-count + chain-head visibility
 
+> **Status (V1.2.1):** Fix 1 (DHT full discovery) and Fix 2 (connection
+> manager with low-watermark) are **SHIPPED in V1.2.1**. Fix 3
+> (gossipsub topic subscription) remains a follow-up — likely combined
+> with the V1.2.1-followup conversation on state-call timeouts.
+
 Note for the Phase 11 sub-agent if it has cycles after Parts A-D.
 
 ## Observed problem
@@ -22,7 +27,7 @@ Sync is unaffected (chain head advances in real-time at the expected
 
 ## Three fixes, ranked
 
-### Fix 1: Kademlia DHT in full discovery mode (~200 LOC)
+### Fix 1: Kademlia DHT in full discovery mode — SHIPPED in V1.2.1
 
 Phase 6 wired the DHT as a client-mode singleton used only for
 `lantern/beacon/v1` rendezvous discovery. Expand it to a generic
@@ -40,7 +45,22 @@ This is what brings peer count from 4 → 50-100 organically.
 
 File: `net/libp2p/dht.go`
 
-### Fix 2: Connection manager with low-watermark target (~80 LOC)
+**V1.2.1 implementation:** `EnableDHT` now spawns two extra loops in
+addition to the existing refresh loop:
+
+- `dhtClosestWalkLoop` runs `dht.GetClosestPeers(self)` every 5 minutes
+  (after a 30s warm-up). Each walk seeds the routing table with peers
+  from across the swarm and logs a one-line summary.
+- `dhtDialWalkLoop` reads `dht.RoutingTable().ListPeers()` every 10
+  minutes, filters out peers we're already connected to, and dials up
+  to 25 candidates per cycle with an 8s per-dial timeout. Capped by
+  the connmgr high-water-mark so it doesn't fight the trim path.
+
+The loops are exposed as a free function `Host.RunDHTDiscovery` so the
+beacon path (which constructs its own server-mode DHT) gets the same
+active peer growth without going through `EnableDHT`.
+
+### Fix 2: Connection manager with low-watermark target — SHIPPED in V1.2.1
 
 libp2p's `connmgr.NewConnManager(low, high, gracePeriod)` is the
 standard pattern. Set `low=50, high=200`. When peer count drops below
@@ -50,7 +70,20 @@ Wire it via `libp2p.ConnectionManager(connmgr)` at host construction.
 
 File: `net/libp2p/host.go` (or wherever the host is constructed)
 
-### Fix 3: Subscribe to a Filecoin protocol (~50 LOC, opt-in)
+**V1.2.1 implementation:** `HostConfig` now exposes both `MinPeers` and
+`MaxPeers` (with a `ConnMgrGrace` default of 20s). `New(...)` constructs
+a `connmgr.NewConnManager(MinPeers, MaxPeers, WithGracePeriod(...))`
+and passes it via `libp2p.ConnectionManager(cm)`. Defaults are tuned
+per subcommand:
+
+- `lantern daemon`: MinPeers=50, MaxPeers=200 (was hard cap 50)
+- `lantern beacon`: MinPeers=100, MaxPeers=200 (was hard cap 200)
+- `lantern init` ephemeral bootstrap host: MinPeers=20, MaxPeers=100
+
+`Host.MinPeers()` / `Host.MaxPeers()` are exposed so the DHT dial-walk
+loop in Fix 1 can stop dialing once it crosses the high-water.
+
+### Fix 3: Subscribe to a Filecoin protocol (~50 LOC, opt-in) — DEFERRED
 
 Lantern doesn't currently subscribe to gossipsub topics like
 `/fil/msgs/<network>` or `/fil/blocks/<network>`. Subscribing alone
@@ -65,7 +98,7 @@ This is opt-in via a `--gossipsub-topics` flag because:
 
 File: `net/libp2p/gossipsub.go` (new) + `cmd/lantern/daemon.go` flag
 
-## Expected outcome
+## Expected outcome (V1.2.1 deployment validation TBD)
 
 After Fix 1 + Fix 2:
 - Peer count: 4 → 50-150 in 5-10 minutes
