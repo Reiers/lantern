@@ -44,6 +44,7 @@ import (
 	headnotify "github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/chain/types"
+	"github.com/Reiers/lantern/internal/buildinfo"
 	lbitswap "github.com/Reiers/lantern/net/bitswap"
 	"github.com/Reiers/lantern/net/combined"
 	"github.com/Reiers/lantern/net/glif"
@@ -63,6 +64,13 @@ const (
 // versionTag is set by the release build via -ldflags "-X main.versionTag=v...".
 // Empty when built from source without -ldflags.
 var versionTag string
+
+func init() {
+	// Push the ldflags-injected tag into internal/buildinfo so RPC
+	// handlers and the libp2p user-agent pick it up without import
+	// cycling through package main.
+	buildinfo.SetVersion(versionTag)
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -98,11 +106,8 @@ func main() {
 	case "info":
 		err = cmdInfo(rest)
 	case "version", "--version", "-v":
-		if versionTag != "" {
-			fmt.Println("lantern " + versionTag + " (Phase 11 — installer + quorum bootstrap)")
-		} else {
-			fmt.Println("lantern 0.5.0 (Phase 11 — installer + quorum bootstrap)")
-		}
+		fmt.Printf("lantern %s Lantern+%s (Phase 11 — installer + quorum bootstrap)\n",
+			buildinfo.BuildVersion(), buildinfo.Network())
 	case "help", "--help", "-h":
 		usage()
 	default:
@@ -225,10 +230,10 @@ func fetchTrustedHead(ctx context.Context, gw string) (*trustedroot.TrustedRoot,
 		return nil, fmt.Errorf("both gateway and Glif failed: %w", err)
 	}
 	return &trustedroot.TrustedRoot{
-		Epoch:        gh.Epoch,
-		StateRoot:    gh.StateRoot,
-		TipSetKey:    gh.TipSetKey,
-		ParentWeight: gh.ParentWeight,
+		Epoch:                 gh.Epoch,
+		StateRoot:             gh.StateRoot,
+		TipSetKey:             gh.TipSetKey,
+		ParentWeight:          gh.ParentWeight,
 		ParentMessageReceipts: gh.ParentMessageReceipts,
 	}, nil
 }
@@ -328,7 +333,8 @@ func cmdDaemon(args []string) error {
 		p2pHost, err = llibp2p.New(ctx, llibp2p.HostConfig{
 			ListenAddrs:    listeners,
 			BootstrapPeers: build.MainnetBootstrapPeers,
-			MaxPeers:       50,
+			MinPeers:       50,
+			MaxPeers:       200,
 		})
 		if err != nil {
 			return fmt.Errorf("start libp2p host: %w", err)
@@ -336,6 +342,18 @@ func cmdDaemon(args []string) error {
 		defer p2pHost.Close()
 		chainAPI.NetInfoSource = p2pHost.NetInfo()
 		fmt.Printf("  libp2p: id=%s listen=%v\n", p2pHost.ID(), p2pHost.ListenAddrs())
+
+		// V1.2.1: enable Kademlia DHT in client mode plus the
+		// closest-walk + dial-walk discovery loops so the peer count
+		// climbs past the 3-5 bootstrap floor. See
+		// PHASE11-PEER-COUNT-ASK.md for context.
+		if err := p2pHost.EnableDHT(ctx, llibp2p.DHTOptions{
+			BootstrapPeers: build.MainnetBootstrapPeers,
+		}); err != nil {
+			fmt.Printf("  libp2p: EnableDHT failed: %v (continuing without DHT discovery)\n", err)
+		} else {
+			fmt.Printf("  libp2p: DHT discovery on (target peers >= 50, hwm 200)\n")
+		}
 	}
 
 	// Phase 10 Part B: real Bitswap as primary fetch path. We rebuild
