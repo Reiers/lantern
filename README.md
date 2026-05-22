@@ -3,41 +3,82 @@
 
   # Lantern
 
-  **A Filecoin light node that boots in minutes with ~150 MB of disk instead of 76 GB.**
+  **The Filecoin node that fits on your laptop.**
 
-  *Verified end-to-end. No CGo. No remote RPC trust.*
+  *Boots in minutes. Verifies everything. No 76 GB snapshot. No third-party trust.*
 
   [![License: Apache 2.0 OR MIT](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](#license)
-  [![Status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)](#status)
+  [![Release: v1.2.1](https://img.shields.io/badge/release-v1.2.1-d97a1e.svg)](https://github.com/Reiers/lantern/releases)
   [![Go: 1.25+](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](go.mod)
+
+  **One line to install:**
+
+  ```sh
+  curl -fsSL https://get.lantern.reiers.io | bash
+  ```
 
 </div>
 
 ---
 
-## What is this?
+## What is Lantern?
 
-Lantern is a Filecoin light client. It does what Lotus or Forest do — verify the chain, serve state, sign and submit messages — but with a fraction of the footprint:
+Lantern is a small Filecoin node that runs on your computer.
 
-- **~35 MB binary, ~150 MB steady state** (vs Lotus's 76 GB+)
-- **Minutes to boot**, not hours
-- **Single static Go binary**, no CGo, no `filecoin-ffi`, no Rust toolchain
-- **Cryptographically verifying** end-to-end. Headers, F3 finality certificates, DRAND beacons, and every IPLD block fetched on demand is verified against its CID. No RPC provider is trusted.
-- **Swarm-native** since Phase 10. Lantern joins the Filecoin libp2p network and fetches state via Bitswap from any honest peer; the HTTP gateway is a last-resort fallback, not the hot path.
+Most people who use Filecoin today rely on a remote provider (Glif, Ankr, web wallets) to tell them what's on the chain. That works, but it's trust-by-handshake — the provider sees every query, knows every balance, and could in theory show you the wrong data.
 
-It's designed for three user classes:
+The alternative used to be running a full node like Lotus or Forest. That works too, but it means a 76 GB snapshot, hours of sync, ongoing disk growth, and a Rust toolchain. For most users that's overkill.
 
-| User           | What they want                                  | What Lantern gives them                                  |
-|----------------|------------------------------------------------|----------------------------------------------------------|
-| **Wallet user** | Send/receive FIL without trusting a custodial RPC | Local key, local sign, on-demand state, ~50 MB cache    |
-| **Deal client** | Make deals against real SPs, query market data    | Verified market actor + SP catalog, prefetch on demand  |
-| **Storage provider** | Run Curio without a 76 GB Lotus sidecar      | Lotus-compatible RPC server, the killer use case        |
+Lantern is the middle path: **a real node with real cryptographic verification, in a 40 MB binary that holds about 150 MB of working state.** It joins the actual Filecoin peer-to-peer network, downloads only the blocks you ask about, and proves to itself that every byte is genuine before showing it to you.
+
+### Who is this for?
+
+Lantern is built for three audiences, and the dashboard ([opens at install time](#dashboard)) has a mode for each:
+
+- **🌱 Client (the default).** You want to hold your own keys, send and receive FIL, look up balances and miners, without trusting Glif or any custodial RPC. You want your wallet to be **your wallet**.
+- **🪪 SP backup.** You run a Filecoin Storage Provider and you want a redundant chain node next to your primary Lotus or Forest. If the primary goes down during a WdPost window, Curio fails over to Lantern and your sectors stay current.
+- **🔧 Dev.** You're building on Filecoin and want a real Lotus-compatible RPC running on your laptop, not a hosted endpoint with rate limits. Lantern implements 71 of 71 Curio FULLNODE_API methods.
+
+You pick the mode in the upper-right of the dashboard. The first time you open it, it shows you the **Client** view: chain status in plain English, three friendly numbers, an explanation of what's actually happening underneath.
 
 ---
 
+## Quick start
+
+**One-line install** (macOS or Linux):
+
+```sh
+curl -fsSL https://get.lantern.reiers.io | bash
+```
+
+This downloads the latest signed release binary, walks you through a multi-source trust quorum to anchor the node, sets up the wallet, and offers to install Lantern as a background service. Three minutes start to finish.
+
+Once it's running:
+
+```sh
+lantern info                          # status + RPC token
+lantern wallet new --type=bls         # generate a key
+lantern wallet balance <addr>         # check a balance, verified locally
+lantern chain head                    # current chain head
+```
+
+And the dashboard at **<http://127.0.0.1:9092/dashboard/>** if you ran with `--metrics 127.0.0.1:9092`.
+
+## Dashboard
+
+Lantern ships an embedded operator dashboard that runs in your browser. It opens automatically whenever you start the daemon with `--metrics` enabled.
+
+Three views via the pill switcher in the top right:
+
+- **Client** (default). One sentence telling you whether the node is healthy, one big chain head number, three friendly stats. Built for someone who's curious about Filecoin but not running infrastructure.
+- **SP**. Storage-provider readiness panel up front (block submit gate, VM bridge, RPC listen, lag), sparklines for peers and bandwidth, a stacked bar showing where state blocks are being served from.
+- **Dev**. The full data dump. Daemon stats, sync stats, gossipsub ingestor stats, quorum anchor, full peer list with multiaddrs, raw fetcher counters.
+
+Dark mode follows your OS setting. Zero JS framework dependencies, ~34 KB total, all embedded in the binary.
+
 ## How it works
 
-Filecoin's state is a content-addressed IPLD merkle tree (HAMTs and AMTs all the way down). If you have a verified state root, you don't need the whole tree - you need the *path* from the root to the actor you care about. That path is a handful of nodes, KBs not GBs, and every node is self-verifying against its parent by CID.
+Filecoin's state is a content-addressed IPLD merkle tree (HAMTs and AMTs all the way down). If you have a verified state root, you don't need the whole tree — you need the *path* from the root to the actor you care about. That path is a handful of nodes, KBs not GBs, and every node is self-verifying against its parent by CID.
 
 Lantern's bet: most users care about a small slice of state, and that slice can be fetched on demand from any honest peer while the cryptography stays airtight.
 
@@ -113,19 +154,9 @@ For everything else - wallet, balance queries, miner info, market deals, deal st
 
 ---
 
-## Quick start
+## Building from source
 
-**One-line install** (macOS or Linux):
-
-```sh
-curl -fsSL https://get.lantern.reiers.io | bash
-```
-
-> The installer endpoint is live (served from `157.180.16.39` via nginx + Let's Encrypt). Repo binaries are not yet public; until `v1.2.0` GA ships the official release binaries, `install.sh` falls back to building from source. Set `LANTERN_BUILD_FROM_SOURCE=1` to force that path explicitly.
-
-Three minutes later you have a working light node whose trust anchor was established by **five independent F3 sources cryptographically agreeing on the same finalized tipset** — see [`INSTALLER-SPEC.md`](INSTALLER-SPEC.md) for the trust foundation, and [`docs/phase11-install-evidence.md`](docs/phase11-install-evidence.md) for an end-to-end transcript on real mainnet.
-
-**Build from source** (Go 1.25+, no CGo, no filecoin-ffi):
+**Go 1.25+, no CGo, no filecoin-ffi:**
 
 ```sh
 git clone https://github.com/Reiers/lantern.git
@@ -179,9 +210,17 @@ Or use Lantern's own CLI:
 
 ## Status
 
-Lantern is **alpha**. The cryptography works. The light-client primitives work. The Lotus-compatible RPC surface covers Curio's read path end-to-end. The VM is a **gas-accurate execution shell** that handles account-to-account `Send` natively; an optional **FVM bridge** delegates non-Send execution to a trusted Forest/Lotus node when operators want full VM coverage.
+**Current release: v1.2.1.** Lantern is alpha but production-deployed on at least one mainnet Storage Provider (f03678816, sp.reiers.io) as a secondary chain node.
 
-Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on mainnet - see [`docs/phase8-part-a-results.md`](docs/phase8-part-a-results.md). Every state read tested matched Glif byte-for-byte.
+What works today:
+
+- **Sync stays current with Lotus.** Lag = 0 epochs most of the time, lag = 1 epoch transiently during epoch transitions. Gossipsub mesh tuned to Filecoin's exact wire format.
+- **Cold state queries in single seconds.** `StateMinerInfo` against a previously-unseen miner returns in 0.1–1.8s, down from 30s+ in the previous release.
+- **Lotus-compatible JSON-RPC.** 71 of 71 Curio FULLNODE_API methods implemented. Real Curio binaries bind transparently.
+- **VM bridge for block production.** When configured, Lantern can produce blocks for an SP by delegating the post-execution state-root computation to an operator's own sibling Forest or Lotus node.
+- **Embedded operator dashboard.** Three-mode UI, prefers-color-scheme, served on the same listener as `/metrics`.
+
+Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on mainnet — see [`docs/phase8-part-a-results.md`](docs/phase8-part-a-results.md). Every state read tested matched Glif byte-for-byte.
 
 | Phase | Scope                                                                   | Status      |
 |-------|-------------------------------------------------------------------------|-------------|
