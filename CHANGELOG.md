@@ -34,6 +34,21 @@ a live quorum source.
   (`chain/f3/certexch/server_test.go`) brings up the full responder +
   source pair over an in-process libp2p mocknet and round-trips a cert.
 
+- **Version string cleanup.** `Filecoin.Version` and `lantern version`
+  now report `<tag> Lantern+<network>` (e.g. `v1.2.1 Lantern+mainnet`),
+  driven by `internal/buildinfo` and the `-ldflags -X main.versionTag=...`
+  injection point. The legacy `lantern/0.4.0 (lotus-compat)` constant
+  is gone; untagged dev builds report `dev Lantern+mainnet`.
+- **Peer-count lift (PHASE11-PEER-COUNT-ASK.md Fix 1 + Fix 2).**
+  Adds an explicit `connmgr.NewConnManager(MinPeers, MaxPeers, 20s)`
+  to the libp2p host (daemon: 50/200, beacon: 100/200) and runs two
+  new DHT discovery loops on top of the existing client-mode DHT:
+  `GetClosestPeers(self)` every 5 minutes to populate the routing
+  table, plus a routing-table-walk that dials up to 25 unknown peers
+  every 10 minutes. Beacon path gets the same walks via a new
+  `Host.RunDHTDiscovery` entry point so server-mode DHT instances
+  benefit too.
+
 ### Notes
 
 - No CGo, no new external dependencies beyond `go-f3` (already
