@@ -2,13 +2,82 @@
 
 All notable changes to Lantern.
 
-## v1.2.1 (in progress)
+## v1.2.1 (2026-05-22)
 
-The V1.2 trust-model completion: Lantern beacons can now answer F3
-cert-exchange queries, turning `LanternBeaconSource` from a stub into
-a live quorum source.
+The SP-failover release. Lantern stays in sync with the network in real
+time, answers cold state queries in single seconds, can produce blocks
+for a Storage Provider via an opt-in VM bridge, and ships an operator
+dashboard. Deployed on mainnet against `f03678816` (sp.reiers.io).
+
+### The headline numbers
+
+Measured against a live `lotus v1.36` on the same box:
+
+- **Sync lag: 0 epochs** ~65% of the time, 1 epoch during epoch
+  transitions (down from a stable 1-epoch lag in V1.2.0). The remaining
+  lag is a fraction-of-a-second propagation window, not a polling
+  artifact.
+- **`StateMinerInfo` cold-cache: 0.09–1.75 seconds** depending on miner
+  HAMT depth (down from 30s timeouts in V1.2.0).
+- **`MinerCreateBlock` end-to-end: 0.22 seconds** when the VM bridge
+  is wired (was 30s timeout).
 
 ### Added
+
+- **Embedded operator dashboard** (`cmd/lantern/dashboard/`,
+  `cmd/lantern/dashboard.go`). Three-mode UI — Client / SP / Dev — with
+  a brand mark, a friendly chain-status sentence in plain English,
+  sparklines for peer count and bandwidth, a stacked bar for block
+  source distribution, copy-to-clipboard CIDs, and prefers-color-scheme
+  dark mode. Single embedded HTML/JS/CSS file via `go:embed` (~34 KB).
+  No build step, no framework dependency. Activated whenever
+  `--metrics` is set; served at `/dashboard/` alongside `/metrics` and
+  `/healthz`. Four read-only JSON endpoints under
+  `/api/dashboard/*` provide the data.
+
+- **VM bridge wiring + CLI flags.** Four new daemon flags:
+  `--vm-bridge-rpc <url>` (upstream Forest/Lotus JSON-RPC),
+  `--vm-bridge-token <jwt>` (or env `LANTERN_VM_BRIDGE_TOKEN`),
+  `--vm-bridge-timeout <duration>`, and `--allow-block-submit`. The
+  block-submit gate refuses to start without a bridge configured.
+  `ForestBridge` is the JSON-RPC client; it calls
+  `Filecoin.StateCompute` to obtain the post-execution state root and
+  per-message receipts. Eight new unit tests, including positive +
+  negative wire-format guards.
+
+- **Race-fetch in the combined blockstore** (`net/combined/fetcher.go`).
+  New `Source.Race=true` flag fires gateway + Bitswap concurrently for
+  cold IPLD blocks. First CID-verified response wins; the slow source
+  is cancelled via ctx. Glif stays as the sequential last-resort
+  fallback. Three new tests cover happy path, fall-through, and total
+  failure.
+
+- **Gossipsub block ingestor with inline parent backfill**
+  (`cmd/lantern/gossip_block.go`). Subscribes to `/fil/blocks/testnetnet`
+  and installs new heads as they arrive over the mesh, instead of
+  waiting for the next polling cycle. Inline RPC backfill (default cap
+  3 epochs) fills small parent gaps without round-tripping through the
+  polling Sync. Eight unit tests covering dedupe, height fence, parent
+  fence, channel overflow, nil guards, and inline backfill paths.
+
+- **Filecoin-shape gossipsub configuration** (`net/libp2p/pubsub.go`).
+  Stock libp2p gossipsub defaults are tuned for IPFS; Lantern's mesh
+  was effectively isolated from the Filecoin one because of mismatched
+  message-ID hashing and overlay constants. This release lifts the
+  full Lotus/Forest gossipsub init: `GossipSubD=8`, `Dhi=12`, `Dlo=6`,
+  `Dlazy=12`, blake2b message IDs, `WithFloodPublish(true)`,
+  `WithPeerExchange(true)`, Lotus peer-score parameters, and
+  `pubsub.WithDirectPeers` for the bootstrap nodes so we mesh-pin with
+  ChainSafe, chain.love, filincubator, and devtty.
+
+- **DHT protocol prefix fix.** The daemon used `/fil/kad/1.0.0`; the
+  beacon used the default `/ipfs/kad/1.0.0`. Filecoin mainnet actually
+  speaks `/fil/kad/testnetnet/kad/1.0.0` (network name baked into the
+  prefix). Every peer that connected previously failed the DHT
+  handshake and got evicted from the routing table, keeping peer count
+  stuck at 4 forever. Fix: derive the prefix from
+  `build.MainnetNetworkName`. Post-fix peer count climbs 4 → 80 in 3
+  minutes and stabilizes around `MinPeers=50` via connmgr trim.
 
 - **Beacon cert-exchange responder (B-11-01).** New package
   `chain/f3/certexch` wraps `go-f3/certexchange.Server` around an
@@ -18,41 +87,48 @@ a live quorum source.
   after `chain/f3.VerifyCertChain` validation. Wired into `lantern
   beacon` so the responder shares the beacon's existing libp2p host;
   controlled by `--certexch`, `--certexch-upstream`, `--certexch-poll`.
-- **`LanternBeaconSource` is live.** Replaces the V1.2.0
+
+- **`LanternBeaconSource` goes live.** Replaces the V1.2.0
   `ErrNoBeaconBackend` stub with a real `certexchange.Client` that
   dials a beacon's peer over libp2p and returns a `Finality` shaped
   to match the quorum's equality contract. Counts toward the quorum
   by default (independent operators, not the project itself).
-- **`sources.DefaultLanternBeacons`.** Curated set of known-good
-  Lantern beacons that speak cert-exchange. Ships with the Hetzner
-  reference beacon. `BuildDefaultSources` wires this into the default
-  quorum source list when a libp2p host is available.
-- **Tests.** Unit test (`chain/bootstrap/sources/lantern_beacon_test.go`)
-  uses a mocknet + `certexchange.Server` to assert
-  `LanternBeaconSource.LatestFinality()` decodes a seeded cert into the
-  expected `Finality`. Integration test
-  (`chain/f3/certexch/server_test.go`) brings up the full responder +
-  source pair over an in-process libp2p mocknet and round-trips a cert.
+  `sources.DefaultLanternBeacons` ships with the Hetzner reference
+  beacon.
 
 - **Version string cleanup.** `Filecoin.Version` and `lantern version`
   now report `<tag> Lantern+<network>` (e.g. `v1.2.1 Lantern+mainnet`),
   driven by `internal/buildinfo` and the `-ldflags -X main.versionTag=...`
   injection point. The legacy `lantern/0.4.0 (lotus-compat)` constant
   is gone; untagged dev builds report `dev Lantern+mainnet`.
+
 - **Peer-count lift (PHASE11-PEER-COUNT-ASK.md Fix 1 + Fix 2).**
   Adds an explicit `connmgr.NewConnManager(MinPeers, MaxPeers, 20s)`
   to the libp2p host (daemon: 50/200, beacon: 100/200) and runs two
-  new DHT discovery loops on top of the existing client-mode DHT:
+  DHT discovery loops on top of the client-mode DHT:
   `GetClosestPeers(self)` every 5 minutes to populate the routing
   table, plus a routing-table-walk that dials up to 25 unknown peers
-  every 10 minutes. Beacon path gets the same walks via a new
-  `Host.RunDHTDiscovery` entry point so server-mode DHT instances
-  benefit too.
+  every 10 minutes.
+
+### Fixed
+
+- **`ForestBridge` Root CID wire format.** Lotus encodes the
+  `StateCompute` Root as the IPLD-link JSON shape `{"/":"<cid>"}`,
+  not as a bare string. The original decoder used `Root string` and
+  would have silently returned `cid.Undef` against a real Lotus, producing
+  invalid block headers. Caught during the live deploy; fixed with a
+  small `cidLink` struct + two new tests that guard both directions of
+  the wire format.
 
 ### Notes
 
-- No CGo, no new external dependencies beyond `go-f3` (already
-  pinned). 71/71 Curio FULLNODE_API method coverage unchanged.
+- No CGo. No new external dependencies beyond `go-f3` (already pinned)
+  and `golang.org/x/crypto/blake2b` (already pulled in by other deps).
+- 71/71 Curio FULLNODE_API method coverage unchanged.
+- Issue tracker: #1 sync lag (closed), #3 StateMinerInfo timeout
+  (closed), #4 VM bridge (closed), #5 web dashboard (closed). Open:
+  #2 passphrase fallback hardening, #6 beacon swarm-first defaults,
+  #7 JWT expiry, #8 brand mark.
 
 ## v1.2.0 (planned — Phase 11 / V1.2 GA)
 
