@@ -195,6 +195,8 @@ func (d *dashboardDeps) syncSnapshot() map[string]any {
 			"triggered":       ks.Triggered,
 			"bootstrap_dials": ks.BootstrapDial,
 			"routing_dials":   ks.RoutingDial,
+			"stuck":           ks.Stuck,
+			"closest_walks":   ks.ClosestWalks,
 			"last_peer_count": ks.LastPeerCount,
 		}
 	}

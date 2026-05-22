@@ -30,6 +30,7 @@ package libp2p
 import (
 	"context"
 	"fmt"
+	mrand "math/rand"
 	"sync/atomic"
 	"time"
 
@@ -186,7 +187,17 @@ type KeepaliveStats struct {
 	Triggered     uint64 // cycles where we were below MinPeers and acted
 	BootstrapDial uint64 // cumulative bootstrap-peer dials
 	RoutingDial   uint64 // cumulative routing-table-walk dials
-	LastPeerCount int    // peer count observed at the last tick
+	// Stuck: cumulative count of peers we dialed on the previous tick
+	// that were NOT still connected when the next tick fired. High Stuck
+	// values relative to RoutingDial indicate peers are accepting the
+	// libp2p stream then closing the connection. That's the failure mode
+	// the issue #9 follow-up was diagnosed against.
+	Stuck uint64
+	// ClosestWalks fired by the keepalive (aggressive, only when peer
+	// count is below MinPeers/2). Separate from the periodic 5-minute
+	// dhtClosestWalkLoop.
+	ClosestWalks  uint64
+	LastPeerCount int // peer count observed at the last tick
 }
 
 // KeepaliveStats returns a snapshot of keepalive activity counters.
@@ -196,6 +207,8 @@ func (h *Host) KeepaliveStats() KeepaliveStats {
 		Triggered:     h.kaTriggered.Load(),
 		BootstrapDial: h.kaBootDial.Load(),
 		RoutingDial:   h.kaRouteDial.Load(),
+		Stuck:         h.kaStuck.Load(),
+		ClosestWalks:  h.kaClosestWalks.Load(),
 		LastPeerCount: int(h.kaLastCount.Load()),
 	}
 }
@@ -243,15 +256,43 @@ func (h *Host) keepaliveLoop(ctx context.Context, opts DHTOptions) {
 
 // runKeepalive is one tick of the keepalive loop, broken out for clarity
 // and testability.
+//
+// Issue #9 follow-up: four behavioural changes from the original 30s loop:
+//
+//  1. Before doing any work, audit peers we dialed on the previous tick.
+//     Any that aren't connected now bump kaStuck. This is the diagnosis
+//     counter the follow-up plan called for: "did the dial actually
+//     result in a stable connection?"
+//
+//  2. Skip peers we attempted to dial in the last 5 minutes. libp2p has
+//     per-peer dial backoff but it doesn't compose well across multiple
+//     candidate lists, and we were re-trying the same dead peers every
+//     30s. The per-peer cooldown saves dial budget for fresh candidates.
+//
+//  3. Walk the routing table in randomized order each tick instead of
+//     ListPeers() insertion order. Routing tables tend to put the
+//     longest-known peers first, which often correlates with peers that
+//     have been bouncing the longest. Randomizing fans the dial budget
+//     across the whole table.
+//
+//  4. When count drops below MinPeers/2, fire a GetClosestPeers walk
+//     against a random key (NOT self) to force the routing table to
+//     absorb peers from a different region of the keyspace. This is
+//     independent of the periodic 5-minute dhtClosestWalkLoop.
 func (h *Host) runKeepalive(ctx context.Context, opts DHTOptions, minPeers, maxRoutingDials int) {
 	h.kaCycles.Add(1)
 	count := h.PeerCount()
 	h.kaLastCount.Store(int64(count))
 
+	// (1) Audit last cycle's dials for stickiness.
+	h.auditPreviousDials()
+
 	if count >= minPeers {
 		return // healthy, no work to do
 	}
 	h.kaTriggered.Add(1)
+
+	dialedThisTick := make(map[peer.ID]struct{}, maxRoutingDials+8)
 
 	// a) Re-dial bootstrap peers. Cheap, bounded (~7 dials).
 	for _, p := range opts.BootstrapPeers {
@@ -263,23 +304,35 @@ func (h *Host) runKeepalive(ctx context.Context, opts DHTOptions, minPeers, maxR
 		if h.H.Network().Connectedness(ai.ID) == network.Connected {
 			continue
 		}
+		// Bootstrap peers don't go through the recent-attempt cooldown:
+		// they're our anchor of last resort. If they're refusing us
+		// repeatedly the cooldown applied by libp2p's dial machinery is
+		// the right backstop.
 		dctx, dcancel := context.WithTimeout(ctx, 6*time.Second)
 		if err := h.H.Connect(dctx, ai); err == nil {
 			h.kaBootDial.Add(1)
+			dialedThisTick[ai.ID] = struct{}{}
+			h.markDialAttempt(ai.ID)
 			if h.kdht != nil {
 				_, _ = h.kdht.RoutingTable().TryAddPeer(ai.ID, true, false)
 			}
+		} else {
+			h.markDialAttempt(ai.ID)
 		}
 		dcancel()
 	}
 
 	// b) Walk the routing table for unconnected peers and dial up to
-	//    maxRoutingDials of them. This is what brings the count back
-	//    up after bootstrap-only-redial isn't enough.
+	//    maxRoutingDials of them, in randomized order, skipping anyone
+	//    we tried in the last 5 minutes.
 	if h.kdht == nil {
+		h.savePreviousDialed(dialedThisTick)
 		return
 	}
 	candidates := h.kdht.RoutingTable().ListPeers()
+	shufflePeers(candidates)
+	now := time.Now()
+	const dialCooldown = 5 * time.Minute
 	dialed := 0
 	for _, pid := range candidates {
 		if dialed >= maxRoutingDials {
@@ -292,6 +345,10 @@ func (h *Host) runKeepalive(ctx context.Context, opts DHTOptions, minPeers, maxR
 		if h.H.Network().Connectedness(pid) == network.Connected {
 			continue
 		}
+		// Skip recently-attempted peers.
+		if last, ok := h.lastDialAttempt(pid); ok && now.Sub(last) < dialCooldown {
+			continue
+		}
 		ai := h.H.Peerstore().PeerInfo(pid)
 		if len(ai.Addrs) == 0 {
 			continue
@@ -300,8 +357,92 @@ func (h *Host) runKeepalive(ctx context.Context, opts DHTOptions, minPeers, maxR
 		if err := h.H.Connect(dctx, ai); err == nil {
 			h.kaRouteDial.Add(1)
 			dialed++
+			dialedThisTick[ai.ID] = struct{}{}
 		}
+		h.markDialAttempt(pid)
 		dcancel()
+	}
+
+	// c) Aggressive closest-walk when we're below MinPeers/2. This pulls
+	//    in peers from a different region of the keyspace than what's in
+	//    the routing table today. Independent of the periodic 5-minute
+	//    closest-walk loop.
+	if h.PeerCount() < minPeers/2 {
+		h.runClosestWalk(ctx, h.kdht)
+		h.kaClosestWalks.Add(1)
+	}
+
+	h.savePreviousDialed(dialedThisTick)
+}
+
+// auditPreviousDials checks every peer we dialed on the previous tick.
+// For each one that's no longer connected, increment kaStuck. This is
+// the diagnosis counter the follow-up plan called for.
+func (h *Host) auditPreviousDials() {
+	h.kaPrevDialedMu.Lock()
+	prev := h.kaPrevDialed
+	h.kaPrevDialedMu.Unlock()
+	if len(prev) == 0 {
+		return
+	}
+	var stuck uint64
+	for pid := range prev {
+		if h.H.Network().Connectedness(pid) != network.Connected {
+			stuck++
+		}
+	}
+	if stuck > 0 {
+		h.kaStuck.Add(stuck)
+	}
+}
+
+// savePreviousDialed atomically replaces the previous-cycle dial set.
+func (h *Host) savePreviousDialed(s map[peer.ID]struct{}) {
+	h.kaPrevDialedMu.Lock()
+	h.kaPrevDialed = s
+	h.kaPrevDialedMu.Unlock()
+}
+
+// markDialAttempt records that we attempted to dial pid right now.
+// Used by the recent-attempt cooldown.
+func (h *Host) markDialAttempt(pid peer.ID) {
+	h.kaLastAttemptMu.Lock()
+	defer h.kaLastAttemptMu.Unlock()
+	if h.kaLastAttempt == nil {
+		h.kaLastAttempt = make(map[peer.ID]time.Time)
+	}
+	h.kaLastAttempt[pid] = time.Now()
+	// Prune entries older than 30 minutes to keep the map bounded.
+	// Only do this every ~64 inserts (cheap heuristic) to amortize the cost.
+	if len(h.kaLastAttempt) > 64 && len(h.kaLastAttempt)%64 == 0 {
+		cutoff := time.Now().Add(-30 * time.Minute)
+		for k, t := range h.kaLastAttempt {
+			if t.Before(cutoff) {
+				delete(h.kaLastAttempt, k)
+			}
+		}
+	}
+}
+
+// lastDialAttempt returns (time, true) if we have a recorded dial attempt
+// for pid, else (zero, false).
+func (h *Host) lastDialAttempt(pid peer.ID) (time.Time, bool) {
+	h.kaLastAttemptMu.Lock()
+	defer h.kaLastAttemptMu.Unlock()
+	if h.kaLastAttempt == nil {
+		return time.Time{}, false
+	}
+	t, ok := h.kaLastAttempt[pid]
+	return t, ok
+}
+
+// shufflePeers permutes the candidate slice in place. Uses crypto/rand
+// via mrand fed by time-seeded source (good enough for a randomization
+// of walk order, NOT a security primitive).
+func shufflePeers(ps []peer.ID) {
+	for i := len(ps) - 1; i > 0; i-- {
+		j := mrand.Intn(i + 1)
+		ps[i], ps[j] = ps[j], ps[i]
 	}
 }
 
