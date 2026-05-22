@@ -179,7 +179,8 @@ func runBootstrapQuorum(ctx context.Context, p bootstrapParams) (bootstrap.Final
 		fmt.Println("    libp2p host: starting...")
 		hcfg := llibp2p.HostConfig{
 			BootstrapPeers: build.MainnetBootstrapPeers,
-			MaxPeers:       50,
+			MinPeers:       20,
+			MaxPeers:       100,
 			UserAgent:      "lantern-bootstrap/0.1",
 		}
 		h, err := llibp2p.New(ctx, hcfg)
