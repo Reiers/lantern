@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -91,7 +92,7 @@ func withStore(t *testing.T, headHeight abi.ChainEpoch) (*hstore.Store, *ltypes.
 
 func TestIngestor_DedupesRepeatEnqueue(t *testing.T) {
 	s, head := withStore(t, 10)
-	ing := newGossipBlockIngestor(s)
+	ing := newGossipBlockIngestor(s, nil)
 
 	// Block at head+1 with the right parent.
 	next := mkBlock(t, head.Height()+1, []cid.Cid{head.Blocks()[0].Cid()}, 1000, "next")
@@ -111,7 +112,7 @@ func TestIngestor_DedupesRepeatEnqueue(t *testing.T) {
 
 func TestIngestor_HeightFence(t *testing.T) {
 	s, head := withStore(t, 10)
-	ing := newGossipBlockIngestor(s)
+	ing := newGossipBlockIngestor(s, nil)
 	ctx := context.Background()
 
 	// Block at the same height as head. Should be skipped silently
@@ -129,7 +130,7 @@ func TestIngestor_HeightFence(t *testing.T) {
 
 func TestIngestor_SkipsWhenParentsMissing(t *testing.T) {
 	s, head := withStore(t, 10)
-	ing := newGossipBlockIngestor(s)
+	ing := newGossipBlockIngestor(s, nil)
 	ctx := context.Background()
 
 	// Block at head+5 (jump ahead). Its parent CID won't be in the store.
@@ -143,7 +144,7 @@ func TestIngestor_SkipsWhenParentsMissing(t *testing.T) {
 
 func TestIngestor_InstallsAtHeadPlusOne(t *testing.T) {
 	s, head := withStore(t, 10)
-	ing := newGossipBlockIngestor(s)
+	ing := newGossipBlockIngestor(s, nil)
 	ctx := context.Background()
 
 	next := mkBlock(t, head.Height()+1, []cid.Cid{head.Blocks()[0].Cid()}, 1000, "next")
@@ -157,7 +158,7 @@ func TestIngestor_InstallsAtHeadPlusOne(t *testing.T) {
 
 func TestIngestor_EnqueueDropsWhenChannelFull(t *testing.T) {
 	s, _ := withStore(t, 1)
-	ing := newGossipBlockIngestor(s)
+	ing := newGossipBlockIngestor(s, nil)
 
 	// Don't start Run(); the channel buffer fills and Enqueue drops.
 	// Send buffer+5 messages; the last 5 should be dropped.
@@ -176,10 +177,91 @@ func TestIngestor_EnqueueDropsWhenChannelFull(t *testing.T) {
 
 func TestIngestor_EnqueueIgnoresNilHeader(t *testing.T) {
 	s, _ := withStore(t, 1)
-	ing := newGossipBlockIngestor(s)
+	ing := newGossipBlockIngestor(s, nil)
 
 	ing.Enqueue(nil)
 	ing.Enqueue(&ltypes.BlockMsg{Header: nil})
 
 	require.Equal(t, uint64(0), ing.received.Load(), "nil messages must not be counted")
+}
+
+// fakeBackfillSource is an in-memory RPC source for testing inline backfill.
+// It indexes blocks by height + CID; TipsetCIDsByHeight returns whatever was
+// registered at that height.
+type fakeBackfillSource struct {
+	byHeight map[abi.ChainEpoch][]*ltypes.BlockHeader
+	byCID    map[cid.Cid]*ltypes.BlockHeader
+	calls    int
+}
+
+func newFakeBackfillSource() *fakeBackfillSource {
+	return &fakeBackfillSource{
+		byHeight: map[abi.ChainEpoch][]*ltypes.BlockHeader{},
+		byCID:    map[cid.Cid]*ltypes.BlockHeader{},
+	}
+}
+
+func (f *fakeBackfillSource) register(b *ltypes.BlockHeader) {
+	f.byHeight[b.Height] = append(f.byHeight[b.Height], b)
+	f.byCID[b.Cid()] = b
+}
+
+func (f *fakeBackfillSource) TipsetCIDsByHeight(_ context.Context, h abi.ChainEpoch) ([]cid.Cid, error) {
+	f.calls++
+	bs := f.byHeight[h]
+	cids := make([]cid.Cid, 0, len(bs))
+	for _, b := range bs {
+		cids = append(cids, b.Cid())
+	}
+	return cids, nil
+}
+
+func (f *fakeBackfillSource) FetchBlock(_ context.Context, k cid.Cid) (*ltypes.BlockHeader, error) {
+	b, ok := f.byCID[k]
+	if !ok {
+		return nil, errFakeSourceNoBlock
+	}
+	return b, nil
+}
+
+var errFakeSourceNoBlock = fmt.Errorf("fake source: block not registered")
+
+func TestIngestor_InlineBackfillFillsGap(t *testing.T) {
+	s, head := withStore(t, 10)
+	src := newFakeBackfillSource()
+
+	// Build a gap of 2 epochs at h=11, h=12, then a new head at h=13.
+	parentCID := head.Blocks()[0].Cid()
+	ep11 := mkBlock(t, 11, []cid.Cid{parentCID}, 1000, "e11")
+	ep12 := mkBlock(t, 12, []cid.Cid{ep11.Cid()}, 1000, "e12")
+	ep13 := mkBlock(t, 13, []cid.Cid{ep12.Cid()}, 1000, "e13")
+	src.register(ep11)
+	src.register(ep12)
+	// ep13 is the gossipsub-arrived block; not registered as we don't fetch it
+
+	ing := newGossipBlockIngestor(s, src)
+	ing.process(context.Background(), &ltypes.BlockMsg{Header: ep13})
+
+	require.Equal(t, uint64(1), ing.backfilled.Load(), "backfill should fire")
+	require.Equal(t, uint64(1), ing.installed.Load(), "head block should install after backfill")
+	require.Equal(t, abi.ChainEpoch(13), s.HeadEpoch(), "head should advance to 13")
+	require.GreaterOrEqual(t, src.calls, 2, "backfill should fetch 2 epochs")
+}
+
+func TestIngestor_InlineBackfillRespectsCapsToSkip(t *testing.T) {
+	s, _ := withStore(t, 10)
+	src := newFakeBackfillSource()
+
+	// Big gap with unknown parent: head at 10, new block at 20 pointing at
+	// a parent block at 19 that's NOT in the store. Default cap is 3, so
+	// the backfill walk from epoch 11 to 19 (9 epochs) exceeds the cap.
+	unknownParent := mkCID(t, "unknown-parent-at-19")
+	far := mkBlock(t, 20, []cid.Cid{unknownParent}, 1000, "far")
+
+	ing := newGossipBlockIngestor(s, src)
+	ing.process(context.Background(), &ltypes.BlockMsg{Header: far})
+
+	require.Equal(t, uint64(0), ing.installed.Load(), "too-big gap must not install")
+	require.Equal(t, uint64(1), ing.backfillFailed.Load(), "backfill should fail with gap > cap")
+	require.Equal(t, uint64(1), ing.skipped.Load(), "and the head block itself is skipped")
 }

@@ -40,12 +40,34 @@ import (
 	"github.com/Reiers/lantern/net/blockpub"
 )
 
+// parentBackfillSource is the minimal RPC surface the ingestor uses for
+// inline backfill when a gossipsub block arrives at head+N with N>1.
+//
+// We don't recurse arbitrarily deep; backfillCap (set on the ingestor)
+// limits how many epochs of catch-up we do per gossipsub event before
+// deferring to the polling Sync agent. This keeps the gossipsub goroutine
+// responsive and prevents a malicious peer from pinning us with a
+// head-of-genesis announcement.
+type parentBackfillSource interface {
+	TipsetCIDsByHeight(ctx context.Context, h abi.ChainEpoch) ([]cid.Cid, error)
+	FetchBlock(ctx context.Context, k cid.Cid) (*ltypes.BlockHeader, error)
+}
+
 // gossipBlockIngestor consumes block announcements from gossipsub and
 // installs them into the header store as new heads.
 //
 // One ingestor per daemon. Owns the deduplication state.
 type gossipBlockIngestor struct {
 	store *hstore.Store
+
+	// src is the optional inline-backfill RPC source. Recommended in
+	// production. With src set, head+N>1 blocks land immediately via a
+	// bounded backfill burst (capped by backfillCap) instead of waiting
+	// for the polling Sync's 6-second cycle.
+	src parentBackfillSource
+
+	// backfillCap caps the depth of inline backfill in epochs. Default 3.
+	backfillCap abi.ChainEpoch
 
 	// incoming carries decoded blocks from blockpub's read goroutine to
 	// the single processor goroutine. Bounded so a runaway peer can't
@@ -66,18 +88,25 @@ type gossipBlockIngestor struct {
 	installed        atomic.Uint64
 	skipped          atomic.Uint64
 	rejected         atomic.Uint64
+	backfilled       atomic.Uint64
+	backfillFailed   atomic.Uint64
 	lastInstallEpoch atomic.Int64
 }
 
 // newGossipBlockIngestor builds an ingestor wired to the header store.
 //
+// src may be nil; when nil, blocks at head+N>1 are skipped and the
+// polling Sync's backfill path handles them on its next cycle.
+//
 // Caller is responsible for calling Run once and Close on shutdown.
-func newGossipBlockIngestor(store *hstore.Store) *gossipBlockIngestor {
+func newGossipBlockIngestor(store *hstore.Store, src parentBackfillSource) *gossipBlockIngestor {
 	return &gossipBlockIngestor{
-		store:    store,
-		incoming: make(chan *ltypes.BlockMsg, 64),
-		seen:     make(map[cid.Cid]struct{}, 256),
-		seenCap:  512,
+		store:       store,
+		src:         src,
+		backfillCap: 3,
+		incoming:    make(chan *ltypes.BlockMsg, 64),
+		seen:        make(map[cid.Cid]struct{}, 256),
+		seenCap:     512,
 	}
 }
 
@@ -153,20 +182,26 @@ func (g *gossipBlockIngestor) process(ctx context.Context, blk *ltypes.BlockMsg)
 		return
 	}
 
-	// Parent linkage: if the parent tipset isn't in the store, the
-	// polling Sync's backfill path is the right tool. We don't want to
-	// trigger backfills from the gossipsub goroutine.
+	// Parent linkage: if any parent isn't in the store, try inline
+	// backfill (bounded by backfillCap epochs) using our RPC source.
+	// When src is nil, fall back to the prior behaviour of skipping
+	// and letting the polling Sync's 6s cycle handle it.
 	parents := bh.Parents
-	allParentsKnown := true
-	for _, pc := range parents {
-		if _, err := g.store.Get(pc); err != nil {
-			allParentsKnown = false
-			break
+	if !g.allParentsPresent(parents) {
+		if g.src == nil {
+			g.skipped.Add(1)
+			return
 		}
-	}
-	if !allParentsKnown {
-		g.skipped.Add(1)
-		return
+		if err := g.inlineBackfill(ctx, bh); err != nil {
+			g.backfillFailed.Add(1)
+			g.skipped.Add(1)
+			return
+		}
+		g.backfilled.Add(1)
+		if !g.allParentsPresent(parents) {
+			g.skipped.Add(1)
+			return
+		}
 	}
 
 	// Multi-block tipsets at the same height: Filecoin allows up to
@@ -189,6 +224,72 @@ func (g *gossipBlockIngestor) process(ctx context.Context, blk *ltypes.BlockMsg)
 	g.lastInstallEpoch.Store(int64(bh.Height))
 }
 
+// allParentsPresent returns true if every parent CID is already in the
+// header store. Cheap point-check, no fetch.
+func (g *gossipBlockIngestor) allParentsPresent(parents []cid.Cid) bool {
+	for _, pc := range parents {
+		if _, err := g.store.Get(pc); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// inlineBackfill walks from the first missing parent epoch up to (but
+// not including) bh.Height, fetching missing tipsets via the RPC source
+// and installing each as we go. Bounded by backfillCap.
+//
+// Bound is by epoch-depth, not by attempted-fetch count, because
+// per-epoch fetches are themselves bounded (tipsets cap out at
+// BlocksPerEpoch=5 blocks).
+func (g *gossipBlockIngestor) inlineBackfill(ctx context.Context, bh *ltypes.BlockHeader) error {
+	curHead := g.store.HeadEpoch()
+	needFrom := curHead + 1
+	needTo := bh.Height - 1
+	if needFrom > needTo {
+		return nil // nothing to backfill
+	}
+	gap := needTo - needFrom + 1
+	if gap > g.backfillCap {
+		return fmt.Errorf("backfill gap %d > cap %d", gap, g.backfillCap)
+	}
+
+	bctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	for ep := needFrom; ep <= needTo; ep++ {
+		cids, err := g.src.TipsetCIDsByHeight(bctx, ep)
+		if err != nil {
+			return fmt.Errorf("backfill cids @ %d: %w", ep, err)
+		}
+		if len(cids) == 0 {
+			continue // null-round epoch
+		}
+		blocks := make([]*ltypes.BlockHeader, 0, len(cids))
+		for _, c := range cids {
+			if b, gerr := g.store.Get(c); gerr == nil {
+				blocks = append(blocks, b)
+				continue
+			}
+			b, ferr := g.src.FetchBlock(bctx, c)
+			if ferr != nil {
+				return fmt.Errorf("backfill fetch %s: %w", c, ferr)
+			}
+			if verr := header.VerifyBlockHeaderCID(b, c); verr != nil {
+				return fmt.Errorf("backfill cid verify @ %d: %w", ep, verr)
+			}
+			blocks = append(blocks, b)
+		}
+		ts, err := ltypes.NewTipSet(blocks)
+		if err != nil {
+			return fmt.Errorf("backfill tipset @ %d: %w", ep, err)
+		}
+		if err := g.store.SetHead(ctx, ts); err != nil {
+			return fmt.Errorf("backfill set head @ %d: %w", ep, err)
+		}
+	}
+	return nil
+}
+
 // markSeen inserts the CID into the dedupe set with simple LRU eviction.
 func (g *gossipBlockIngestor) markSeen(c cid.Cid) {
 	g.seen[c] = struct{}{}
@@ -207,6 +308,8 @@ type gossipBlockStats struct {
 	Installed        uint64
 	Skipped          uint64
 	Rejected         uint64
+	Backfilled       uint64
+	BackfillFailed   uint64
 	LastInstallEpoch abi.ChainEpoch
 }
 
@@ -218,6 +321,8 @@ func (g *gossipBlockIngestor) Stats() gossipBlockStats {
 		Installed:        g.installed.Load(),
 		Skipped:          g.skipped.Load(),
 		Rejected:         g.rejected.Load(),
+		Backfilled:       g.backfilled.Load(),
+		BackfillFailed:   g.backfillFailed.Load(),
 		LastInstallEpoch: abi.ChainEpoch(g.lastInstallEpoch.Load()),
 	}
 }
@@ -230,11 +335,11 @@ func (g *gossipBlockIngestor) Stats() gossipBlockStats {
 //   - Starts the ingestor goroutine
 //   - Starts a periodic stats log every 60s (matches the existing [sync]
 //     stat cadence so operators see both side by side)
-func startGossipBlocks(ctx context.Context, ps *pubsub.PubSub, store *hstore.Store) (*gossipBlockIngestor, *blockpub.Publisher, error) {
+func startGossipBlocks(ctx context.Context, ps *pubsub.PubSub, store *hstore.Store, src parentBackfillSource) (*gossipBlockIngestor, *blockpub.Publisher, error) {
 	if ps == nil || store == nil {
 		return nil, nil, fmt.Errorf("startGossipBlocks: ps and store are required")
 	}
-	ing := newGossipBlockIngestor(store)
+	ing := newGossipBlockIngestor(store, src)
 	pub, err := blockpub.New(ctx, ps, blockpub.Config{
 		OnBlock: ing.Enqueue,
 	})
@@ -259,9 +364,10 @@ func logGossipBlockStats(ctx context.Context, ing *gossipBlockIngestor, pub *blo
 			s := ing.Stats()
 			published, received, rejected := pub.Stats()
 			fmt.Fprintf(os.Stderr,
-				"  [gossip-block] sub-received=%d sub-rejected=%d ingest-received=%d installed=%d dedup=%d skipped=%d rejected=%d lastEpoch=%d published=%d\n",
+				"  [gossip-block] sub-rcv=%d sub-rej=%d ing-rcv=%d installed=%d dedup=%d skipped=%d rejected=%d backfilled=%d backfillFail=%d lastEpoch=%d published=%d\n",
 				received, rejected,
 				s.Received, s.Installed, s.Dedup, s.Skipped, s.Rejected,
+				s.Backfilled, s.BackfillFailed,
 				s.LastInstallEpoch, published,
 			)
 		}
