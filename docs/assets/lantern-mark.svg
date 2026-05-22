@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Lantern brand mark v2.
+
+  Paper-lantern silhouette in Filecoin blue. Iterated from v1:
+  - Body now bulges in the middle (classic paper-lantern egg shape)
+  - Top/bottom caps narrower than the mid-body
+  - 3 vertical ribs visible (left, center, right) for the bamboo-frame cue
+  - Softer center glow (no harsh dot at midline)
+  - Cleaner tassel knot
+
+  Palette aligned with the dashboard:
+    primary   #0090ff (Filecoin blue)
+    soft-fill rgba(0, 144, 255, 0.14)
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 84" width="256" height="336" role="img" aria-label="Lantern">
+  <!-- Top hanger ring -->
+  <circle cx="32" cy="4" r="2.4" fill="none" stroke="#0090ff" stroke-width="1.6"/>
+  <!-- Top hanger cord -->
+  <line x1="32" y1="6.4" x2="32" y2="10" stroke="#0090ff" stroke-width="1.6" stroke-linecap="round"/>
+
+  <!-- Top cap (narrower than body) -->
+  <rect x="22" y="10" width="20" height="4" rx="1.2" fill="#0090ff"/>
+
+  <!-- Body: classic paper-lantern bulge (egg shape) -->
+  <!-- Top opens at 22-42 (width 20), bulges to 6-58 (width 52) at mid, closes back to 22-42 at bottom -->
+  <path d="
+    M 22 14
+    C 12 16, 6 24, 6 42
+    C 6 60, 12 68, 22 70
+    L 42 70
+    C 52 68, 58 60, 58 42
+    C 58 24, 52 16, 42 14
+    Z
+  "
+    fill="rgba(0, 144, 255, 0.14)"
+    stroke="#0090ff"
+    stroke-width="2.4"
+    stroke-linejoin="round"/>
+
+  <!-- Vertical ribs: three light curves following the egg bulge -->
+  <path d="M 22 14 C 16 30, 16 54, 22 70" stroke="#0090ff" stroke-width="1.2" fill="none" opacity="0.55"/>
+  <path d="M 32 14 C 32 30, 32 54, 32 70" stroke="#0090ff" stroke-width="1.2" fill="none" opacity="0.45"/>
+  <path d="M 42 14 C 48 30, 48 54, 42 70" stroke="#0090ff" stroke-width="1.2" fill="none" opacity="0.55"/>
+
+  <!-- (No mid-band: clean silhouette reads better at favicon scale.) -->
+
+  <!-- Bottom cap (matches top) -->
+  <rect x="22" y="70" width="20" height="4" rx="1.2" fill="#0090ff"/>
+
+  <!-- Tassel cord -->
+  <line x1="32" y1="74" x2="32" y2="79" stroke="#0090ff" stroke-width="1.6" stroke-linecap="round"/>
+  <!-- Tassel knot -->
+  <circle cx="32" cy="80.5" r="1.8" fill="#0090ff"/>
+  <!-- Tassel strands (3 short lines for the fringe) -->
+  <line x1="30" y1="80.5" x2="29" y2="83" stroke="#0090ff" stroke-width="1.0" stroke-linecap="round" opacity="0.7"/>
+  <line x1="32" y1="82.3" x2="32" y2="83.5" stroke="#0090ff" stroke-width="1.0" stroke-linecap="round" opacity="0.7"/>
+  <line x1="34" y1="80.5" x2="35" y2="83" stroke="#0090ff" stroke-width="1.0" stroke-linecap="round" opacity="0.7"/>
+</svg>

@@ -33,7 +33,7 @@ import (
 	llibp2p "github.com/Reiers/lantern/net/libp2p"
 )
 
-//go:embed dashboard/index.html
+//go:embed dashboard/index.html dashboard/lantern-mark.svg dashboard/lantern-favicon.svg
 var dashboardAssets embed.FS
 
 // dashboardDeps bundles the data sources the dashboard endpoints need.

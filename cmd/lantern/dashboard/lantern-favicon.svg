@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Favicon-friendly lantern mark in a square viewBox.
+  Slightly larger body relative to viewport so the mark reads at 16/32 px.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="80" height="80">
+  <g transform="translate(8, 0)">
+    <circle cx="32" cy="4" r="2.4" fill="none" stroke="#0090ff" stroke-width="1.6"/>
+    <line x1="32" y1="6.4" x2="32" y2="10" stroke="#0090ff" stroke-width="1.6" stroke-linecap="round"/>
+    <rect x="22" y="10" width="20" height="4" rx="1.2" fill="#0090ff"/>
+    <path d="M 22 14 C 12 16, 6 24, 6 42 C 6 60, 12 68, 22 70 L 42 70 C 52 68, 58 60, 58 42 C 58 24, 52 16, 42 14 Z"
+          fill="rgba(0, 144, 255, 0.14)" stroke="#0090ff" stroke-width="2.4" stroke-linejoin="round"/>
+    <path d="M 22 14 C 16 30, 16 54, 22 70" stroke="#0090ff" stroke-width="1.2" fill="none" opacity="0.55"/>
+    <path d="M 32 14 C 32 30, 32 54, 32 70" stroke="#0090ff" stroke-width="1.2" fill="none" opacity="0.45"/>
+    <path d="M 42 14 C 48 30, 48 54, 42 70" stroke="#0090ff" stroke-width="1.2" fill="none" opacity="0.55"/>
+    <rect x="22" y="70" width="20" height="4" rx="1.2" fill="#0090ff"/>
+    <line x1="32" y1="74" x2="32" y2="79" stroke="#0090ff" stroke-width="1.6" stroke-linecap="round"/>
+    <circle cx="32" cy="80.5" r="1.8" fill="#0090ff"/>
+  </g>
+</svg>
