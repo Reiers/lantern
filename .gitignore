@@ -3,3 +3,6 @@
 /lantern-phase2
 /lantern-phase4
 /lantern
+
+# Wrangler local cache from Cloudflare Pages deploys
+deploy/*/.wrangler/

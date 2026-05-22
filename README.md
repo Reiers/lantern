@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/assets/lantern-logo.png" alt="Lantern" width="280" />
+  <img src="docs/assets/lantern-mark-256.png" alt="Lantern" width="96" />
 
   # Lantern
 
