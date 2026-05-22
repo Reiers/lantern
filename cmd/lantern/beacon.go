@@ -59,8 +59,10 @@ func cmdBeacon(args []string) error {
 	gateway := fs.String("gateway", "https://gateway.lantern.reiers.io", "Upstream gateway URL for backfill on cache miss. Empty disables backfill.")
 	metricsAddr := fs.String("metrics", "", "Optional listen address for /metrics. Empty disables.")
 	certexchEnable := fs.Bool("certexch", true, "Serve F3 cert-exchange over libp2p (B-11-01). Disable to skip the ingest loop.")
-	certexchUpstream := fs.String("certexch-upstream", "https://api.node.glif.io/rpc/v1", "Upstream Lotus-compatible JSON-RPC source for F3 certs.")
+	certexchUpstream := fs.String("certexch-upstream", "https://api.node.glif.io/rpc/v1", "JSON-RPC fallback for F3 certs when the swarm can't serve them. Used only when --certexch-swarm=true (default) cannot find Lantern beacons OR when --certexch-swarm=false.")
+	certexchSwarm := fs.Bool("certexch-swarm", true, "Issue #6: pull F3 certs from other Lantern beacons over libp2p first, fall back to --certexch-upstream only when no beacon answers. Disable to use the JSON-RPC upstream directly.")
 	certexchPoll := fs.Duration("certexch-poll", 30*time.Second, "How often to pull new F3 certs from upstream.")
+	certexchPeers := fs.String("certexch-peers", "", "Comma-separated multiaddrs of Lantern beacons to pin as cert-exchange upstreams. When empty (default), beacons are discovered dynamically via the DHT rendezvous.")
 	fs.Parse(args)
 
 	cacheBytes, err := parseSize(*cacheSizeStr)
@@ -187,7 +189,15 @@ func cmdBeacon(args []string) error {
 	// host; serves /f3/certexch/get/1/<networkName> backed by an
 	// in-memory certstore populated from an upstream JSON-RPC source.
 	if *certexchEnable {
-		if err := startCertExch(ctx, host, *certexchUpstream, *certexchPoll); err != nil {
+		cfg := certExchConfig{
+			upstreamRPC:     *certexchUpstream,
+			pollInterval:    *certexchPoll,
+			swarmEnabled:    *certexchSwarm,
+			pinnedPeers:     *certexchPeers,
+			rendezvousKDHT:  kdht,
+			announceEnabled: *announceDHT,
+		}
+		if err := startCertExch(ctx, host, cfg); err != nil {
 			fmt.Printf("WARN cert-exchange responder: %v\n", err)
 		}
 	}
@@ -213,12 +223,28 @@ func cmdBeacon(args []string) error {
 	return nil
 }
 
+// certExchConfig bundles the options startCertExch needs. Lives in the
+// caller's scope; not part of any public API.
+type certExchConfig struct {
+	upstreamRPC     string        // JSON-RPC fallback URL
+	pollInterval    time.Duration // how often the responder ingests new certs
+	swarmEnabled    bool          // issue #6: prefer libp2p Lantern beacons
+	pinnedPeers     string        // optional comma-separated multiaddrs
+	rendezvousKDHT  *dht.IpfsDHT  // DHT for rendezvous discovery (nil when no DHT)
+	announceEnabled bool          // whether we're announcing under the rendezvous (only then can we find others)
+}
+
 // startCertExch wires up the F3 cert-exchange responder on the beacon's
 // libp2p host. Logs one line confirming the listener is up so operators
-// see it in their boot transcript (this is the V1.2.1 deliverable —
-// the responder side of the cert-exchange protocol that completes
-// LanternBeaconSource in the bootstrap quorum).
-func startCertExch(ctx context.Context, h *llibp2p.Host, upstream string, poll time.Duration) error {
+// see it in their boot transcript.
+//
+// Issue #6: when cfg.swarmEnabled is true (default), the responder's
+// upstream cert source is a SwarmCertSource that prefers other Lantern
+// beacons over libp2p first, falling back to the JSON-RPC upstream only
+// when no beacon answers. This makes Lantern's trust model genuinely
+// swarm-native at the cert-source layer instead of leaking through
+// to Glif.
+func startCertExch(ctx context.Context, h *llibp2p.Host, cfg certExchConfig) error {
 	a, err := anchor.Embedded("mainnet")
 	if err != nil {
 		return fmt.Errorf("load anchor: %w", err)
@@ -227,13 +253,32 @@ func startCertExch(ctx context.Context, h *llibp2p.Host, upstream string, poll t
 	if err != nil {
 		return fmt.Errorf("parse manifest: %w", err)
 	}
-	src := subscriber.NewJSONRPCSource(upstream)
+	fallback := subscriber.NewJSONRPCSource(cfg.upstreamRPC)
+
+	var src subscriber.CertSource = fallback
+	if cfg.swarmEnabled {
+		provider := buildBeaconPeerProvider(ctx, cfg)
+		swarmSrc, serr := subscriber.NewSwarmCertSource(subscriber.SwarmConfig{
+			Host:        h.H,
+			NetworkName: string(mf.NetworkName),
+			Provider:    provider,
+			Fallback:    fallback,
+		})
+		if serr != nil {
+			fmt.Printf("WARN cert-exchange swarm source init failed (%v); using JSON-RPC fallback directly\n", serr)
+		} else {
+			src = swarmSrc
+			fmt.Printf("Cert source:  swarm-first (libp2p Lantern beacons → %s)\n", cfg.upstreamRPC)
+		}
+	} else {
+		fmt.Printf("Cert source:  %s (swarm disabled)\n", cfg.upstreamRPC)
+	}
 	r, err := certexch.New(certexch.Config{
 		Host:         h.H,
 		Anchor:       a,
 		Manifest:     mf,
 		CertSource:   src,
-		PollInterval: poll,
+		PollInterval: cfg.pollInterval,
 	})
 	if err != nil {
 		return err
@@ -241,8 +286,8 @@ func startCertExch(ctx context.Context, h *llibp2p.Host, upstream string, poll t
 	if err := r.Start(ctx); err != nil {
 		return fmt.Errorf("start responder: %w", err)
 	}
-	fmt.Printf("Cert-exch:    listening on %s (peer %s, upstream %s)\n",
-		r.ProtocolID(), h.ID(), upstream)
+	fmt.Printf("Cert-exch:    listening on %s (peer %s)\n",
+		r.ProtocolID(), h.ID())
 	go func() {
 		<-ctx.Done()
 		stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
