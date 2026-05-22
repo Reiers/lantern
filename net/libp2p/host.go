@@ -61,6 +61,13 @@ type HostConfig struct {
 	// DisableBandwidthCounter skips the metrics.BandwidthCounter wiring.
 	// Used by tests that don't want to allocate the counter.
 	DisableBandwidthCounter bool
+	// GossipSubDirectPeers is a list of libp2p multiaddrs that the
+	// gossipsub router should treat as direct mesh neighbours for the
+	// block / message topics. We use it to pin big fast Filecoin nodes
+	// (ChainSafe, chain.love, filincubator, devtty) into our mesh so
+	// new heads propagate at the same speed they do for those nodes.
+	// Defaults to BootstrapPeers when empty.
+	GossipSubDirectPeers []string
 }
 
 // Host wraps a libp2p Host + GossipSub PubSub instance.
@@ -166,7 +173,15 @@ func New(ctx context.Context, cfg HostConfig) (*Host, error) {
 		return nil, fmt.Errorf("libp2p.New: %w", err)
 	}
 
-	ps, err := pubsub.NewGossipSub(ctx, h)
+	// Issue #1 follow-up: configure gossipsub with Filecoin-shape mesh
+	// constants + blake2b message IDs + Lotus peer-score params, plus
+	// pin the bootstrap peers as direct mesh neighbours so new heads
+	// propagate at native Filecoin speed.
+	directPeers := cfg.GossipSubDirectPeers
+	if len(directPeers) == 0 {
+		directPeers = cfg.BootstrapPeers
+	}
+	ps, err := newFilecoinPubSub(ctx, h, directPeers)
 	if err != nil {
 		_ = h.Close()
 		return nil, fmt.Errorf("pubsub.NewGossipSub: %w", err)

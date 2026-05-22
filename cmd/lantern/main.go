@@ -361,11 +361,17 @@ func cmdDaemon(args []string) error {
 		// The polling Sync above stays as the catch-up fallback for
 		// blocks that gossipsub missed (connectivity blips, late join,
 		// etc.) and for the first install on a cold start.
+		//
+		// We pass the same glif client the polling Sync uses so the
+		// ingestor can do bounded inline backfill when a gossipsub
+		// arrival lands at head+N>1 (rather than skipping and waiting
+		// the full poll cycle).
 		if store != nil && p2pHost.PubSub != nil {
-			if _, _, gerr := startGossipBlocks(ctx, p2pHost.PubSub, store); gerr != nil {
+			gossipSrc := glif.New("", 8*time.Second)
+			if _, _, gerr := startGossipBlocks(ctx, p2pHost.PubSub, store, gossipSrc); gerr != nil {
 				fmt.Printf("  gossipsub-blocks: failed to start: %v (continuing without)\n", gerr)
 			} else {
-				fmt.Printf("  gossipsub-blocks: subscribed to %s (ingestor active)\n", build.MainnetGossipTopicBlocks)
+				fmt.Printf("  gossipsub-blocks: subscribed to %s (ingestor active, inline backfill on)\n", build.MainnetGossipTopicBlocks)
 			}
 		}
 	}
