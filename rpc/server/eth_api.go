@@ -167,3 +167,34 @@ func (n *netAPI) NetVersion(ctx context.Context) (string, error) {
 	}
 	return v.String(), nil
 }
+
+// EthGetTransactionByHash forwards to the VMBridge.
+func (e *ethAPI) EthGetTransactionByHash(ctx context.Context, txHash string) (any, error) {
+	return e.full.EthGetTransactionByHash(ctx, txHash)
+}
+
+// EthGetTransactionByBlockNumberAndIndex forwards to the VMBridge.
+func (e *ethAPI) EthGetTransactionByBlockNumberAndIndex(ctx context.Context, blockParam string, index string) (any, error) {
+	return e.full.EthGetTransactionByBlockNumberAndIndex(ctx, blockParam, index)
+}
+
+// EthGetCode forwards to the VMBridge.
+func (e *ethAPI) EthGetCode(ctx context.Context, addr string, blockParam any) (string, error) {
+	return e.full.EthGetCode(ctx, addr, blockParam)
+}
+
+// EthGetStorageAt forwards to the VMBridge.
+func (e *ethAPI) EthGetStorageAt(ctx context.Context, addr string, key string, blockParam any) (string, error) {
+	return e.full.EthGetStorageAt(ctx, addr, key, blockParam)
+}
+
+// EthGetBlockByHash forwards to the VMBridge.
+func (e *ethAPI) EthGetBlockByHash(ctx context.Context, blockHash string, fullTx bool) (any, error) {
+	return e.full.EthGetBlockByHash(ctx, blockHash, fullTx)
+}
+
+// EthGetLogs forwards to the VMBridge. Heavily used by FilecoinPay rail
+// event watchers and client-side payment monitoring.
+func (e *ethAPI) EthGetLogs(ctx context.Context, filter any) (any, error) {
+	return e.full.EthGetLogs(ctx, filter)
+}
