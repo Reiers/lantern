@@ -379,9 +379,28 @@ func (c *ChainAPI) EthGetBalance(ctx context.Context, addrHex string, _ any) (st
 // "safe", "finalized". All non-numeric values resolve to head.
 //
 // Closes part of lantern#29.
-func (c *ChainAPI) EthGetBlockByNumber(ctx context.Context, blockParam string, _ bool) (any, error) {
+func (c *ChainAPI) EthGetBlockByNumber(ctx context.Context, blockParam string, fullTx bool) (any, error) {
 	if c.HeaderStore == nil {
-		return nil, xerrors.New("header store not configured")
+		// Embedded mode without header store mounted (pkg/daemon's
+		// extraction is incomplete — see TODO(daemon-extraction)).
+		// Forward to VMBridge if available so curio-core's tx-builder
+		// path (go-ethereum HeaderByNumber for baseFee) keeps working.
+		if c.Bridge != nil {
+			params, err := json.Marshal([]any{blockParam, fullTx})
+			if err != nil {
+				return nil, xerrors.Errorf("marshal eth_getBlockByNumber params: %w", err)
+			}
+			raw, err := c.Bridge.RawJSONRPC(ctx, "eth_getBlockByNumber", params)
+			if err != nil {
+				return nil, xerrors.Errorf("bridge eth_getBlockByNumber: %w", err)
+			}
+			var out any
+			if err := json.Unmarshal(raw, &out); err != nil {
+				return nil, xerrors.Errorf("decode eth_getBlockByNumber result: %w", err)
+			}
+			return out, nil
+		}
+		return nil, xerrors.New("header store not configured (and no VM bridge available for fallback)")
 	}
 
 	var epoch int64
