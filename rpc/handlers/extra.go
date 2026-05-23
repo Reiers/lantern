@@ -10,12 +10,18 @@ package handlers
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	stdbig "math/big"
 
+	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
+	"github.com/filecoin-project/go-state-types/builtin"
 	"github.com/filecoin-project/go-state-types/network"
 	"github.com/ipfs/go-cid"
+	"golang.org/x/xerrors"
 
 	"github.com/Reiers/lantern/api"
 	"github.com/Reiers/lantern/build"
@@ -279,6 +285,185 @@ func (c *ChainAPI) EthMaxPriorityFeePerGas(_ context.Context) (string, error) {
 // MinimumBaseFee is the safe floor.
 func (c *ChainAPI) EthGasPrice(_ context.Context) (string, error) {
 	return fmt.Sprintf("0x%x", build.MinimumBaseFee), nil
+}
+
+// EthSyncing returns false because Lantern is a light client — we're
+// always anchored to our trust root, so there's no 'syncing' state
+// the way a full node has. Returns `false` (not an object) to match
+// the typical Ethereum convention when a node is fully synced.
+//
+// Note: returns `any` because the JSON-RPC convention is for this
+// method to return EITHER `false` (when synced) OR a SyncStatus
+// object. Always-returning-false is the simpler shape and matches
+// what most viem clients expect.
+func (c *ChainAPI) EthSyncing(_ context.Context) (any, error) {
+	return false, nil
+}
+
+// EthGetBalance returns the balance of an Ethereum-shaped address as
+// a 0x-prefixed hex attoFIL amount.
+//
+// Address resolution:
+//   - 0x-prefixed 20-byte ETH address
+//   - check if it's a masked-ID address (0xff prefix in first 12 bytes)
+//     → decode as f0 (Filecoin ID address)
+//   - otherwise → wrap as f4-namespaced delegated address under EAM
+//     (ActorID 10)
+//
+// Block parameter is accepted for API compatibility but ignored:
+// Lantern reads state at the trusted-root tipset only.
+//
+// Closes part of lantern#29.
+func (c *ChainAPI) EthGetBalance(ctx context.Context, addrHex string, _ any) (string, error) {
+	if c.Accessor == nil {
+		return "", xerrors.New("state accessor not configured")
+	}
+
+	// Strip 0x prefix.
+	h := addrHex
+	if len(h) >= 2 && (h[:2] == "0x" || h[:2] == "0X") {
+		h = h[2:]
+	}
+	if len(h) != 40 {
+		return "", xerrors.Errorf("eth address must be 20 bytes (40 hex chars), got %d chars", len(h))
+	}
+	raw := make([]byte, 20)
+	if _, err := hex.Decode(raw, []byte(h)); err != nil {
+		return "", xerrors.Errorf("decode eth address: %w", err)
+	}
+
+	var filAddr address.Address
+	var err error
+
+	// Detect masked-ID address: first byte 0xff, next 11 bytes 0x00.
+	// FEVM convention is 0xff || 11 zero bytes || big-endian uint64 actor ID.
+	maskedID := raw[0] == 0xff
+	for i := 1; i < 12 && maskedID; i++ {
+		if raw[i] != 0x00 {
+			maskedID = false
+		}
+	}
+	if maskedID {
+		// Last 8 bytes are big-endian uint64 actor ID.
+		actorID := uint64(0)
+		for i := 12; i < 20; i++ {
+			actorID = (actorID << 8) | uint64(raw[i])
+		}
+		filAddr, err = address.NewIDAddress(actorID)
+		if err != nil {
+			return "", xerrors.Errorf("build id address: %w", err)
+		}
+	} else {
+		filAddr, err = address.NewDelegatedAddress(builtin.EthereumAddressManagerActorID, raw)
+		if err != nil {
+			return "", xerrors.Errorf("build f4 address: %w", err)
+		}
+	}
+
+	actor, _, err := c.Accessor.GetActor(ctx, filAddr)
+	if err != nil {
+		// Unknown actor returns 0 balance, matching Ethereum convention
+		// for never-used addresses.
+		return "0x0", nil
+	}
+	return "0x" + actor.Balance.Int.Text(16), nil
+}
+
+// EthGetBlockByNumber returns a tipset reshaped to look like an
+// Ethereum block. fullTx is accepted but ignored — Lantern's header
+// store doesn't carry full message bodies, only block headers and
+// chain structure.
+//
+// blockParam accepts: 0x-hex epoch, "latest", "earliest", "pending",
+// "safe", "finalized". All non-numeric values resolve to head.
+//
+// Closes part of lantern#29.
+func (c *ChainAPI) EthGetBlockByNumber(ctx context.Context, blockParam string, _ bool) (any, error) {
+	if c.HeaderStore == nil {
+		return nil, xerrors.New("header store not configured")
+	}
+
+	var epoch int64
+	switch blockParam {
+	case "earliest":
+		epoch = 0
+	case "latest", "pending", "safe", "finalized", "":
+		epoch = int64(c.HeaderStore.HeadEpoch())
+	default:
+		// Parse 0x-hex.
+		h := blockParam
+		if len(h) >= 2 && (h[:2] == "0x" || h[:2] == "0X") {
+			h = h[2:]
+		}
+		parsed, ok := new(stdbig.Int).SetString(h, 16)
+		if !ok {
+			return nil, xerrors.Errorf("bad block number %q", blockParam)
+		}
+		epoch = parsed.Int64()
+	}
+
+	ts, err := c.HeaderStore.GetTipSetByHeight(abi.ChainEpoch(epoch))
+	if err != nil || ts == nil {
+		return nil, nil // matches Ethereum convention: unknown block returns null
+	}
+
+	// Use the first block in the tipset as the canonical block id.
+	blocks := ts.Blocks()
+	if len(blocks) == 0 {
+		return nil, nil
+	}
+	b := blocks[0]
+
+	cidStrs := make([]string, len(blocks))
+	for i, blk := range blocks {
+		cidStrs[i] = blk.Cid().String()
+	}
+
+	// ETH-shaped block fields. Many Filecoin concepts have no ETH
+	// equivalent; we return zero/empty for those and trust the client
+	// to only consult the fields it cares about (typical viem use is
+	// number + timestamp + hash).
+	return map[string]any{
+		"number":           fmt.Sprintf("0x%x", int64(b.Height)),
+		"hash":             b.Cid().String(),
+		"parentHash":       firstCidOrEmpty(b.Parents),
+		"nonce":            "0x0000000000000000",
+		"sha3Uncles":       "0x0000000000000000000000000000000000000000000000000000000000000000",
+		"logsBloom":        "0x" + zeroPad(512),
+		"transactionsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+		"stateRoot":        b.ParentStateRoot.String(),
+		"receiptsRoot":     b.ParentMessageReceipts.String(),
+		"miner":            b.Miner.String(),
+		"difficulty":       "0x0",
+		"totalDifficulty":  "0x0",
+		"extraData":        "0x",
+		"size":             "0x0",
+		"gasLimit":         fmt.Sprintf("0x%x", build.BlockGasLimit),
+		"gasUsed":          "0x0", // we don't track per-block gas use
+		"timestamp":        fmt.Sprintf("0x%x", b.Timestamp),
+		"transactions":     []string{}, // empty when fullTx=false (we ignore fullTx for now)
+		"uncles":           []string{},
+		// Filecoin extension: surface the full tipset CIDs so clients
+		// that know about Filecoin can disambiguate sibling blocks.
+		"filecoinTipsetCids": cidStrs,
+	}, nil
+}
+
+// firstCidOrEmpty returns the first CID's string or a 32-byte zero hex.
+func firstCidOrEmpty(cs []cid.Cid) string {
+	if len(cs) == 0 {
+		return "0x0000000000000000000000000000000000000000000000000000000000000000"
+	}
+	return cs[0].String()
+}
+
+// zeroPad returns a string of `n` '0' characters. For logsBloom etc.
+func zeroPad(n int) string {
+	out := make([]byte, n)
+	for i := range out {
+		out[i] = '0'
+	}
+	return string(out)
 }
 
 // NetBandwidthStats returns the live libp2p BandwidthCounter totals. The
