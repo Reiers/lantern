@@ -37,6 +37,7 @@ import (
 
 	"github.com/filecoin-project/go-state-types/abi"
 
+	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/wallet"
 )
@@ -120,8 +121,10 @@ type Config struct {
 	// AllowBlockSubmit lifts the SyncSubmitBlock gate. Requires VMBridgeRPC.
 	AllowBlockSubmit bool
 
-	// Network is a label baked into version strings + dashboards.
-	// Default "mainnet".
+	// Network selects the Filecoin network the embedded daemon syncs.
+	// Accepted values: "mainnet" (default), "calibration". Drives the
+	// gateway URL, Glif fallback URL, bootstrap peers, network name,
+	// genesis CID, F3 manifest, and the Filecoin.Version label.
 	Network string
 
 	// EmbeddedMode is set by callers (e.g. Curio Core) that want to
@@ -158,7 +161,15 @@ func (c *Config) applyDefaults() {
 		c.VMBridgeTimeout = 30 * time.Second
 	}
 	if c.Network == "" {
-		c.Network = "mainnet"
+		c.Network = string(build.DefaultNetwork)
+	}
+
+	// Pick a per-network default gateway when the caller didn't set one
+	// explicitly. Mainnet uses the Lantern gateway; calibration falls back
+	// to Glif calibration HTTP because there's no Lantern gateway running
+	// against calibration yet.
+	if c.Gateway == "https://gateway.lantern.reiers.io" && build.Network(c.Network) == build.Calibration {
+		c.Gateway = "https://api.calibration.node.glif.io/rpc/v1"
 	}
 }
 
@@ -171,6 +182,9 @@ func (c *Config) validate() error {
 	}
 	if c.AllowBlockSubmit && c.VMBridgeRPC == "" {
 		return errors.New("daemon.Config: AllowBlockSubmit requires VMBridgeRPC")
+	}
+	if !build.Network(c.Network).Valid() {
+		return errors.New("daemon.Config: Network must be \"mainnet\" or \"calibration\"")
 	}
 	return nil
 }

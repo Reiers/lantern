@@ -40,6 +40,7 @@ import (
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/ipfs/go-cid"
 
+	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/chain/types"
@@ -52,7 +53,7 @@ import (
 // captures the TrustedRoot, which is the load-bearing first step every
 // Lantern daemon does.
 func (d *Daemon) startInternal(ctx context.Context) error {
-	tr, err := fetchTrustedHead(ctx, d.cfg.Gateway)
+	tr, err := fetchTrustedHead(ctx, d.cfg.Gateway, build.Network(d.cfg.Network))
 	if err != nil {
 		return fmt.Errorf("fetch trusted head: %w", err)
 	}
@@ -93,7 +94,7 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 // (Mirrored from cmd/lantern/main.go's fetchTrustedHead. Once the full
 // extraction lands, cmd/lantern will call this version and the
 // duplicate will be removed from cmd/lantern.)
-func fetchTrustedHead(ctx context.Context, gw string) (*trustedroot.TrustedRoot, error) {
+func fetchTrustedHead(ctx context.Context, gw string, network build.Network) (*trustedroot.TrustedRoot, error) {
 	now := time.Now().UTC()
 
 	if gw != "" {
@@ -121,8 +122,15 @@ func fetchTrustedHead(ctx context.Context, gw string) (*trustedroot.TrustedRoot,
 	}
 
 	// Fallback to Glif when the gateway is unreachable or returned an
-	// unparseable head.
-	gc := glif.New("", 10*time.Second)
+	// unparseable head. Network-aware: calibration falls back to the
+	// calibration Glif endpoint; mainnet uses the default (empty URL
+	// = api.node.glif.io). Without this, a calibration daemon would
+	// silently pull mainnet chain data from mainnet Glif.
+	glifURL := ""
+	if network == build.Calibration {
+		glifURL = "https://api.calibration.node.glif.io/rpc/v1"
+	}
+	gc := glif.New(glifURL, 10*time.Second)
 	gh, err := gc.FetchHead(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("both gateway and Glif failed: %w", err)
