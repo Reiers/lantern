@@ -335,13 +335,14 @@ func (g *gossipBlockIngestor) Stats() gossipBlockStats {
 //   - Starts the ingestor goroutine
 //   - Starts a periodic stats log every 60s (matches the existing [sync]
 //     stat cadence so operators see both side by side)
-func startGossipBlocks(ctx context.Context, ps *pubsub.PubSub, store *hstore.Store, src parentBackfillSource) (*gossipBlockIngestor, *blockpub.Publisher, error) {
+func startGossipBlocks(ctx context.Context, ps *pubsub.PubSub, store *hstore.Store, src parentBackfillSource, topic string) (*gossipBlockIngestor, *blockpub.Publisher, error) {
 	if ps == nil || store == nil {
 		return nil, nil, fmt.Errorf("startGossipBlocks: ps and store are required")
 	}
 	ing := newGossipBlockIngestor(store, src)
 	pub, err := blockpub.New(ctx, ps, blockpub.Config{
 		OnBlock: ing.Enqueue,
+		Topic:   topic,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("blockpub.New: %w", err)

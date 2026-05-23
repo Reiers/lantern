@@ -63,7 +63,13 @@ func cmdBeacon(args []string) error {
 	certexchSwarm := fs.Bool("certexch-swarm", true, "Issue #6: pull F3 certs from other Lantern beacons over libp2p first, fall back to --certexch-upstream only when no beacon answers. Disable to use the JSON-RPC upstream directly.")
 	certexchPoll := fs.Duration("certexch-poll", 30*time.Second, "How often to pull new F3 certs from upstream.")
 	certexchPeers := fs.String("certexch-peers", "", "Comma-separated multiaddrs of Lantern beacons to pin as cert-exchange upstreams. When empty (default), beacons are discovered dynamically via the DHT rendezvous.")
+	networkFlag := fs.String("network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration")
 	fs.Parse(args)
+
+	network := build.Network(*networkFlag)
+	if !network.Valid() {
+		return fmt.Errorf("invalid --network %q: want one of mainnet, calibration", *networkFlag)
+	}
 
 	cacheBytes, err := parseSize(*cacheSizeStr)
 	if err != nil {
@@ -97,7 +103,7 @@ func cmdBeacon(args []string) error {
 	// 2) libp2p host with Bitswap server-side enabled (default for boxo.New).
 	hcfg := llibp2p.HostConfig{
 		ListenAddrs:    strings.Split(*listen, ","),
-		BootstrapPeers: build.MainnetBootstrapPeers,
+		BootstrapPeers: network.BootstrapPeers(),
 		MinPeers:       100,
 		MaxPeers:       200,
 		UserAgent:      "lantern-beacon/" + buildinfo.BuildVersion(),
@@ -118,7 +124,7 @@ func cmdBeacon(args []string) error {
 	// with real Filecoin nodes; default /ipfs prefix talks to nobody
 	// in the Filecoin swarm and the routing table evicts every peer
 	// that fails the handshake.
-	dhtPrefix := protocol.ID(fmt.Sprintf("/fil/kad/%s", build.MainnetNetworkName))
+	dhtPrefix := protocol.ID(fmt.Sprintf("/fil/kad/%s", network.NetworkName()))
 	kdht, err := dht.New(ctx, host.H,
 		dht.Mode(dht.ModeServer),
 		dht.ProtocolPrefix(dhtPrefix),
@@ -137,7 +143,8 @@ func cmdBeacon(args []string) error {
 	// bootstrap floor. The beacon's DHT is server-mode (it contributes
 	// routing), but the discovery walks are mode-agnostic.
 	host.RunDHTDiscovery(ctx, kdht, llibp2p.DHTOptions{
-		BootstrapPeers: build.MainnetBootstrapPeers,
+		BootstrapPeers: network.BootstrapPeers(),
+		NetworkName:    network.NetworkName(),
 	})
 
 	// 4) Bitswap (client+server). Server-side is enabled by default;
@@ -196,6 +203,7 @@ func cmdBeacon(args []string) error {
 			pinnedPeers:     *certexchPeers,
 			rendezvousKDHT:  kdht,
 			announceEnabled: *announceDHT,
+			network:         network,
 		}
 		if err := startCertExch(ctx, host, cfg); err != nil {
 			fmt.Printf("WARN cert-exchange responder: %v\n", err)
@@ -232,6 +240,7 @@ type certExchConfig struct {
 	pinnedPeers     string        // optional comma-separated multiaddrs
 	rendezvousKDHT  *dht.IpfsDHT  // DHT for rendezvous discovery (nil when no DHT)
 	announceEnabled bool          // whether we're announcing under the rendezvous (only then can we find others)
+	network         build.Network // selects the F3 manifest + anchor profile
 }
 
 // startCertExch wires up the F3 cert-exchange responder on the beacon's
@@ -245,11 +254,11 @@ type certExchConfig struct {
 // swarm-native at the cert-source layer instead of leaking through
 // to Glif.
 func startCertExch(ctx context.Context, h *llibp2p.Host, cfg certExchConfig) error {
-	a, err := anchor.Embedded("mainnet")
+	a, err := anchor.Embedded(cfg.network.String())
 	if err != nil {
 		return fmt.Errorf("load anchor: %w", err)
 	}
-	mf, err := f3pkg.ParseManifest(build.F3ManifestMainnetJSON)
+	mf, err := f3pkg.ParseManifest(cfg.network.F3Manifest())
 	if err != nil {
 		return fmt.Errorf("parse manifest: %w", err)
 	}
