@@ -170,6 +170,10 @@ type FullNode interface {
 	NetBandwidthStats(ctx context.Context) (NetBandwidthStats, error)
 	NetAutoNatStatus(ctx context.Context) (NatInfo, error)
 	EthBlockNumber(ctx context.Context) (string, error)
+	EthChainId(ctx context.Context) (string, error)
+	EthAccounts(ctx context.Context) ([]string, error)
+	EthMaxPriorityFeePerGas(ctx context.Context) (string, error)
+	EthGasPrice(ctx context.Context) (string, error)
 }
 
 // NetBandwidthStats mirrors libp2p/core/metrics.Stats. Re-declared here so

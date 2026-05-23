@@ -73,13 +73,28 @@ func New(cfg Config, node api.FullNode) (*Server, error) {
 		return nil, fmt.Errorf("init auth: %w", err)
 	}
 
-	rs := jsonrpc.NewServer()
+	// Custom method-name formatter so the same handler struct can be
+	// registered under both:
+	//   - 'Filecoin' namespace as `Filecoin.MethodName` (Lotus-compat)
+	//   - 'eth' namespace as `eth_methodName` (viem / synapse-sdk)
+	// Lantern issue #26 (eth_* coverage): the FoC client stack speaks
+	// `eth_*` exclusively, so we register the Eth* handlers in both
+	// namespaces without duplicating the Go methods.
+	rs := jsonrpc.NewServer(jsonrpc.WithServerMethodNameFormatter(lanternMethodNameFormatter))
 
 	// Register the FullNode directly. Lotus uses a permission-decorated
 	// proxy struct (FullNodeStruct) with auto-generated method shims; for
 	// Lantern V1 we enforce perms at the HTTP middleware (Auth.handle) by
 	// mapping method name prefixes to required scope.
 	rs.Register("Filecoin", node)
+
+	// Also register under the 'eth' namespace so synapse-sdk + viem +
+	// any other web3 client can speak eth_* directly. The ethAPI
+	// wrapper exposes ONLY the Ethereum-API methods (not the entire
+	// FullNode surface) so `eth_chainHead` etc. don't accidentally
+	// land on the wire just because the underlying handler has those
+	// methods.
+	rs.Register("eth", newEthAPI(node))
 
 	mux := http.NewServeMux()
 	authHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -494,4 +509,37 @@ func jsonRPCError(w http.ResponseWriter, err error) {
 	w.WriteHeader(http.StatusOK)
 	body := fmt.Sprintf(`{"jsonrpc":"2.0","error":{"code":-32000,"message":%q},"id":null}`, err.Error())
 	_, _ = io.WriteString(w, body)
+}
+
+// lanternMethodNameFormatter assembles JSON-RPC method names from
+// (namespace, GoMethodName) pairs to match the wire-formats real
+// clients expect.
+//
+// - 'Filecoin' namespace: 'Filecoin.MethodName' (Lotus / Curio convention)
+// - 'eth' namespace:      'eth_methodName'      (Ethereum / viem / synapse-sdk)
+// - everything else:      '<ns>.MethodName'     (default behaviour)
+//
+// For the 'eth' namespace, the Go method names already follow the
+// convention `EthBlockNumber`, `EthChainId`, etc., so this formatter
+// strips the 'Eth' prefix and lower-cases the first remaining char:
+//   EthBlockNumber → eth_blockNumber
+//   EthChainId     → eth_chainId
+//   EthGetBalance  → eth_getBalance
+//
+// Methods that don't start with 'Eth' are still registered (without
+// the prefix-strip) so a future RPC method named e.g. `Subscribe`
+// would surface as `eth_subscribe`.
+func lanternMethodNameFormatter(namespace, method string) string {
+	if namespace == "eth" {
+		stripped := method
+		if len(method) > 3 && method[:3] == "Eth" {
+			stripped = method[3:]
+		}
+		if len(stripped) > 0 {
+			// lowercase first char
+			stripped = string(stripped[0]|0x20) + stripped[1:]
+		}
+		return "eth_" + stripped
+	}
+	return namespace + "." + method
 }

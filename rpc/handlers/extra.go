@@ -18,6 +18,7 @@ import (
 	"github.com/ipfs/go-cid"
 
 	"github.com/Reiers/lantern/api"
+	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/types"
 	"github.com/Reiers/lantern/state/actors"
 )
@@ -232,6 +233,52 @@ func (c *ChainAPI) EthBlockNumber(_ context.Context) (string, error) {
 		epoch = 0
 	}
 	return fmt.Sprintf("0x%x", epoch), nil
+}
+
+// EthChainId returns the Ethereum-style chain identifier for the active
+// Filecoin network. Filecoin's mapping:
+//   mainnet     → 314    (0x13a)
+//   calibration → 314159 (0x4cb2f)
+//
+// These are the published EIP-155 chain IDs; viem and synapse-sdk use
+// them to scope signatures + reject cross-chain replays.
+func (c *ChainAPI) EthChainId(_ context.Context) (string, error) {
+	switch c.NetworkName {
+	case "calibration":
+		return "0x4cb2f", nil // 314159
+	default:
+		return "0x13a", nil // 314
+	}
+}
+
+// EthAccounts returns an empty array. Lantern does not expose its
+// wallet via eth_accounts because the keystore is administrator-only
+// and clients sign locally with their own keys. Matches Glif's
+// behaviour: returns [] on every call.
+func (c *ChainAPI) EthAccounts(_ context.Context) ([]string, error) {
+	return []string{}, nil
+}
+
+// EthMaxPriorityFeePerGas returns "0x0". Filecoin's fee market has no
+// tip / priority-fee concept: gas is paid out of (baseFee + premium)
+// where the premium is set per-message. EIP-1559-style tipping is not
+// applicable. viem clients use this method during transaction
+// preparation; returning 0 lets the call succeed without setting a tip.
+func (c *ChainAPI) EthMaxPriorityFeePerGas(_ context.Context) (string, error) {
+	return "0x0", nil
+}
+
+// EthGasPrice returns the chain's current floor base fee in attoFIL,
+// hex-encoded. This is the EIP-1559 'gasPrice' compatibility shim;
+// strictly speaking Filecoin uses base-fee + premium per message, but
+// reporting MinimumBaseFee gives viem clients a workable estimate
+// when they call gasPrice during transaction preparation.
+//
+// TODO(#26): when we wire chain-head base-fee tracking, return the
+// actual head base-fee instead of the protocol minimum. For now,
+// MinimumBaseFee is the safe floor.
+func (c *ChainAPI) EthGasPrice(_ context.Context) (string, error) {
+	return fmt.Sprintf("0x%x", build.MinimumBaseFee), nil
 }
 
 // NetBandwidthStats returns the live libp2p BandwidthCounter totals. The
