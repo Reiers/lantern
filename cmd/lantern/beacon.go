@@ -228,6 +228,16 @@ func cmdBeacon(args []string) error {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 	fmt.Println("\nShutting down...")
+
+	// Cancel root context so every long-running subsystem (DHT
+	// discovery, Bitswap, cert-exchange, etc.) winds down promptly.
+	// Without this, defers + the daemon's natural goroutine teardown
+	// race against process exit. See lantern#31.
+	cancel()
+
+	// Small grace so subsystems observe Done before the deferred
+	// host.Close / Badger.Close fire.
+	time.Sleep(500 * time.Millisecond)
 	return nil
 }
 
