@@ -148,7 +148,7 @@ func cmdRepair(args []string) error {
 		fmt.Println("✗ Refusing to overwrite trust anchor — quorum not reached.")
 		return err
 	}
-	if err := writeBootstrapAnchor(dir, fin); err != nil {
+	if err := writeBootstrapAnchor(dir, fin, filNet); err != nil {
 		return err
 	}
 	fmt.Println()

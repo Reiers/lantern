@@ -241,7 +241,7 @@ func (d *dashboardDeps) actionRenewAnchor(ctx context.Context) actionResult {
 			Detail:  map[string]any{"sources": progressLog},
 		}
 	}
-	if err := writeBootstrapAnchor(d.dataDirPath, fin); err != nil {
+	if err := writeBootstrapAnchor(d.dataDirPath, fin, build.Network(d.network)); err != nil {
 		fmt.Fprintf(os.Stderr, "dashboard action renew-anchor: anchor write failed: %v\n", err)
 		return actionResult{Status: "error", Message: "failed to write anchor: " + err.Error()}
 	}
