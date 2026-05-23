@@ -183,6 +183,12 @@ type FullNode interface {
 	EthGetTransactionCount(ctx context.Context, addr string, blockParam any) (string, error)
 	EthGetTransactionReceipt(ctx context.Context, txHash string) (any, error)
 	EthFeeHistory(ctx context.Context, blockCount string, newestBlock string, rewardPercentiles []float64) (any, error)
+	EthGetTransactionByHash(ctx context.Context, txHash string) (any, error)
+	EthGetTransactionByBlockNumberAndIndex(ctx context.Context, blockParam string, index string) (any, error)
+	EthGetCode(ctx context.Context, addr string, blockParam any) (string, error)
+	EthGetStorageAt(ctx context.Context, addr string, key string, blockParam any) (string, error)
+	EthGetBlockByHash(ctx context.Context, blockHash string, fullTx bool) (any, error)
+	EthGetLogs(ctx context.Context, filter any) (any, error)
 }
 
 // NetBandwidthStats mirrors libp2p/core/metrics.Stats. Re-declared here so

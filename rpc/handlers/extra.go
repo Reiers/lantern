@@ -670,3 +670,92 @@ func (c *ChainAPI) NetAutoNatStatus(_ context.Context) (api.NatInfo, error) {
 	}
 	return c.NetInfoSource.AutoNatStatus(), nil
 }
+
+// ─── lite-node eth tx + state methods, all VMBridge-forwarded ────────
+// Lantern's local state tree doesn't include FEVM execution + indexed
+// message lookups today (see lantern#3 and the storage backfill work).
+// Forward these to the configured upstream so curio-core's tx-builder
+// path + retrieval-side clients keep working. Migrate to local state
+// once the backfill catches up.
+//
+// All errors propagated verbatim; clients see the same status they
+// would talking to the upstream directly.
+
+// EthGetTransactionByHash returns a previously-broadcast transaction
+// by its hash, or null if not found.
+func (c *ChainAPI) EthGetTransactionByHash(ctx context.Context, txHash string) (any, error) {
+	return c.forwardEth(ctx, "eth_getTransactionByHash", []any{txHash})
+}
+
+// EthGetTransactionByBlockNumberAndIndex returns a transaction in a
+// specific block by position.
+func (c *ChainAPI) EthGetTransactionByBlockNumberAndIndex(ctx context.Context, blockParam string, index string) (any, error) {
+	return c.forwardEth(ctx, "eth_getTransactionByBlockNumberAndIndex", []any{blockParam, index})
+}
+
+// EthGetCode returns the deployed contract bytecode at an address.
+// Used by every ethclient.CodeAt call (e.g. wallet detection, contract
+// presence checks before calling).
+func (c *ChainAPI) EthGetCode(ctx context.Context, addr string, blockParam any) (string, error) {
+	raw, err := c.forwardEth(ctx, "eth_getCode", []any{addr, blockParam})
+	if err != nil {
+		return "", err
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return "", xerrors.Errorf("eth_getCode: unexpected result type %T", raw)
+	}
+	return s, nil
+}
+
+// EthGetStorageAt returns the raw 32-byte storage slot value at the
+// given key on the given contract.
+func (c *ChainAPI) EthGetStorageAt(ctx context.Context, addr string, key string, blockParam any) (string, error) {
+	raw, err := c.forwardEth(ctx, "eth_getStorageAt", []any{addr, key, blockParam})
+	if err != nil {
+		return "", err
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return "", xerrors.Errorf("eth_getStorageAt: unexpected result type %T", raw)
+	}
+	return s, nil
+}
+
+// EthGetBlockByHash returns the ETH-shaped block for the given hash.
+// Mirrors EthGetBlockByNumber's behaviour: prefer local header store
+// if present, otherwise forward to the bridge.
+func (c *ChainAPI) EthGetBlockByHash(ctx context.Context, blockHash string, fullTx bool) (any, error) {
+	// We don't have hash-indexed local block lookup yet; always forward.
+	return c.forwardEth(ctx, "eth_getBlockByHash", []any{blockHash, fullTx})
+}
+
+// EthGetLogs returns logs matching the provided filter. Heavily used
+// by client-side payment rail watchers (FilecoinPay rail event
+// indexing). Lantern doesn't run an FEVM log index of its own; the
+// upstream's index is the source of truth.
+func (c *ChainAPI) EthGetLogs(ctx context.Context, filter any) (any, error) {
+	return c.forwardEth(ctx, "eth_getLogs", []any{filter})
+}
+
+// forwardEth is the common shape: marshal params, post to bridge,
+// return the result blob untouched. Callers may type-assert if they
+// need a specific shape.
+func (c *ChainAPI) forwardEth(ctx context.Context, method string, params []any) (any, error) {
+	if c.Bridge == nil {
+		return nil, errBridgeUnconfigured
+	}
+	payload, err := json.Marshal(params)
+	if err != nil {
+		return nil, xerrors.Errorf("marshal %s params: %w", method, err)
+	}
+	raw, err := c.Bridge.RawJSONRPC(ctx, method, payload)
+	if err != nil {
+		return nil, xerrors.Errorf("bridge %s: %w", method, err)
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, xerrors.Errorf("decode %s result: %w", method, err)
+	}
+	return out, nil
+}
