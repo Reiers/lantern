@@ -34,22 +34,25 @@ func newEthAPI(full api.FullNode) *ethAPI {
 
 // --- Coverage ledger ----------------------------------------------------
 //
-// Implemented:
-//   eth_blockNumber  → mirrors Filecoin chain epoch
+// Implemented (eth_* + Filecoin.Eth*):
+//   eth_blockNumber          mirrors Filecoin chain epoch
+//   eth_chainId              314 mainnet / 314159 calibration
+//   eth_accounts             []
+//   eth_maxPriorityFeePerGas "0x0" (Filecoin has no tip)
+//   eth_gasPrice             MinimumBaseFee (TODO: live base-fee)
+//   eth_syncing              false (light client always anchored)
+//   eth_getBalance           state.Accessor.GetActor + balance lookup
+//   eth_getBlockByNumber     HeaderStore.GetTipSetByHeight + ETH reshape
 //
-// Not implemented yet (see Reiers/lantern#26 for the full matrix):
-//   eth_chainId               cheap; needs build.Network → 314 / 314159
+// Not implemented yet (see Reiers/lantern#30 for VMBridge plan):
 //   eth_call                  HARD: needs FEVM execution. Forward via
 //                             VMBridge to upstream Forest/Lotus.
-//   eth_getBalance            implementable: state.Accessor.GetActor + balance
-//   eth_gasPrice              implementable: read MinimumBaseFee from chain
 //   eth_estimateGas           HARD: needs FEVM. Forward via VMBridge.
-//   eth_getTransactionCount   needs state nonce lookup
-//   eth_getTransactionReceipt needs message + receipt indexing
-//   eth_sendRawTransaction    needs FEVM mempool admission. Forward via
-//                             VMBridge (similar to AllowBlockSubmit path).
-//   eth_accounts              returns []string{} (clients use their own keystore)
-//   eth_maxPriorityFeePerGas  returns "0x0" (Filecoin doesn't tip)
+//   eth_sendRawTransaction    HARD: needs FEVM mempool admission.
+//                             Forward via VMBridge.
+//   eth_getTransactionCount   medium: state nonce lookup
+//   eth_getTransactionByHash  hard: needs message indexing
+//   eth_getTransactionReceipt hard: needs receipt indexing
 // ------------------------------------------------------------------------
 
 // EthBlockNumber returns the current head epoch as a 0x-prefixed hex
@@ -78,4 +81,19 @@ func (e *ethAPI) EthMaxPriorityFeePerGas(ctx context.Context) (string, error) {
 // gas-price quote.
 func (e *ethAPI) EthGasPrice(ctx context.Context) (string, error) {
 	return e.full.EthGasPrice(ctx)
+}
+
+// EthSyncing returns false; Lantern is always anchored to its trust root.
+func (e *ethAPI) EthSyncing(ctx context.Context) (any, error) {
+	return e.full.EthSyncing(ctx)
+}
+
+// EthGetBalance returns the balance of an Ethereum-shaped address.
+func (e *ethAPI) EthGetBalance(ctx context.Context, addr string, blockParam any) (string, error) {
+	return e.full.EthGetBalance(ctx, addr, blockParam)
+}
+
+// EthGetBlockByNumber returns an ETH-shaped block for the given epoch.
+func (e *ethAPI) EthGetBlockByNumber(ctx context.Context, blockParam string, fullTx bool) (any, error) {
+	return e.full.EthGetBlockByNumber(ctx, blockParam, fullTx)
 }
