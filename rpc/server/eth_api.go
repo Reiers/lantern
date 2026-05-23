@@ -44,15 +44,15 @@ func newEthAPI(full api.FullNode) *ethAPI {
 //   eth_getBalance           state.Accessor.GetActor + balance lookup
 //   eth_getBlockByNumber     HeaderStore.GetTipSetByHeight + ETH reshape
 //
-// Not implemented yet (see Reiers/lantern#30 for VMBridge plan):
-//   eth_call                  HARD: needs FEVM execution. Forward via
-//                             VMBridge to upstream Forest/Lotus.
-//   eth_estimateGas           HARD: needs FEVM. Forward via VMBridge.
-//   eth_sendRawTransaction    HARD: needs FEVM mempool admission.
-//                             Forward via VMBridge.
-//   eth_getTransactionCount   medium: state nonce lookup
-//   eth_getTransactionByHash  hard: needs message indexing
-//   eth_getTransactionReceipt hard: needs receipt indexing
+// Implemented via VMBridge forwarding (lantern#30):
+//   eth_call                  forwarded to upstream Forest/Lotus for FEVM execution
+//   eth_estimateGas           forwarded to upstream Forest/Lotus
+//   eth_sendRawTransaction    forwarded to upstream Forest/Lotus mempool
+//
+// Not implemented yet:
+//   eth_getTransactionCount   medium: state nonce lookup (could be local)
+//   eth_getTransactionByHash  hard: needs message indexing or VMBridge forward
+//   eth_getTransactionReceipt hard: needs receipt indexing or VMBridge forward
 // ------------------------------------------------------------------------
 
 // EthBlockNumber returns the current head epoch as a 0x-prefixed hex
@@ -96,4 +96,21 @@ func (e *ethAPI) EthGetBalance(ctx context.Context, addr string, blockParam any)
 // EthGetBlockByNumber returns an ETH-shaped block for the given epoch.
 func (e *ethAPI) EthGetBlockByNumber(ctx context.Context, blockParam string, fullTx bool) (any, error) {
 	return e.full.EthGetBlockByNumber(ctx, blockParam, fullTx)
+}
+
+// EthCall forwards to the VMBridge for FEVM execution. Returns an
+// error pointing at --vm-bridge-rpc when no bridge is configured.
+func (e *ethAPI) EthCall(ctx context.Context, callObj any, blockParam any) (string, error) {
+	return e.full.EthCall(ctx, callObj, blockParam)
+}
+
+// EthEstimateGas forwards to the VMBridge for FEVM execution.
+func (e *ethAPI) EthEstimateGas(ctx context.Context, callObj any) (string, error) {
+	return e.full.EthEstimateGas(ctx, callObj)
+}
+
+// EthSendRawTransaction forwards a signed raw tx to the VMBridge
+// upstream for mempool admission.
+func (e *ethAPI) EthSendRawTransaction(ctx context.Context, signedTxHex string) (string, error) {
+	return e.full.EthSendRawTransaction(ctx, signedTxHex)
 }

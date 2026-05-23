@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -20,6 +21,9 @@ type mockBridge struct {
 }
 
 func (m *mockBridge) Provenance() string { return "mock" }
+func (m *mockBridge) RawJSONRPC(_ context.Context, _ string, _ json.RawMessage) (json.RawMessage, error) {
+	return nil, errors.New("mockBridge: RawJSONRPC not used in this test")
+}
 func (m *mockBridge) ComputeStateRoot(_ context.Context, _ cid.Cid, _ int64, msgs []*types.Message) (cid.Cid, []*types.MessageReceipt, error) {
 	m.calls++
 	recs := make([]*types.MessageReceipt, len(msgs))
@@ -126,6 +130,9 @@ func TestCachingBridge_Eviction(t *testing.T) {
 type errBridge struct{}
 
 func (errBridge) Provenance() string { return "err" }
+func (errBridge) RawJSONRPC(_ context.Context, _ string, _ json.RawMessage) (json.RawMessage, error) {
+	return nil, errors.New("errBridge: RawJSONRPC not used in this test")
+}
 func (errBridge) ComputeStateRoot(_ context.Context, _ cid.Cid, _ int64, _ []*types.Message) (cid.Cid, []*types.MessageReceipt, error) {
 	return cid.Undef, nil, errors.New("upstream unreachable")
 }

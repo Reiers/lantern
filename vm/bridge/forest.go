@@ -220,3 +220,61 @@ func truncate(s string, n int) string {
 	}
 	return s[:n] + "..."
 }
+
+// RawJSONRPC forwards an arbitrary JSON-RPC method call to the upstream
+// Forest/Lotus node. Used by handlers for FEVM-shaped methods
+// (eth_call, eth_estimateGas, eth_sendRawTransaction) that Lantern's
+// native Send-only VM can't execute.
+//
+// `params` is already-marshaled JSON. The upstream's `result` is
+// returned verbatim as json.RawMessage so the caller can decode it
+// with the shape it expects.
+func (f *ForestBridge) RawJSONRPC(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
+	if params == nil {
+		params = json.RawMessage("[]")
+	}
+	body, err := json.Marshal(map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  method,
+		"params":  params,
+		"id":      1,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ForestBridge: marshal rpc body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", f.URL, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("ForestBridge: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if f.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+f.Token)
+	}
+
+	resp, err := f.Client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ForestBridge: %s rpc call: %w", method, err)
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("ForestBridge: read response: %w", err)
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("ForestBridge: HTTP %d on %s: %s", resp.StatusCode, method, truncate(string(respBody), 256))
+	}
+
+	var envelope struct {
+		Result json.RawMessage `json:"result"`
+		Error  *jsonRPCError   `json:"error"`
+	}
+	if err := json.Unmarshal(respBody, &envelope); err != nil {
+		return nil, fmt.Errorf("ForestBridge: decode response: %w (body=%s)", err, truncate(string(respBody), 256))
+	}
+	if envelope.Error != nil {
+		return nil, fmt.Errorf("ForestBridge: upstream %s on %s: code=%d %s",
+			f.Provenance(), method, envelope.Error.Code, envelope.Error.Message)
+	}
+	return envelope.Result, nil
+}

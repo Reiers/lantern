@@ -11,6 +11,7 @@ package handlers
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	stdbig "math/big"
@@ -447,6 +448,98 @@ func (c *ChainAPI) EthGetBlockByNumber(ctx context.Context, blockParam string, _
 		// that know about Filecoin can disambiguate sibling blocks.
 		"filecoinTipsetCids": cidStrs,
 	}, nil
+}
+
+// --- FEVM bridge-forwarding handlers (lantern#30) -----------------------
+//
+// Lantern's native VM is a gas-accurate Send-only shell; it can't
+// execute FEVM bytecode. The three eth_* methods below forward to an
+// upstream Forest/Lotus via the existing VMBridge. When --vm-bridge-rpc
+// isn't configured, they return ErrNotImpl with a pointer at the flag.
+//
+// Architectural note: this preserves the 'no Glif sidecar' promise.
+// 'No Glif sidecar' means 'no DEPENDENCY on Glif.' Operators with
+// their own Lotus/Forest use that as the FEVM oracle via VMBridge.
+// Glif is just one possible VMBridge target.
+// ------------------------------------------------------------------------
+
+// errBridgeUnconfigured is returned when an FEVM-requiring method is
+// called on a daemon without --vm-bridge-rpc. The message points at
+// the flag so operators can self-diagnose.
+var errBridgeUnconfigured = xerrors.New("FEVM method requires --vm-bridge-rpc pointing at a Forest/Lotus node")
+
+// EthCall forwards an eth_call to the upstream VM bridge.
+// Synapse-SDK / viem `readContract` / `simulateContract` calls hit
+// this method.
+//
+// We pass the request through verbatim — the upstream is responsible
+// for executing the FEVM bytecode. Lantern's contribution is its
+// trust-anchored chain head (we don't speak the FEVM ourselves, but
+// we know which block to ask about).
+func (c *ChainAPI) EthCall(ctx context.Context, callObj any, blockParam any) (string, error) {
+	if c.Bridge == nil {
+		return "", errBridgeUnconfigured
+	}
+	params, err := json.Marshal([]any{callObj, blockParam})
+	if err != nil {
+		return "", xerrors.Errorf("marshal eth_call params: %w", err)
+	}
+	raw, err := c.Bridge.RawJSONRPC(ctx, "eth_call", params)
+	if err != nil {
+		return "", xerrors.Errorf("bridge eth_call: %w", err)
+	}
+	var out string
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", xerrors.Errorf("decode eth_call result: %w", err)
+	}
+	return out, nil
+}
+
+// EthEstimateGas forwards an eth_estimateGas to the upstream VM bridge.
+// viem `writeContract` calls this during transaction preparation to
+// size the gas limit.
+func (c *ChainAPI) EthEstimateGas(ctx context.Context, callObj any) (string, error) {
+	if c.Bridge == nil {
+		return "", errBridgeUnconfigured
+	}
+	params, err := json.Marshal([]any{callObj})
+	if err != nil {
+		return "", xerrors.Errorf("marshal eth_estimateGas params: %w", err)
+	}
+	raw, err := c.Bridge.RawJSONRPC(ctx, "eth_estimateGas", params)
+	if err != nil {
+		return "", xerrors.Errorf("bridge eth_estimateGas: %w", err)
+	}
+	var out string
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", xerrors.Errorf("decode eth_estimateGas result: %w", err)
+	}
+	return out, nil
+}
+
+// EthSendRawTransaction forwards a signed raw transaction to the
+// upstream VM bridge for mempool admission. The transaction's hash
+// is returned verbatim from the upstream.
+//
+// Note: clients sign locally; Lantern never touches their private
+// keys. We just relay the wire bytes.
+func (c *ChainAPI) EthSendRawTransaction(ctx context.Context, signedTxHex string) (string, error) {
+	if c.Bridge == nil {
+		return "", errBridgeUnconfigured
+	}
+	params, err := json.Marshal([]any{signedTxHex})
+	if err != nil {
+		return "", xerrors.Errorf("marshal eth_sendRawTransaction params: %w", err)
+	}
+	raw, err := c.Bridge.RawJSONRPC(ctx, "eth_sendRawTransaction", params)
+	if err != nil {
+		return "", xerrors.Errorf("bridge eth_sendRawTransaction: %w", err)
+	}
+	var txHash string
+	if err := json.Unmarshal(raw, &txHash); err != nil {
+		return "", xerrors.Errorf("decode eth_sendRawTransaction result: %w", err)
+	}
+	return txHash, nil
 }
 
 // firstCidOrEmpty returns the first CID's string or a 32-byte zero hex.
