@@ -17,6 +17,8 @@ package server
 
 import (
 	"context"
+	"fmt"
+	stdbig "math/big"
 
 	"github.com/Reiers/lantern/api"
 )
@@ -132,4 +134,36 @@ func (e *ethAPI) EthGetTransactionReceipt(ctx context.Context, txHash string) (a
 // Forwarded to the VMBridge.
 func (e *ethAPI) EthFeeHistory(ctx context.Context, blockCount string, newestBlock string, rewardPercentiles []float64) (any, error) {
 	return e.full.EthFeeHistory(ctx, blockCount, newestBlock, rewardPercentiles)
+}
+
+// netAPI implements the small "net_*" namespace. Go-ethereum's
+// ethclient.NetworkID() calls net_version (returns the chain ID as a
+// decimal string). Adding the entire namespace as a sibling to eth_*
+// keeps the wire shape predictable.
+type netAPI struct {
+	full api.FullNode
+}
+
+func newNetAPI(full api.FullNode) *netAPI {
+	return &netAPI{full: full}
+}
+
+// NetVersion returns the decimal chain ID. Matches eth_chainId's
+// integer value but in decimal string form, which is what net_version
+// returns on every Ethereum-compat node.
+func (n *netAPI) NetVersion(ctx context.Context) (string, error) {
+	chainHex, err := n.full.EthChainId(ctx)
+	if err != nil {
+		return "", err
+	}
+	// Convert 0x-hex chain id to decimal string.
+	s := chainHex
+	if len(s) >= 2 && (s[:2] == "0x" || s[:2] == "0X") {
+		s = s[2:]
+	}
+	v, ok := new(stdbig.Int).SetString(s, 16)
+	if !ok {
+		return "", fmt.Errorf("netAPI: bad chain id hex %q", chainHex)
+	}
+	return v.String(), nil
 }
