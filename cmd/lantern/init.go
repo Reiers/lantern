@@ -45,19 +45,46 @@ func (p *peerList) Set(v string) error { *p = append(*p, v); return nil }
 func cmdInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	noWallet := fs.Bool("no-wallet", false, "Skip creating a wallet")
-	quorum := fs.Int("bootstrap-quorum", 5, "Number of agreeing sources required before writing the trust anchor (≥1). Set to 0 to skip the quorum check (NOT recommended outside testing).")
+	quorum := fs.Int("bootstrap-quorum", 0, "Number of agreeing sources required before writing the trust anchor (≥1). Set to 0 to use the network-default (mainnet=5, calibration=3) or skip the quorum check with --bootstrap-quorum=-1 (NOT recommended outside testing).")
 	timeout := fs.Duration("bootstrap-timeout", 60*time.Second, "Total wall-clock budget for the bootstrap quorum")
 	gateway := fs.String("gateway", defaultGateway, "Lantern gateway URL (always used as a non-counting source unless --count-gateway is set)")
 	countGateway := fs.Bool("count-gateway", false, "Count the Lantern gateway in the quorum tally (default false; not recommended)")
 	noLibp2p := fs.Bool("no-libp2p", false, "Skip libp2p sources (use only HTTP RPC sources). Useful for environments without inbound networking.")
 	libp2pSettle := fs.Duration("libp2p-settle", 8*time.Second, "Wait this long for libp2p bootstrap connections to settle before running the quorum probe")
-	network := fs.String("network", "filecoin", "F3 network name (e.g. filecoin for mainnet)")
+	network := fs.String("network", "filecoin", "F3 network name. DEPRECATED: prefer --filecoin-network which selects the F3 manifest automatically.")
+	filNetwork := fs.String("filecoin-network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration. Drives bootstrap peers, public RPC sources, and F3 manifest selection.")
 	var peers peerList
 	fs.Var(&peers, "peer", "Additional finality source URL (repeatable). Format: URL or URL|TOKEN")
 	fs.Parse(args)
 
+	filNet := build.Network(*filNetwork)
+	if !filNet.Valid() {
+		return fmt.Errorf("invalid --filecoin-network %q: want one of mainnet, calibration", *filNetwork)
+	}
+	// Auto-resolve F3 NetworkName from the selected filecoin-network if
+	// the caller didn't override --network. Mainnet F3 NetworkName is
+	// 'filecoin'; calibration's is 'calibrationnet2' (per the embedded
+	// f3manifest_*.json files).
+	if *network == "filecoin" && filNet == build.Calibration {
+		*network = "calibrationnet2"
+	}
+	// Resolve the quorum default based on the selected network. Mainnet
+	// has 5+ independent public sources; calibration today has 1
+	// (Glif calibration). We drop to 3-of-N for calibration to allow
+	// libp2p sources to make up the quorum.
+	if *quorum == 0 {
+		if filNet == build.Calibration {
+			*quorum = 3
+		} else {
+			*quorum = 5
+		}
+	} else if *quorum < 0 {
+		*quorum = 0 // explicit 'skip' signal
+	}
+
 	dir := dataDir()
 	printBanner(dir)
+	fmt.Printf("▸ Filecoin network: %s  (F3 NetworkName: %s)\n", filNet, *network)
 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -82,6 +109,7 @@ func cmdInit(args []string) error {
 			NoLibp2p:     *noLibp2p,
 			Libp2pSettle: *libp2pSettle,
 			NetworkName:  *network,
+			Network:      filNet,
 			UserPeers:    []string(peers),
 			Progress:     prettyProgress,
 		})
@@ -153,7 +181,8 @@ type bootstrapParams struct {
 	CountGateway bool
 	NoLibp2p     bool
 	Libp2pSettle time.Duration
-	NetworkName  string
+	NetworkName  string        // F3 network name (e.g. filecoin, calibrationnet2)
+	Network      build.Network // mainnet | calibration; drives source-set selection
 	UserPeers    []string
 	// Progress is called once per completed source. If nil, no progress
 	// output is printed.
@@ -177,8 +206,12 @@ func runBootstrapQuorum(ctx context.Context, p bootstrapParams) (bootstrap.Final
 	var host *llibp2p.Host
 	if !p.NoLibp2p {
 		fmt.Println("    libp2p host: starting...")
+		bootPeers := p.Network.BootstrapPeers()
+		if len(bootPeers) == 0 {
+			bootPeers = build.MainnetBootstrapPeers
+		}
 		hcfg := llibp2p.HostConfig{
-			BootstrapPeers: build.MainnetBootstrapPeers,
+			BootstrapPeers: bootPeers,
 			MinPeers:       20,
 			MaxPeers:       100,
 			UserAgent:      "lantern-bootstrap/0.1",
@@ -197,11 +230,19 @@ func runBootstrapQuorum(ctx context.Context, p bootstrapParams) (bootstrap.Final
 		}
 	}
 
-	// 2. Assemble source set.
+	// 2. Assemble source set. Calibration uses CalibnetPublicForestURLs
+	// (single endpoint today: Glif calibration); mainnet uses
+	// MainnetPublicForestURLs (Glif + chain.love).
+	publicForest := sources.MainnetPublicForestURLs
+	bootPeers := build.MainnetBootstrapPeers
+	if p.Network == build.Calibration {
+		publicForest = sources.CalibnetPublicForestURLs
+		bootPeers = build.CalibnetBootstrapPeers
+	}
 	srcs := sources.BuildDefaultSources(sources.SourceSetConfig{
 		Host:                  hostHandle(host),
-		MainnetBootstrapPeers: build.MainnetBootstrapPeers,
-		PublicForestURLs:      sources.MainnetPublicForestURLs,
+		MainnetBootstrapPeers: bootPeers,
+		PublicForestURLs:      publicForest,
 		LanternGatewayURL:     p.Gateway,
 		UserPeerURLs:          p.UserPeers,
 		NetworkName:           gpbftNetworkName(p.NetworkName),

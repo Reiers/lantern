@@ -52,6 +52,20 @@ var MainnetPublicForestURLs = []string{
 	"https://api.chain.love/rpc/v1",
 }
 
+// CalibnetPublicForestURLs is the calibration subset of the public
+// JSON-RPC endpoints. Use this when bootstrapping a calibration node.
+//
+// Calibration has fewer publicly-curated archive endpoints than
+// mainnet. The quorum config for calibration drops to 3-of-N as a
+// result; operators wanting stricter quorum should add --peer URLs.
+var CalibnetPublicForestURLs = []string{
+	"https://api.calibration.node.glif.io/rpc/v1",
+	// chain.love does NOT run a calibration endpoint as of 2026-05-23
+	// (verified). Add it if/when one comes online.
+	// ChainSafe forest-archive calibration: verify reachability before
+	// adding.
+}
+
 // DefaultPublicForestURLs is the curated set of public Filecoin
 // JSON-RPC endpoints we know publish F3 finality certs. The bootstrap
 // quorum draws from this list when the user does not supply their own

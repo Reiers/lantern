@@ -19,21 +19,38 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/bootstrap"
 )
 
 func cmdDoctor(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
-	quorum := fs.Int("bootstrap-quorum", 5, "Number of agreeing sources required for a healthy verdict")
+	quorum := fs.Int("bootstrap-quorum", 0, "Number of agreeing sources required for a healthy verdict (0 = network-default: mainnet=5, calibration=3)")
 	timeout := fs.Duration("bootstrap-timeout", 60*time.Second, "Total wall-clock budget for the probe")
 	gateway := fs.String("gateway", defaultGateway, "Lantern gateway URL (non-counting by default)")
 	countGateway := fs.Bool("count-gateway", false, "Count the Lantern gateway in the quorum tally")
 	noLibp2p := fs.Bool("no-libp2p", false, "Skip libp2p sources (HTTP only)")
 	libp2pSettle := fs.Duration("libp2p-settle", 8*time.Second, "Bootstrap connection settle delay")
-	network := fs.String("network", "filecoin", "F3 network name")
+	network := fs.String("network", "filecoin", "F3 network name. Auto-derived from --filecoin-network when not set.")
+	filNetwork := fs.String("filecoin-network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration")
 	var peers peerList
 	fs.Var(&peers, "peer", "Additional source URL (repeatable)")
 	fs.Parse(args)
+
+	filNet := build.Network(*filNetwork)
+	if !filNet.Valid() {
+		return fmt.Errorf("invalid --filecoin-network %q: want one of mainnet, calibration", *filNetwork)
+	}
+	if *network == "filecoin" && filNet == build.Calibration {
+		*network = "calibrationnet2"
+	}
+	if *quorum == 0 {
+		if filNet == build.Calibration {
+			*quorum = 3
+		} else {
+			*quorum = 5
+		}
+	}
 
 	dir := dataDir()
 	fmt.Println("Lantern doctor — quorum health check")
@@ -58,6 +75,7 @@ func cmdDoctor(args []string) error {
 		NoLibp2p:     *noLibp2p,
 		Libp2pSettle: *libp2pSettle,
 		NetworkName:  *network,
+		Network:      filNet,
 		UserPeers:    []string(peers),
 		Progress:     prettyProgress,
 	})
@@ -80,16 +98,32 @@ func cmdDoctor(args []string) error {
 
 func cmdRepair(args []string) error {
 	fs := flag.NewFlagSet("repair", flag.ExitOnError)
-	quorum := fs.Int("bootstrap-quorum", 5, "Number of agreeing sources required")
+	quorum := fs.Int("bootstrap-quorum", 0, "Number of agreeing sources required (0 = network-default: mainnet=5, calibration=3)")
 	timeout := fs.Duration("bootstrap-timeout", 60*time.Second, "Total wall-clock budget")
 	gateway := fs.String("gateway", defaultGateway, "Lantern gateway URL")
 	countGateway := fs.Bool("count-gateway", false, "Count the gateway in the quorum")
 	noLibp2p := fs.Bool("no-libp2p", false, "Skip libp2p sources")
 	libp2pSettle := fs.Duration("libp2p-settle", 8*time.Second, "Bootstrap settle delay")
-	network := fs.String("network", "filecoin", "F3 network name")
+	network := fs.String("network", "filecoin", "F3 network name. Auto-derived from --filecoin-network when not set.")
+	filNetwork := fs.String("filecoin-network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration")
 	var peers peerList
 	fs.Var(&peers, "peer", "Additional source URL (repeatable)")
 	fs.Parse(args)
+
+	filNet := build.Network(*filNetwork)
+	if !filNet.Valid() {
+		return fmt.Errorf("invalid --filecoin-network %q: want one of mainnet, calibration", *filNetwork)
+	}
+	if *network == "filecoin" && filNet == build.Calibration {
+		*network = "calibrationnet2"
+	}
+	if *quorum == 0 {
+		if filNet == build.Calibration {
+			*quorum = 3
+		} else {
+			*quorum = 5
+		}
+	}
 
 	dir := dataDir()
 	fmt.Println("Lantern repair — refreshing trust anchor from live swarm")
@@ -105,6 +139,7 @@ func cmdRepair(args []string) error {
 		NoLibp2p:     *noLibp2p,
 		Libp2pSettle: *libp2pSettle,
 		NetworkName:  *network,
+		Network:      filNet,
 		UserPeers:    []string(peers),
 		Progress:     prettyProgress,
 	})
