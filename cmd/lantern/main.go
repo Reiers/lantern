@@ -177,12 +177,112 @@ func splitCSV(s string) []string {
 	return out
 }
 
+// dataDir returns the BASE Lantern data directory. It is shared across
+// networks; per-network state (anchor, header store, keystore, JWT)
+// lives under networkDataDir() below.
+//
+// Service files (launchd plist, systemd unit) live at this level since
+// the service manages the whole install, not a specific network.
 func dataDir() string {
 	if h := os.Getenv("LANTERN_HOME"); h != "" {
 		return h
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".lantern")
+}
+
+// networkDataDir returns the per-network subdirectory under dataDir().
+// All network-scoped state (bootstrap-anchor.json, headerstore/,
+// keystore/, jwt-secret, API tokens) lives here.
+//
+// This isolation matters because: chain heads differ between mainnet
+// and calibration; signing keys for one chain are meaningless on the
+// other; the JWT secret + HMAC'd API tokens are tied to the chain that
+// minted them. Sharing the same directory between two networks was a
+// silent corruption hazard (lantern#27, discovered 2026-05-23 by
+// overwriting the local mainnet anchor with a calibration init).
+//
+// Caller must pass a valid build.Network. Empty/invalid values default
+// to build.DefaultNetwork (mainnet) for backward compatibility with
+// callers that haven't been network-converted yet (info, service).
+func networkDataDir(n build.Network) string {
+	if !n.Valid() {
+		n = build.DefaultNetwork
+	}
+	return filepath.Join(dataDir(), string(n))
+}
+
+// migrateLegacyDataDir moves pre-V1.3 top-level state files into the
+// per-network subdirectory. Idempotent: if the per-network dir already
+// contains state OR the legacy files are gone, this is a no-op.
+//
+// We migrate INTO the specified network because pre-V1.3 Lantern only
+// ran on mainnet. Calibration installs are new and don't have legacy
+// state to migrate; mainnet installs get their old state lifted
+// automatically.
+//
+// Migration target is dataDir()/<network>/. Files migrated:
+//   bootstrap-anchor.json, headerstore/, keystore/, jwt-secret,
+//   token, token-read, token-sign, token-write
+//
+// Anything else at dataDir()/ is left in place (service files, the
+// 'lantern' binary if anyone manually dropped one, future top-level
+// files).
+func migrateLegacyDataDir(n build.Network) error {
+	if n != build.Mainnet {
+		return nil // pre-V1.3 Lantern was mainnet-only, nothing to migrate elsewhere
+	}
+	base := dataDir()
+	net := networkDataDir(n)
+
+	// If the per-network dir already has an anchor, migration is done.
+	if _, err := os.Stat(filepath.Join(net, "bootstrap-anchor.json")); err == nil {
+		return nil
+	}
+
+	// If NONE of the legacy markers exist at the base level, this is a
+	// fresh install — nothing to migrate.
+	legacyMarkers := []string{
+		"bootstrap-anchor.json", "jwt-secret", "keystore", "headerstore",
+	}
+	anyLegacy := false
+	for _, m := range legacyMarkers {
+		if _, err := os.Stat(filepath.Join(base, m)); err == nil {
+			anyLegacy = true
+			break
+		}
+	}
+	if !anyLegacy {
+		return nil
+	}
+
+	if err := os.MkdirAll(net, 0o700); err != nil {
+		return fmt.Errorf("create network data dir %s: %w", net, err)
+	}
+
+	names := []string{
+		"bootstrap-anchor.json", "jwt-secret",
+		"token", "token-read", "token-sign", "token-write",
+		"headerstore", "keystore",
+	}
+	moved := 0
+	for _, name := range names {
+		src := filepath.Join(base, name)
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			return fmt.Errorf("stat %s: %w", src, err)
+		}
+		dst := filepath.Join(net, name)
+		if err := os.Rename(src, dst); err != nil {
+			return fmt.Errorf("migrate %s -> %s: %w", src, dst, err)
+		}
+		moved++
+	}
+	if moved > 0 {
+		fmt.Fprintf(os.Stderr, "migrated %d legacy data files from %s to %s\n", moved, base, net)
+	}
+	return nil
 }
 
 // resolvePassphrase decides what passphrase to use to unlock (or create)
@@ -252,13 +352,27 @@ func resolvePassphrase(dir string) (string, error) {
 	return p1, nil
 }
 
-func openWallet() (*wallet.Wallet, error) {
-	dir := filepath.Join(dataDir(), "keystore")
+// openWallet opens (or creates) the keystore for the given network.
+// Signing keys are per-chain: a key minted on mainnet does NOT sign
+// calibration messages and vice versa.
+//
+// For CLI subcommands that don't yet thread network through, use
+// openWalletDefault() which defaults to mainnet for backward compat.
+func openWallet(network build.Network) (*wallet.Wallet, error) {
+	dir := filepath.Join(networkDataDir(network), "keystore")
 	p, err := resolvePassphrase(dir)
 	if err != nil {
 		return nil, err
 	}
 	return wallet.New(context.Background(), dir, p)
+}
+
+// openWalletDefault opens the mainnet keystore. Used by CLI subcommands
+// that haven't been network-converted yet (wallet new/list/balance/send,
+// chain head, state get-actor). When those subcommands gain a --network
+// flag, they should switch to openWallet(net).
+func openWalletDefault() (*wallet.Wallet, error) {
+	return openWallet(build.Mainnet)
 }
 
 // gatewayClient builds the (cache + gateway + glif fallback) BlockGetter
@@ -361,7 +475,7 @@ func cmdDaemon(args []string) error {
 	gw := fs.String("gateway", defaultGateway, "Lantern gateway base URL")
 	listen := fs.String("listen", defaultListen, "RPC listen address")
 	noHS := fs.Bool("no-header-store", false, "Disable the persistent header store (legacy synthetic-head mode)")
-	hsPath := fs.String("header-store", filepath.Join(dataDir(), "headerstore"), "Header store BadgerDB path")
+	hsPath := fs.String("header-store", "", "Header store BadgerDB path (default: <data-dir>/<network>/headerstore)")
 	syncInterval := fs.Duration("sync-interval", 6*time.Second, "Header-store sync poll interval")
 	notifyBufSize := fs.Int("notify-buf", headnotify.DefaultBufferSize, "ChainNotify per-subscriber buffer size")
 	p2pListen := fs.String("p2p-listen", "/ip4/0.0.0.0/tcp/0,/ip4/0.0.0.0/udp/0/quic-v1", "libp2p listen multiaddrs (comma-separated). Empty disables the libp2p host.")
@@ -394,10 +508,27 @@ func cmdDaemon(args []string) error {
 		return fmt.Errorf("invalid --network %q: want one of mainnet, calibration", *networkFlag)
 	}
 
+	// V1.3 per-network data dir: migrate any legacy mainnet-only state
+	// at dataDir() to dataDir()/mainnet/ on first boot. Idempotent for
+	// fresh installs or already-migrated state.
+	if err := migrateLegacyDataDir(network); err != nil {
+		return fmt.Errorf("migrate legacy data dir: %w", err)
+	}
+	netDir := networkDataDir(network)
+	if err := os.MkdirAll(netDir, 0o700); err != nil {
+		return fmt.Errorf("create network data dir: %w", err)
+	}
+
+	// Resolve --header-store default now that network is known.
+	if *hsPath == "" {
+		*hsPath = filepath.Join(netDir, "headerstore")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	fmt.Printf("Lantern daemon — Lotus-compatible RPC (network: %s)\n", network)
+	fmt.Printf("  data dir:    %s\n", netDir)
 	fmt.Println("Fetching trusted head from", *gw)
 	tr, err := fetchTrustedHead(ctx, *gw, network)
 	if err != nil {
@@ -405,7 +536,7 @@ func cmdDaemon(args []string) error {
 	}
 	fmt.Printf("  head epoch:  %d\n  state root:  %s\n", tr.Epoch, tr.StateRoot)
 
-	w, err := openWallet()
+	w, err := openWallet(network)
 	if err != nil {
 		return fmt.Errorf("open wallet: %w", err)
 	}
@@ -648,11 +779,11 @@ func cmdDaemon(args []string) error {
 			ingestor:     gossipIngestor,
 			vmBridgeTag:  bridgeTag,
 			allowSubmit:  chainAPI.AllowBlockSubmit,
-			network:      "Lantern+mainnet",
+			network:      "Lantern+" + network.String(),
 			rpcAddr:      *listen,
 			startedAt:    time.Now(),
 			headDelaySec: uint64(build.BlockDelaySecs),
-			dataDirPath:  dataDir(),
+			dataDirPath:  netDir,
 			gatewayURL:   *gw,
 			hello:        helloSvc,
 			xchg:         xchgSvc,
@@ -664,7 +795,7 @@ func cmdDaemon(args []string) error {
 
 	srv, err := server.New(server.Config{
 		ListenAddress: *listen,
-		DataDir:       dataDir(),
+		DataDir:       netDir,
 	}, chainAPI)
 	if err != nil {
 		return err
@@ -737,7 +868,7 @@ func walletNew(args []string) error {
 	fs := flag.NewFlagSet("wallet new", flag.ExitOnError)
 	kt := fs.String("type", "bls", "Key type: bls, secp, delegated")
 	fs.Parse(args)
-	w, err := openWallet()
+	w, err := openWalletDefault()
 	if err != nil {
 		return err
 	}
@@ -761,7 +892,7 @@ func walletNew(args []string) error {
 }
 
 func walletList() error {
-	w, err := openWallet()
+	w, err := openWalletDefault()
 	if err != nil {
 		return err
 	}
@@ -784,7 +915,7 @@ func walletList() error {
 }
 
 func walletDefault(args []string) error {
-	w, err := openWallet()
+	w, err := openWalletDefault()
 	if err != nil {
 		return err
 	}
@@ -838,7 +969,7 @@ func walletSend(args []string) error {
 	if err != nil {
 		return fmt.Errorf("parse amount: %w", err)
 	}
-	w, err := openWallet()
+	w, err := openWalletDefault()
 	if err != nil {
 		return err
 	}

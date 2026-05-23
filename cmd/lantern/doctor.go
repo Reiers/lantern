@@ -52,9 +52,13 @@ func cmdDoctor(args []string) error {
 		}
 	}
 
-	dir := dataDir()
+	if err := migrateLegacyDataDir(filNet); err != nil {
+		return fmt.Errorf("migrate legacy data dir: %w", err)
+	}
+	dir := networkDataDir(filNet)
 	fmt.Println("Lantern doctor — quorum health check")
 	fmt.Println("====================================")
+	fmt.Printf("Data dir: %s (network: %s)\n\n", dir, filNet)
 	if a, err := ReadBootstrapAnchor(dir); err == nil && a != nil {
 		fmt.Printf("Previously-anchored finality: instance=%d epoch=%d state=%s (captured %s)\n",
 			a.Instance, a.Epoch, shortStr(a.StateRoot, 24),
@@ -125,9 +129,13 @@ func cmdRepair(args []string) error {
 		}
 	}
 
-	dir := dataDir()
+	if err := migrateLegacyDataDir(filNet); err != nil {
+		return fmt.Errorf("migrate legacy data dir: %w", err)
+	}
+	dir := networkDataDir(filNet)
 	fmt.Println("Lantern repair — refreshing trust anchor from live swarm")
 	fmt.Println("========================================================")
+	fmt.Printf("Data dir: %s (network: %s)\n\n", dir, filNet)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
