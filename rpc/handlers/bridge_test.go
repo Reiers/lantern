@@ -7,6 +7,8 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"testing"
 
 	addr "github.com/filecoin-project/go-address"
@@ -26,6 +28,9 @@ type fakeBridge struct {
 }
 
 func (f *fakeBridge) Provenance() string { return "fake" }
+func (f *fakeBridge) RawJSONRPC(_ context.Context, _ string, _ json.RawMessage) (json.RawMessage, error) {
+	return nil, errors.New("fakeBridge: RawJSONRPC not used in this test")
+}
 func (f *fakeBridge) ComputeStateRoot(_ context.Context, _ cid.Cid, _ int64, msgs []*types.Message) (cid.Cid, []*types.MessageReceipt, error) {
 	f.calls++
 	f.last = msgs

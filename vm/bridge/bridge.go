@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"sort"
 	"sync"
@@ -17,7 +18,9 @@ import (
 
 // Bridge is the operator-pluggable VM bridge. Implementations call out
 // to an upstream Forest/Lotus (or a private FVM service) to compute the
-// post-execution state root + receipts for a base + message list.
+// post-execution state root + receipts for a base + message list, AND
+// to forward arbitrary FEVM-shaped JSON-RPC calls (eth_call,
+// eth_estimateGas, eth_sendRawTransaction).
 //
 // Implementations MUST be safe for concurrent use.
 type Bridge interface {
@@ -33,6 +36,18 @@ type Bridge interface {
 	//
 	// `ctx` cancellation propagates to the upstream RPC call.
 	ComputeStateRoot(ctx context.Context, base cid.Cid, epoch int64, msgs []*types.Message) (cid.Cid, []*types.MessageReceipt, error)
+
+	// RawJSONRPC forwards a JSON-RPC method call to the upstream and
+	// returns the raw `result` JSON. Used to delegate FEVM-shaped
+	// methods (eth_call, eth_estimateGas, eth_sendRawTransaction)
+	// that need real FEVM execution — Lantern's native VM is Send-only.
+	//
+	// `params` should be the already-marshaled JSON array of the
+	// upstream method's parameters (e.g. `["0xdeadbeef", "latest"]`).
+	//
+	// Returns the raw `result` JSON on success, or an error if the
+	// upstream call failed or returned a JSON-RPC error.
+	RawJSONRPC(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error)
 
 	// Provenance returns a short, opaque identifier for the upstream
 	// node serving this bridge — typically "forest@<host>" or
@@ -72,6 +87,14 @@ func NewCachingBridge(b Bridge, maxEntries int) *CachingBridge {
 // Provenance proxies to the underlying bridge.
 func (c *CachingBridge) Provenance() string {
 	return c.inner.Provenance() + "+cache"
+}
+
+// RawJSONRPC proxies straight through. We don't cache FEVM RPC calls
+// because eth_call results depend on chain state (which changes every
+// tipset) and eth_sendRawTransaction MUST not be cached — it has
+// side effects on the upstream mempool.
+func (c *CachingBridge) RawJSONRPC(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
+	return c.inner.RawJSONRPC(ctx, method, params)
 }
 
 // ComputeStateRoot is the cached variant.
