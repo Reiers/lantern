@@ -50,6 +50,7 @@ import (
 	"github.com/Reiers/lantern/rpc/handlers"
 	rpcserver "github.com/Reiers/lantern/rpc/server"
 	"github.com/Reiers/lantern/state/hamt"
+	"github.com/Reiers/lantern/vm/bridge"
 )
 
 // startInternal is the bring-up sequence: anchor trust + mount the
@@ -93,6 +94,19 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 	)
 
 	chainAPI := handlers.New(tr, fetcher, d.cfg.Wallet, nil, network.String())
+
+	// Optional VM bridge: when configured, FEVM read methods (eth_call,
+	// eth_estimateGas) and SendRawTransaction get forwarded to an
+	// upstream Forest/Lotus node. Without this, eth_call against any
+	// contract returns "FEVM method requires --vm-bridge-rpc".
+	if d.cfg.VMBridgeRPC != "" {
+		vmBr := bridge.NewForestBridge(d.cfg.VMBridgeRPC, d.cfg.VMBridgeToken, d.cfg.VMBridgeTimeout)
+		chainAPI.WithBridge(vmBr)
+		chainAPI.AllowBlockSubmit = d.cfg.AllowBlockSubmit
+		if !d.cfg.EmbeddedMode {
+			fmt.Printf("daemon: vm-bridge %s\n", vmBr.Provenance())
+		}
+	}
 
 	srv, err := rpcserver.New(rpcserver.Config{
 		ListenAddress: d.cfg.RPCListen,
