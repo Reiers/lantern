@@ -82,9 +82,15 @@ func cmdInit(args []string) error {
 		*quorum = 0 // explicit 'skip' signal
 	}
 
-	dir := dataDir()
+	// V1.3 per-network data dir: migrate pre-V1.3 mainnet state to
+	// dataDir()/mainnet/ before continuing.
+	if err := migrateLegacyDataDir(filNet); err != nil {
+		return fmt.Errorf("migrate legacy data dir: %w", err)
+	}
+	dir := networkDataDir(filNet)
 	printBanner(dir)
 	fmt.Printf("▸ Filecoin network: %s  (F3 NetworkName: %s)\n", filNet, *network)
+	fmt.Printf("  data dir:        %s\n", dir)
 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -142,7 +148,7 @@ func cmdInit(args []string) error {
 	if *noWallet {
 		fmt.Println("    · Skipping wallet creation (--no-wallet).")
 	} else {
-		w, err := openWallet()
+		w, err := openWallet(filNet)
 		if err != nil {
 			return err
 		}
