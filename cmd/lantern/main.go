@@ -388,6 +388,18 @@ func gatewayClient(gw string) (hamt.BlockGetter, *combined.Fetcher) {
 	return f, f
 }
 
+// glifURLForNetwork returns the public Glif JSON-RPC endpoint for a
+// given Filecoin network. Used by every Glif client constructor in the
+// daemon path so a calibration daemon never accidentally pulls
+// mainnet chain data (which would corrupt the header store, sync
+// poller, gossipsub backfill, and combined-fetcher fallback).
+func glifURLForNetwork(n build.Network) string {
+	if n == build.Calibration {
+		return "https://api.calibration.node.glif.io/rpc/v1"
+	}
+	return "" // empty -> glif.New uses its DefaultURL (mainnet)
+}
+
 // fetchTrustedHead probes the primary gateway's /state/root endpoint,
 // falling back to Glif's Filecoin.ChainHead when the gateway is down.
 // Both responses are CID-verified before becoming a TrustedRoot.
@@ -508,6 +520,11 @@ func cmdDaemon(args []string) error {
 		return fmt.Errorf("invalid --network %q: want one of mainnet, calibration", *networkFlag)
 	}
 
+	// Propagate the active network into buildinfo so Filecoin.Version,
+	// libp2p UserAgent, and other identity surfaces reflect the actual
+	// network instead of the package default ('mainnet').
+	buildinfo.SetNetwork(network.String())
+
 	// V1.3 per-network data dir: migrate any legacy mainnet-only state
 	// at dataDir() to dataDir()/mainnet/ on first boot. Idempotent for
 	// fresh installs or already-migrated state.
@@ -547,7 +564,7 @@ func cmdDaemon(args []string) error {
 	cache := hamt.NewMemBlockStore()
 	fetcher := combined.New(cache,
 		combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
-		combined.Source{Name: "glif", Getter: glif.New("", 20*time.Second), Timeout: 20 * time.Second},
+		combined.Source{Name: "glif", Getter: glif.New(glifURLForNetwork(network), 20*time.Second), Timeout: 20 * time.Second},
 	)
 	chainAPI := handlers.New(tr, fetcher, w, nil, network.String())
 
@@ -598,8 +615,11 @@ func cmdDaemon(args []string) error {
 		// Sync source: a Glif client. The combined fetcher in gatewayClient
 		// is hamt-shaped (only Get), but Sync needs RPC-shaped
 		// HeadEpoch/TipsetCIDsByHeight/FetchBlock — that's exactly what
-		// glif.Client exposes.
-		src := glif.New("", 8*time.Second)
+		// glif.Client exposes. Network-aware: calibration daemon pulls
+		// from calibration Glif, mainnet daemon pulls from mainnet Glif.
+		// Without this, the header store fills with the wrong chain's
+		// headers (silent corruption).
+		src := glif.New(glifURLForNetwork(network), 8*time.Second)
 		sync = hstore.NewSync(store, src, hstore.SyncOptions{
 			Interval:       *syncInterval,
 			MaxBacktrack:   60,
@@ -713,7 +733,7 @@ func cmdDaemon(args []string) error {
 		// arrival lands at head+N>1 (rather than skipping and waiting
 		// the full poll cycle).
 		if store != nil && p2pHost.PubSub != nil {
-			gossipSrc := glif.New("", 8*time.Second)
+			gossipSrc := glif.New(glifURLForNetwork(network), 8*time.Second)
 			if ing, _, gerr := startGossipBlocks(ctx, p2pHost.PubSub, store, gossipSrc, network.GossipTopicBlocks()); gerr != nil {
 				fmt.Printf("  gossipsub-blocks: failed to start: %v (continuing without)\n", gerr)
 			} else {
@@ -752,7 +772,7 @@ func cmdDaemon(args []string) error {
 		fetcher = combined.New(cache,
 			combined.Source{Name: "bitswap", Getter: bsClient, Timeout: *bitswapFullDL, Race: true},
 			combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
-			combined.Source{Name: "glif", Getter: glif.New("", 20*time.Second), Timeout: 20 * time.Second},
+			combined.Source{Name: "glif", Getter: glif.New(glifURLForNetwork(network), 20*time.Second), Timeout: 20 * time.Second},
 		)
 		rebindBlockGetter(chainAPI, fetcher)
 		fmt.Printf("  bitswap:  enabled (preferred=%d, fast=%s, full=%s)\n",
