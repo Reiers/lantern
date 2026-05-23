@@ -180,6 +180,9 @@ type FullNode interface {
 	EthCall(ctx context.Context, callObj any, blockParam any) (string, error)
 	EthEstimateGas(ctx context.Context, callObj any) (string, error)
 	EthSendRawTransaction(ctx context.Context, signedTxHex string) (string, error)
+	EthGetTransactionCount(ctx context.Context, addr string, blockParam any) (string, error)
+	EthGetTransactionReceipt(ctx context.Context, txHash string) (any, error)
+	EthFeeHistory(ctx context.Context, blockCount string, newestBlock string, rewardPercentiles []float64) (any, error)
 }
 
 // NetBandwidthStats mirrors libp2p/core/metrics.Stats. Re-declared here so

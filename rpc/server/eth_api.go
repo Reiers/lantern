@@ -114,3 +114,22 @@ func (e *ethAPI) EthEstimateGas(ctx context.Context, callObj any) (string, error
 func (e *ethAPI) EthSendRawTransaction(ctx context.Context, signedTxHex string) (string, error) {
 	return e.full.EthSendRawTransaction(ctx, signedTxHex)
 }
+
+// EthGetTransactionCount returns the nonce for an Ethereum address.
+// Forwarded to the VMBridge (state-tree backed nonce lookup; Lantern's
+// local state doesn't currently include FEVM account nonces).
+func (e *ethAPI) EthGetTransactionCount(ctx context.Context, addr string, blockParam any) (string, error) {
+	return e.full.EthGetTransactionCount(ctx, addr, blockParam)
+}
+
+// EthGetTransactionReceipt returns the receipt for a previously-broadcast
+// transaction. Forwarded to the VMBridge.
+func (e *ethAPI) EthGetTransactionReceipt(ctx context.Context, txHash string) (any, error) {
+	return e.full.EthGetTransactionReceipt(ctx, txHash)
+}
+
+// EthFeeHistory returns historical gas-fee data for tx builders.
+// Forwarded to the VMBridge.
+func (e *ethAPI) EthFeeHistory(ctx context.Context, blockCount string, newestBlock string, rewardPercentiles []float64) (any, error) {
+	return e.full.EthFeeHistory(ctx, blockCount, newestBlock, rewardPercentiles)
+}
