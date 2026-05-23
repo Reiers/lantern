@@ -35,10 +35,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/filecoin-project/go-jsonrpc/auth"
 	"github.com/filecoin-project/go-state-types/abi"
 
+	lapi "github.com/Reiers/lantern/api"
 	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/trustedroot"
+	rpcserver "github.com/Reiers/lantern/rpc/server"
 	"github.com/Reiers/lantern/wallet"
 )
 
@@ -203,6 +206,11 @@ type Daemon struct {
 	tr      *trustedroot.TrustedRoot
 	rpcAddr string
 
+	// Optional runtime subsystems. nil when the relevant Config field
+	// disabled the subsystem or it hasn't been wired yet.
+	rpcServer *rpcserver.Server
+	auth      *rpcserver.Auth
+
 	// Internal cancellation: derived from caller's ctx in Start.
 	cancel context.CancelFunc
 }
@@ -261,6 +269,54 @@ func (d *Daemon) HeadEpoch() abi.ChainEpoch {
 // header store, brings up libp2p + gossipsub, mounts the JSON-RPC server,
 // and (optionally) the metrics + dashboard endpoints. Blocks until ctx
 // is cancelled or a fatal startup error occurs.
+//
+// AdminToken returns the pre-minted admin-scope JWT for the embedded
+// RPC server. Only valid after Start has returned nil (or Started()
+// returns true) and only when the RPC server was actually mounted
+// (RPCListen != "" in Config). Returns "" otherwise.
+//
+// Embedded callers (notably curio-core) use this to self-issue a
+// token against the in-process Lantern without going through disk
+// files or environment variables.
+func (d *Daemon) AdminToken() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.auth == nil {
+		return ""
+	}
+	return d.auth.Token(lapi.PermAdmin)
+}
+
+// MintToken issues a fresh JWT with the requested permissions.
+// Use AdminToken() when the pre-minted admin token suffices; use this
+// only when a narrower scope is needed (e.g. minting a read-only token
+// for a constrained consumer). Returns an error if the RPC server
+// hasn't been mounted yet.
+func (d *Daemon) MintToken(perms []auth.Permission) ([]byte, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.auth == nil {
+		return nil, errors.New("daemon: rpc server not mounted; MintToken unavailable")
+	}
+	return d.auth.AuthNew(perms)
+}
+
+// FullNodeAPIInfo returns the Lotus-compatible FULLNODE_API_INFO string
+// for the admin-scoped token, ready to be set into the environment by
+// embedded callers running a Lotus-API client. Only valid after Start
+// has mounted the RPC server.
+func (d *Daemon) FullNodeAPIInfo() (string, error) {
+	d.mu.Lock()
+	srv := d.rpcServer
+	d.mu.Unlock()
+	if srv == nil {
+		return "", errors.New("daemon: rpc server not mounted; FullNodeAPIInfo unavailable")
+	}
+	return srv.FullNodeAPIInfo()
+}
+
+// Original Start doc continues:
+//
 //
 // On a clean ctx cancellation, Start returns nil. On startup failure,
 // Start returns the error and the daemon is half-built (caller should
