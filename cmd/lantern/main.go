@@ -837,9 +837,31 @@ func cmdDaemon(args []string) error {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 	fmt.Println("\nShutting down...")
+
+	// Cancel the root daemon context so every long-running subsystem
+	// (sync poller, libp2p connect loops, bitswap, gossipsub, beacon,
+	// chainxchg, header store sync, log goroutines) starts winding
+	// down promptly. Without this, only the HTTP server shuts down
+	// and SIGTERM responsiveness degrades to '5s timeout then exit
+	// while goroutines are still alive,' which makes back-to-back
+	// daemon restarts fail to acquire the Badger headerstore lock.
+	// See lantern#31.
+	cancel()
+
+	// Bound the HTTP server's graceful shutdown so a stuck connection
+	// doesn't hang the process forever. 5s is the canonical Go timeout.
 	sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer scancel()
-	return srv.Stop(sctx)
+	if err := srv.Stop(sctx); err != nil {
+		fmt.Fprintf(os.Stderr, "  warn: HTTP shutdown: %v\n", err)
+	}
+
+	// Tiny grace period for in-flight handlers to observe ctx.Done
+	// before main returns and the defers (Badger.Close, libp2p.Close)
+	// fire. Without this, the Badger DB's WAL flush sometimes races
+	// with the subsequent daemon start.
+	time.Sleep(500 * time.Millisecond)
+	return nil
 }
 
 // logSyncStats periodically prints sync + notify counters so operators can
