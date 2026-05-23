@@ -352,6 +352,7 @@ func attachF3Latest(ctx context.Context, tr *trustedroot.TrustedRoot) {
 
 func cmdDaemon(args []string) error {
 	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
+	networkFlag := fs.String("network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration")
 	gw := fs.String("gateway", defaultGateway, "Lantern gateway base URL")
 	listen := fs.String("listen", defaultListen, "RPC listen address")
 	noHS := fs.Bool("no-header-store", false, "Disable the persistent header store (legacy synthetic-head mode)")
@@ -383,10 +384,15 @@ func cmdDaemon(args []string) error {
 	allowBlockSubmit := fs.Bool("allow-block-submit", false, "Allow SyncSubmitBlock to publish to gossipsub. Requires --vm-bridge-rpc.")
 	fs.Parse(args)
 
+	network := build.Network(*networkFlag)
+	if !network.Valid() {
+		return fmt.Errorf("invalid --network %q: want one of mainnet, calibration", *networkFlag)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	fmt.Println("Lantern daemon — Lotus-compatible RPC")
+	fmt.Printf("Lantern daemon — Lotus-compatible RPC (network: %s)\n", network)
 	fmt.Println("Fetching trusted head from", *gw)
 	tr, err := fetchTrustedHead(ctx, *gw)
 	if err != nil {
@@ -407,7 +413,7 @@ func cmdDaemon(args []string) error {
 		combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
 		combined.Source{Name: "glif", Getter: glif.New("", 20*time.Second), Timeout: 20 * time.Second},
 	)
-	chainAPI := handlers.New(tr, fetcher, w, nil, "mainnet")
+	chainAPI := handlers.New(tr, fetcher, w, nil, network.String())
 
 	// Issue #4: wire optional VM bridge for block production. Refuse to
 	// start when AllowBlockSubmit is on but no bridge is configured;
@@ -502,7 +508,7 @@ func cmdDaemon(args []string) error {
 		// honest floor for a light client is ~20.
 		p2pHost, err = llibp2p.New(ctx, llibp2p.HostConfig{
 			ListenAddrs:    listeners,
-			BootstrapPeers: build.MainnetBootstrapPeers,
+			BootstrapPeers: network.BootstrapPeers(),
 			MinPeers:       20,
 			MaxPeers:       200,
 		})
@@ -518,7 +524,8 @@ func cmdDaemon(args []string) error {
 		// climbs past the 3-5 bootstrap floor. See
 		// PHASE11-PEER-COUNT-ASK.md for context.
 		if err := p2pHost.EnableDHT(ctx, llibp2p.DHTOptions{
-			BootstrapPeers: build.MainnetBootstrapPeers,
+			BootstrapPeers: network.BootstrapPeers(),
+			NetworkName:    network.NetworkName(),
 		}); err != nil {
 			fmt.Printf("  libp2p: EnableDHT failed: %v (continuing without DHT discovery)\n", err)
 		} else {
@@ -529,7 +536,7 @@ func cmdDaemon(args []string) error {
 		// connmgr scores us positively and stops trimming us within 30s.
 		// Also tags inbound peers as "fcpeer" in our own connmgr so we
 		// don't trim them.
-		if genCID, perr := cid.Parse(build.MainnetGenesisCID); perr == nil {
+		if genCID, perr := cid.Parse(network.GenesisCID()); perr == nil {
 			head := func() ([]cid.Cid, int64, string) {
 				if store != nil {
 					if ts := store.Head(); ts != nil {
@@ -545,7 +552,7 @@ func cmdDaemon(args []string) error {
 			helloSvc = hello.NewService(p2pHost.H, genCID, head)
 			helloSvc.Register()
 			go helloSvc.WatchNewConns(ctx)
-			fmt.Printf("  hello:    /fil/hello/1.0.0 active (genesis %s)\n", build.MainnetGenesisCID[:18]+"…")
+			fmt.Printf("  hello:    /fil/hello/1.0.0 active (genesis %s…)\n", network.GenesisCID()[:18])
 		} else {
 			fmt.Printf("  hello:    DISABLED (genesis CID parse: %v)\n", perr)
 		}
@@ -571,11 +578,11 @@ func cmdDaemon(args []string) error {
 		// the full poll cycle).
 		if store != nil && p2pHost.PubSub != nil {
 			gossipSrc := glif.New("", 8*time.Second)
-			if ing, _, gerr := startGossipBlocks(ctx, p2pHost.PubSub, store, gossipSrc); gerr != nil {
+			if ing, _, gerr := startGossipBlocks(ctx, p2pHost.PubSub, store, gossipSrc, network.GossipTopicBlocks()); gerr != nil {
 				fmt.Printf("  gossipsub-blocks: failed to start: %v (continuing without)\n", gerr)
 			} else {
 				gossipIngestor = ing
-				fmt.Printf("  gossipsub-blocks: subscribed to %s (ingestor active, inline backfill on)\n", build.MainnetGossipTopicBlocks)
+				fmt.Printf("  gossipsub-blocks: subscribed to %s (ingestor active, inline backfill on)\n", network.GossipTopicBlocks())
 			}
 		}
 	}
