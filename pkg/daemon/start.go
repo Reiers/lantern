@@ -44,14 +44,19 @@ import (
 	"github.com/Reiers/lantern/chain/f3/subscriber"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/chain/types"
+	"github.com/Reiers/lantern/net/combined"
 	"github.com/Reiers/lantern/net/glif"
 	"github.com/Reiers/lantern/net/hsync"
+	"github.com/Reiers/lantern/rpc/handlers"
+	rpcserver "github.com/Reiers/lantern/rpc/server"
+	"github.com/Reiers/lantern/state/hamt"
 )
 
-// startInternal is the (currently minimal) bring-up sequence. It will
-// grow as cmd/lantern's daemon body migrates into pkg/daemon. Today it
-// captures the TrustedRoot, which is the load-bearing first step every
-// Lantern daemon does.
+// startInternal is the bring-up sequence: anchor trust + mount the
+// JSON-RPC server. The lighter subsystems (libp2p, gossipsub, header
+// store, bitswap, metrics, dashboard) remain in cmd/lantern for now.
+// Embedded consumers (curio-core) only need the RPC mount to dial
+// in-process.
 func (d *Daemon) startInternal(ctx context.Context) error {
 	tr, err := fetchTrustedHead(ctx, d.cfg.Gateway, build.Network(d.cfg.Network))
 	if err != nil {
@@ -64,22 +69,72 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 	d.tr = tr
 	d.mu.Unlock()
 
-	// TODO(daemon-extraction): mount RPC server, libp2p, gossipsub,
-	// metrics, dashboard, header store, etc. See cmd/lantern/main.go
-	// cmdDaemon for the existing wiring.
+	// Mount the JSON-RPC server. Skipped only when the operator passed
+	// RPCListen="" explicitly (currently no such code path, but cheap
+	// to support).
+	if d.cfg.RPCListen == "" {
+		return nil
+	}
+
+	network := build.Network(d.cfg.Network)
+	gw := d.cfg.Gateway
+
+	// Combined fetcher: gateway race + glif fallback. Matches the
+	// cmd/lantern wiring (without bitswap, since libp2p isn't mounted
+	// here yet — the gateway+glif pair covers cold state-tree reads).
+	cache := hamt.NewMemBlockStore()
+	glifURL := ""
+	if network == build.Calibration {
+		glifURL = "https://api.calibration.node.glif.io/rpc/v1"
+	}
+	fetcher := combined.New(cache,
+		combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
+		combined.Source{Name: "glif", Getter: glif.New(glifURL, 20*time.Second), Timeout: 20 * time.Second},
+	)
+
+	chainAPI := handlers.New(tr, fetcher, d.cfg.Wallet, nil, network.String())
+
+	srv, err := rpcserver.New(rpcserver.Config{
+		ListenAddress: d.cfg.RPCListen,
+		DataDir:       d.cfg.DataDir,
+	}, chainAPI)
+	if err != nil {
+		return fmt.Errorf("build rpc server: %w", err)
+	}
+	chainAPI.AuthIssuer = srv.Auth()
+
+	if err := srv.Start(); err != nil {
+		return fmt.Errorf("start rpc server: %w", err)
+	}
+
+	d.mu.Lock()
+	d.rpcServer = srv
+	d.auth = srv.Auth()
+	d.rpcAddr = srv.Addr().String()
+	d.mu.Unlock()
+
+	if !d.cfg.EmbeddedMode {
+		fmt.Printf("daemon: rpc at http://%s/rpc/v1\n", srv.Addr().String())
+	}
 	return nil
 }
 
-// stopInternal performs the (currently minimal) shutdown sequence.
+// stopInternal performs the shutdown sequence: graceful RPC server
+// stop with a bounded timeout, then mark the daemon as stopped.
 func (d *Daemon) stopInternal(ctx context.Context) error {
 	defer close(d.stopped)
 	d.mu.Lock()
+	srv := d.rpcServer
+	d.rpcServer = nil
+	d.auth = nil
 	d.started = false
 	d.mu.Unlock()
-	// TODO(daemon-extraction): shutdown the RPC server + close header
-	// store + close libp2p host. See cmd/lantern/main.go cmdDaemon's
-	// deferred cleanup chain.
-	_ = ctx
+
+	if srv != nil {
+		if err := srv.Stop(ctx); err != nil {
+			return fmt.Errorf("stop rpc server: %w", err)
+		}
+	}
 	return nil
 }
 
