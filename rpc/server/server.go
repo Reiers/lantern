@@ -96,6 +96,11 @@ func New(cfg Config, node api.FullNode) (*Server, error) {
 	// methods.
 	rs.Register("eth", newEthAPI(node))
 
+	// Also register the small 'net' namespace. go-ethereum's
+	// ethclient.NetworkID() calls net_version (chain id as decimal).
+	// SenderETH in upstream curio uses NetworkID() during tx build.
+	rs.Register("net", newNetAPI(node))
+
 	mux := http.NewServeMux()
 	authHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx, perms, err := a.handle(r.Context(), r)
@@ -530,7 +535,8 @@ func jsonRPCError(w http.ResponseWriter, err error) {
 // the prefix-strip) so a future RPC method named e.g. `Subscribe`
 // would surface as `eth_subscribe`.
 func lanternMethodNameFormatter(namespace, method string) string {
-	if namespace == "eth" {
+	switch namespace {
+	case "eth":
 		stripped := method
 		if len(method) > 3 && method[:3] == "Eth" {
 			stripped = method[3:]
@@ -540,6 +546,15 @@ func lanternMethodNameFormatter(namespace, method string) string {
 			stripped = string(stripped[0]|0x20) + stripped[1:]
 		}
 		return "eth_" + stripped
+	case "net":
+		stripped := method
+		if len(method) > 3 && method[:3] == "Net" {
+			stripped = method[3:]
+		}
+		if len(stripped) > 0 {
+			stripped = string(stripped[0]|0x20) + stripped[1:]
+		}
+		return "net_" + stripped
 	}
 	return namespace + "." + method
 }
