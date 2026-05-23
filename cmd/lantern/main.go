@@ -289,7 +289,7 @@ func gatewayClient(gw string) (hamt.BlockGetter, *combined.Fetcher) {
 // We also attempt a best-effort F3 latest-cert probe so F3Instance is
 // populated when the dashboard renders. Failure is non-fatal: F3 is
 // observability, not consensus, at this layer.
-func fetchTrustedHead(ctx context.Context, gw string) (*trustedroot.TrustedRoot, error) {
+func fetchTrustedHead(ctx context.Context, gw string, network build.Network) (*trustedroot.TrustedRoot, error) {
 	now := time.Now().UTC()
 	hc := hsync.NewClient([]string{gw}, 5*time.Second)
 	head, err := hc.GetStateHead(ctx)
@@ -314,9 +314,14 @@ func fetchTrustedHead(ctx context.Context, gw string) (*trustedroot.TrustedRoot,
 			return tr, nil
 		}
 	}
-	// Fallback to Glif.
+	// Fallback to Glif. Network-aware: calibration uses the calibration
+	// Glif endpoint; mainnet uses the default.
+	glifURL := "" // default mainnet
+	if network == build.Calibration {
+		glifURL = "https://api.calibration.node.glif.io/rpc/v1"
+	}
 	fmt.Fprintln(os.Stderr, "(gateway unavailable; falling back to Glif RPC)")
-	gc := glif.New("", 10*time.Second)
+	gc := glif.New(glifURL, 10*time.Second)
 	gh, err := gc.FetchHead(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("both gateway and Glif failed: %w", err)
@@ -394,7 +399,7 @@ func cmdDaemon(args []string) error {
 
 	fmt.Printf("Lantern daemon — Lotus-compatible RPC (network: %s)\n", network)
 	fmt.Println("Fetching trusted head from", *gw)
-	tr, err := fetchTrustedHead(ctx, *gw)
+	tr, err := fetchTrustedHead(ctx, *gw, network)
 	if err != nil {
 		return err
 	}
@@ -807,7 +812,7 @@ func walletBalance(args []string) error {
 		return err
 	}
 	ctx := context.Background()
-	tr, err := fetchTrustedHead(ctx, defaultGateway)
+	tr, err := fetchTrustedHead(ctx, defaultGateway, build.Mainnet)
 	if err != nil {
 		return err
 	}
@@ -841,7 +846,7 @@ func walletSend(args []string) error {
 	if err != nil {
 		return err
 	}
-	tr, err := fetchTrustedHead(context.Background(), defaultGateway)
+	tr, err := fetchTrustedHead(context.Background(), defaultGateway, build.Mainnet)
 	if err != nil {
 		return err
 	}
@@ -896,7 +901,7 @@ func cmdChain(args []string) error {
 	switch args[0] {
 	case "head":
 		ctx := context.Background()
-		tr, err := fetchTrustedHead(ctx, defaultGateway)
+		tr, err := fetchTrustedHead(ctx, defaultGateway, build.Mainnet)
 		if err != nil {
 			return err
 		}
@@ -929,7 +934,7 @@ func cmdState(args []string) error {
 			return err
 		}
 		ctx := context.Background()
-		tr, err := fetchTrustedHead(ctx, defaultGateway)
+		tr, err := fetchTrustedHead(ctx, defaultGateway, build.Mainnet)
 		if err != nil {
 			return err
 		}

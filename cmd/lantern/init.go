@@ -119,7 +119,7 @@ func cmdInit(args []string) error {
 			fmt.Println("  Run `lantern doctor` for a detailed per-source report.")
 			return err
 		}
-		if err := writeBootstrapAnchor(dir, fin); err != nil {
+		if err := writeBootstrapAnchor(dir, fin, filNet); err != nil {
 			return fmt.Errorf("persist bootstrap anchor: %w", err)
 		}
 		fmt.Println()
@@ -337,10 +337,14 @@ type BootstrapAnchor struct {
 	Network    string    `json:"network"`
 }
 
-func writeBootstrapAnchor(dir string, f bootstrap.Finality) error {
+func writeBootstrapAnchor(dir string, f bootstrap.Finality, network build.Network) error {
 	tsks := make([]string, len(f.TipSetKey))
 	for i, c := range f.TipSetKey {
 		tsks[i] = c.String()
+	}
+	netStr := string(network)
+	if netStr == "" {
+		netStr = string(build.DefaultNetwork)
 	}
 	a := BootstrapAnchor{
 		Instance:   f.Instance,
@@ -348,7 +352,7 @@ func writeBootstrapAnchor(dir string, f bootstrap.Finality) error {
 		TipSetKey:  tsks,
 		StateRoot:  f.StateRoot.String(),
 		CapturedAt: time.Now().UTC(),
-		Network:    "mainnet",
+		Network:    netStr,
 	}
 	raw, err := json.MarshalIndent(&a, "", "  ")
 	if err != nil {
