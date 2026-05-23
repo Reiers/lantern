@@ -517,6 +517,78 @@ func (c *ChainAPI) EthEstimateGas(ctx context.Context, callObj any) (string, err
 	return out, nil
 }
 
+// EthGetTransactionCount returns the transaction count (nonce) for an
+// Ethereum address. Forwarded to the upstream VM bridge because Lantern's
+// own state tree doesn't currently include f4 account nonces — it would
+// require either a full FEVM state import or a custom EthAccountActor
+// reader. Cheap to forward; cheap to migrate to a local implementation
+// later when state-tree backfill catches up (lantern#3).
+func (c *ChainAPI) EthGetTransactionCount(ctx context.Context, addr string, blockParam any) (string, error) {
+	if c.Bridge == nil {
+		return "", errBridgeUnconfigured
+	}
+	params, err := json.Marshal([]any{addr, blockParam})
+	if err != nil {
+		return "", xerrors.Errorf("marshal eth_getTransactionCount params: %w", err)
+	}
+	raw, err := c.Bridge.RawJSONRPC(ctx, "eth_getTransactionCount", params)
+	if err != nil {
+		return "", xerrors.Errorf("bridge eth_getTransactionCount: %w", err)
+	}
+	var out string
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", xerrors.Errorf("decode eth_getTransactionCount result: %w", err)
+	}
+	return out, nil
+}
+
+// EthGetTransactionReceipt returns the receipt for a previously-broadcast
+// transaction. Forwarded to the upstream VM bridge: receipts require
+// indexed message lookups + execution result reconstruction which Lantern
+// doesn't run today. Returns nil when the tx isn't found (caller will
+// retry; the standard go-ethereum receipt poll loop expects this shape).
+func (c *ChainAPI) EthGetTransactionReceipt(ctx context.Context, txHash string) (any, error) {
+	if c.Bridge == nil {
+		return nil, errBridgeUnconfigured
+	}
+	params, err := json.Marshal([]any{txHash})
+	if err != nil {
+		return nil, xerrors.Errorf("marshal eth_getTransactionReceipt params: %w", err)
+	}
+	raw, err := c.Bridge.RawJSONRPC(ctx, "eth_getTransactionReceipt", params)
+	if err != nil {
+		return nil, xerrors.Errorf("bridge eth_getTransactionReceipt: %w", err)
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, xerrors.Errorf("decode eth_getTransactionReceipt result: %w", err)
+	}
+	return out, nil
+}
+
+// EthFeeHistory returns historical gas fee data used by tx builders to
+// suggest EIP-1559 priority fees. Forwarded to the upstream VM bridge
+// since Filecoin's fee market shape doesn't map 1:1 to Ethereum's
+// baseFee+tip model and the upstream already does the right shimming.
+func (c *ChainAPI) EthFeeHistory(ctx context.Context, blockCount string, newestBlock string, rewardPercentiles []float64) (any, error) {
+	if c.Bridge == nil {
+		return nil, errBridgeUnconfigured
+	}
+	params, err := json.Marshal([]any{blockCount, newestBlock, rewardPercentiles})
+	if err != nil {
+		return nil, xerrors.Errorf("marshal eth_feeHistory params: %w", err)
+	}
+	raw, err := c.Bridge.RawJSONRPC(ctx, "eth_feeHistory", params)
+	if err != nil {
+		return nil, xerrors.Errorf("bridge eth_feeHistory: %w", err)
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, xerrors.Errorf("decode eth_feeHistory result: %w", err)
+	}
+	return out, nil
+}
+
 // EthSendRawTransaction forwards a signed raw transaction to the
 // upstream VM bridge for mempool admission. The transaction's hash
 // is returned verbatim from the upstream.
