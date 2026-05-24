@@ -29,6 +29,7 @@ import (
 	gjwt "github.com/gbrlsnchs/jwt/v3"
 
 	"github.com/Reiers/lantern/api"
+	"github.com/Reiers/lantern/internal/buildinfo"
 )
 
 // Config configures the RPC server.
@@ -101,6 +102,13 @@ func New(cfg Config, node api.FullNode) (*Server, error) {
 	// SenderETH in upstream curio uses NetworkID() during tx build.
 	rs.Register("net", newNetAPI(node))
 
+	// Also register the small 'web3' namespace. Browser wallets and
+	// dapps call web3_clientVersion to identify the node they're talking
+	// to; without it the wallet treats us as an unknown / unsupported
+	// node. EIP-1474 lists web3_clientVersion + web3_sha3 as canonical
+	// client-introspection methods.
+	rs.Register("web3", newWeb3API(buildinfo.Network()))
+
 	mux := http.NewServeMux()
 	authHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx, perms, err := a.handle(r.Context(), r)
@@ -128,8 +136,34 @@ func New(cfg Config, node api.FullNode) (*Server, error) {
 		}
 		rs.ServeHTTP(w, r.WithContext(ctx))
 	})
-	mux.Handle("/rpc/v1", authHandler)
-	mux.Handle("/rpc/v0", authHandler)
+
+	// withCORS adds standard cross-origin headers so browser wallets +
+	// dapps can POST to /rpc/v1 from a different origin. Without this,
+	// MetaMask / Brave wallet / WalletConnect / any web-app that wants
+	// to use Lantern as its RPC endpoint hits a preflight failure and
+	// can't talk to us. Permissive Access-Control-Allow-Origin: * is
+	// safe here because (a) the RPC requires a Bearer token for any
+	// mutating operation, enforced above by authHandler / methodPermission;
+	// (b) the listener is loopback by default in cfg.ListenAddress; (c) we
+	// want browser-based clients to be able to connect without a per-origin
+	// allowlist that would require server config every time a new dapp
+	// joins. Operators who don't want this can run Lantern behind a
+	// reverse proxy that strips the header.
+	withCORS := func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Max-Age", "86400")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			h.ServeHTTP(w, r)
+		})
+	}
+	mux.Handle("/rpc/v1", withCORS(authHandler))
+	mux.Handle("/rpc/v0", withCORS(authHandler))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte("ok\n"))
