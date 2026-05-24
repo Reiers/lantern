@@ -117,15 +117,14 @@ func (d *Distributor) Subscribe(ctx context.Context) <-chan []api.HeadChange {
 	d.mu.Unlock()
 
 	// Send "current" synchronously so the client always sees it as the
-	// first message after subscribe (matches Lotus).
-	if current != nil {
-		sub.ch <- []api.HeadChange{{Type: "current", Val: current}}
-	} else {
-		// No head yet — still deliver an empty "current" event so
-		// subscribers can race-safely block on first read. We use an
-		// empty slice rather than emitting a fake tipset.
-		sub.ch <- []api.HeadChange{}
-	}
+	// first message after subscribe (matches Lotus). When the store
+	// hasn't observed a head yet, send a "current" event with nil Val
+	// rather than an empty batch — downstream consumers that pattern-
+	// match on the first event's Type (notably curio's chainsched at
+	// lib/chainsched/chain_sched.go:162) reject an empty batch with a
+	// 'first notification must be current' error and tear down the
+	// subscription.
+	sub.ch <- []api.HeadChange{{Type: "current", Val: current}}
 
 	// Detach on ctx cancellation.
 	go func() {
