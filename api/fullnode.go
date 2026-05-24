@@ -12,6 +12,7 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-bitfield"
+	"github.com/filecoin-project/go-jsonrpc"
 	"github.com/filecoin-project/go-jsonrpc/auth"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
@@ -190,6 +191,21 @@ type FullNode interface {
 	EthGetStorageAt(ctx context.Context, addr string, key string, blockParam any) (string, error)
 	EthGetBlockByHash(ctx context.Context, blockHash string, fullTx bool) (any, error)
 	EthGetLogs(ctx context.Context, filter any) (any, error)
+
+	// EthSubscribe (EIP-1193) registers an event subscription on the
+	// current WebSocket connection. Returns a subscription ID; events
+	// flow back as eth_subscription notifications via the reverse
+	// client (see rpc/handlers/eth_subscribe.go for the wire shape).
+	// V1 supports event type "newHeads" only; "logs",
+	// "newPendingTransactions" and "syncing" return method-supported-
+	// but-event-type-not-supported. Requires WebSocket transport;
+	// returns an error on plain HTTP requests.
+	EthSubscribe(ctx context.Context, params jsonrpc.RawParams) (string, error)
+
+	// EthUnsubscribe cancels the subscription with the given ID.
+	// Returns true if a subscription was found and cancelled, false
+	// if no such subscription was active.
+	EthUnsubscribe(ctx context.Context, id string) (bool, error)
 }
 
 // NetBandwidthStats mirrors libp2p/core/metrics.Stats. Re-declared here so

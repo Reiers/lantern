@@ -30,6 +30,7 @@ import (
 
 	"github.com/Reiers/lantern/api"
 	"github.com/Reiers/lantern/internal/buildinfo"
+	"github.com/Reiers/lantern/rpc/handlers"
 )
 
 // Config configures the RPC server.
@@ -81,7 +82,15 @@ func New(cfg Config, node api.FullNode) (*Server, error) {
 	// Lantern issue #26 (eth_* coverage): the FoC client stack speaks
 	// `eth_*` exclusively, so we register the Eth* handlers in both
 	// namespaces without duplicating the Go methods.
-	rs := jsonrpc.NewServer(jsonrpc.WithServerMethodNameFormatter(lanternMethodNameFormatter))
+	// WithReverseClient registers EthSubscriberMethods as the proxy
+	// type for server-initiated WS callbacks (eth_subscription).
+	// Required for eth_subscribe to push newHeads events back to the
+	// client over the same WS connection. The 'eth' namespace matches
+	// the formatter's eth_* prefix.
+	rs := jsonrpc.NewServer(
+		jsonrpc.WithServerMethodNameFormatter(lanternMethodNameFormatter),
+		jsonrpc.WithReverseClient[handlers.EthSubscriberMethods]("eth"),
+	)
 
 	// Register the FullNode directly. Lotus uses a permission-decorated
 	// proxy struct (FullNodeStruct) with auto-generated method shims; for
