@@ -443,23 +443,40 @@ func (c *ChainAPI) EthGetBlockByNumber(ctx context.Context, blockParam string, f
 	// equivalent; we return zero/empty for those and trust the client
 	// to only consult the fields it cares about (typical viem use is
 	// number + timestamp + hash).
+	// All address + hash fields go through the ETH-shape helpers so
+	// strict ETH parsers (e.g. go-ethereum types.Header) can JSON-
+	// unmarshal the result. Filecoin CIDs become 32-byte hex hashes
+	// (via EthHashFromCid). The miner f0-actor becomes 0xff||be64(id).
+	// We also surface the original CIDs in filecoinTipsetCids for
+	// callers that know about Filecoin and want the full tipset.
+	//
+	// baseFeePerGas is included so EIP-1559 gas-pricing paths
+	// (curio's sender_eth.go: HeaderByNumber -> Header.BaseFee) get a
+	// non-nil value. We use the parent block's base fee since the
+	// current block's is the same on Filecoin (base fee is consensus-
+	// determined at tipset finalisation).
+	baseFeeHex := "0x0"
+	if b.ParentBaseFee.Int != nil {
+		baseFeeHex = "0x" + b.ParentBaseFee.Int.Text(16)
+	}
 	return map[string]any{
 		"number":           fmt.Sprintf("0x%x", int64(b.Height)),
-		"hash":             b.Cid().String(),
-		"parentHash":       firstCidOrEmpty(b.Parents),
+		"hash":             EthHashFromCid(b.Cid()),
+		"parentHash":       firstCidHash(b.Parents),
 		"nonce":            "0x0000000000000000",
 		"sha3Uncles":       "0x0000000000000000000000000000000000000000000000000000000000000000",
 		"logsBloom":        "0x" + zeroPad(512),
 		"transactionsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
-		"stateRoot":        b.ParentStateRoot.String(),
-		"receiptsRoot":     b.ParentMessageReceipts.String(),
-		"miner":            b.Miner.String(),
+		"stateRoot":        EthHashFromCid(b.ParentStateRoot),
+		"receiptsRoot":     EthHashFromCid(b.ParentMessageReceipts),
+		"miner":            EthAddressFromFilecoinIDActor(b.Miner),
 		"difficulty":       "0x0",
 		"totalDifficulty":  "0x0",
 		"extraData":        "0x",
 		"size":             "0x0",
 		"gasLimit":         fmt.Sprintf("0x%x", build.BlockGasLimit),
 		"gasUsed":          "0x0", // we don't track per-block gas use
+		"baseFeePerGas":    baseFeeHex,
 		"timestamp":        fmt.Sprintf("0x%x", b.Timestamp),
 		"transactions":     []string{}, // empty when fullTx=false (we ignore fullTx for now)
 		"uncles":           []string{},
