@@ -553,6 +553,22 @@ func (c *ChainAPI) StateGetRandomnessFromBeacon(ctx context.Context, pers gscryp
 	return abi.Randomness(out), nil
 }
 
+// StateGetRandomnessDigestFromBeacon returns the blake2b-256 of the
+// canonical beacon entry's Data bytes at randEpoch. Matches Lotus'
+// StateManager.GetRandomnessDigestFromBeacon -> stateRand.GetBeaconRandomness
+// (chain/rand/rand.go). The Digest variant has no personalisation /
+// entropy mixing - callers that need that should use
+// StateGetRandomnessFromBeacon. PDP ProveTask is one of the callers
+// that wants only the raw digest (see curio/tasks/pdpv0/task_prove.go).
+func (c *ChainAPI) StateGetRandomnessDigestFromBeacon(ctx context.Context, randEpoch abi.ChainEpoch, _ types.TipSetKey) (abi.Randomness, error) {
+	entry, err := c.beaconEntryForEpoch(ctx, randEpoch)
+	if err != nil {
+		return nil, err
+	}
+	d := lbeacon.BeaconDigest(*entry)
+	return abi.Randomness(d[:]), nil
+}
+
 // StateGetRandomnessFromTickets returns randomness derived from the chain
 // ticket at the requested epoch. Matches Lotus' getChainRandomness +
 // DrawRandomnessFromDigest path for nv >= 13 (no lookback flag; we use the
