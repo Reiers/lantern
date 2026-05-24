@@ -34,6 +34,8 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/filecoin-project/go-state-types/abi"
@@ -42,6 +44,8 @@ import (
 
 	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
+	hstore "github.com/Reiers/lantern/chain/header/store"
+	"github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/chain/types"
 	"github.com/Reiers/lantern/net/combined"
@@ -95,6 +99,60 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 
 	chainAPI := handlers.New(tr, fetcher, d.cfg.Wallet, nil, network.String())
 
+	// Persistent header store + head-change distributor + sync.
+	//
+	// Without this, Filecoin.ChainNotify returns 'method not supported
+	// in this mode (no out channel support)' because go-jsonrpc can't
+	// stream channels over plain HTTP POST. Embedded consumers reach
+	// the distributor directly via Daemon.HeadChanges(); external
+	// consumers reach it via ChainNotify over WebSocket (when the RPC
+	// server is upgraded — separate workstream).
+	//
+	// The wiring mirrors cmd/lantern's standalone-daemon path: Badger
+	// header store at <data-dir>/<network>/headerstore, distributor
+	// fanning subscribers off the store, hstore.Sync polling the same
+	// Glif source used as the cold-state fallback fetcher.
+	if !d.cfg.NoHeaderStore {
+		hsPath := d.cfg.HeaderStorePath
+		if hsPath == "" {
+			hsPath = filepath.Join(d.cfg.DataDir, network.String(), "headerstore")
+		}
+		if err := os.MkdirAll(hsPath, 0o700); err != nil {
+			return fmt.Errorf("create header store dir: %w", err)
+		}
+		store, err := hstore.Open(hsPath, hstore.Options{})
+		if err != nil {
+			return fmt.Errorf("open header store: %w", err)
+		}
+		chainAPI.HeaderStore = store
+
+		dist := headnotify.New(store, d.cfg.NotifyBufSize)
+		dist.Start()
+		chainAPI.HeadNotify = dist
+
+		src := glif.New(glifURL, 8*time.Second)
+		sync := hstore.NewSync(store, src, hstore.SyncOptions{
+			Interval:       d.cfg.SyncInterval,
+			MaxBacktrack:   60,
+			BootstrapDepth: 3,
+		})
+		if err := sync.Start(ctx); err != nil {
+			_ = store.Close()
+			return fmt.Errorf("start header sync: %w", err)
+		}
+
+		d.mu.Lock()
+		d.headerStore = store
+		d.headerSync = sync
+		d.headNotify = dist
+		d.mu.Unlock()
+
+		if !d.cfg.EmbeddedMode {
+			fmt.Printf("daemon: header store %s (sync every %s, buf=%d)\n",
+				hsPath, d.cfg.SyncInterval, d.cfg.NotifyBufSize)
+		}
+	}
+
 	// Optional VM bridge: when configured, FEVM read methods (eth_call,
 	// eth_estimateGas) and SendRawTransaction get forwarded to an
 	// upstream Forest/Lotus node. Without this, eth_call against any
@@ -139,14 +197,30 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 	defer close(d.stopped)
 	d.mu.Lock()
 	srv := d.rpcServer
+	sync := d.headerSync
+	store := d.headerStore
 	d.rpcServer = nil
 	d.auth = nil
+	d.headerSync = nil
+	d.headerStore = nil
+	d.headNotify = nil
 	d.started = false
 	d.mu.Unlock()
 
 	if srv != nil {
 		if err := srv.Stop(ctx); err != nil {
 			return fmt.Errorf("stop rpc server: %w", err)
+		}
+	}
+	// Shut down header-sync before closing the store: Sync writes
+	// SetHead asynchronously, and Close on an open Badger handle while
+	// a writer is mid-txn corrupts the LSM. Stop is idempotent.
+	if sync != nil {
+		sync.Stop()
+	}
+	if store != nil {
+		if err := store.Close(); err != nil {
+			return fmt.Errorf("close header store: %w", err)
 		}
 	}
 	return nil
