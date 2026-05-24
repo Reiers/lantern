@@ -41,6 +41,7 @@ import (
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/ipfs/go-cid"
+	logging "github.com/ipfs/go-log/v2"
 
 	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
@@ -56,6 +57,8 @@ import (
 	"github.com/Reiers/lantern/state/hamt"
 	"github.com/Reiers/lantern/vm/bridge"
 )
+
+var log = logging.Logger("lantern/daemon")
 
 // startInternal is the bring-up sequence: anchor trust + mount the
 // JSON-RPC server. The lighter subsystems (libp2p, gossipsub, header
@@ -147,6 +150,11 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		d.headNotify = dist
 		d.mu.Unlock()
 
+		log.Infow("header store wired",
+			"path", hsPath,
+			"sync_interval", d.cfg.SyncInterval,
+			"notify_buf", d.cfg.NotifyBufSize,
+			"embedded", d.cfg.EmbeddedMode)
 		if !d.cfg.EmbeddedMode {
 			fmt.Printf("daemon: header store %s (sync every %s, buf=%d)\n",
 				hsPath, d.cfg.SyncInterval, d.cfg.NotifyBufSize)
