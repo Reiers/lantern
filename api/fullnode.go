@@ -73,6 +73,7 @@ type FullNode interface {
 	StateReadState(ctx context.Context, a address.Address, key types.TipSetKey) (*ActorState, error)
 	StateGetRandomnessFromBeacon(ctx context.Context, pers gscrypto.DomainSeparationTag, randEpoch abi.ChainEpoch, entropy []byte, key types.TipSetKey) (abi.Randomness, error)
 	StateGetRandomnessFromTickets(ctx context.Context, pers gscrypto.DomainSeparationTag, randEpoch abi.ChainEpoch, entropy []byte, key types.TipSetKey) (abi.Randomness, error)
+	StateGetRandomnessDigestFromBeacon(ctx context.Context, randEpoch abi.ChainEpoch, key types.TipSetKey) (abi.Randomness, error)
 	StateGetBeaconEntry(ctx context.Context, epoch abi.ChainEpoch) (*types.BeaconEntry, error)
 
 	// Miner-specific reads
