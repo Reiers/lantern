@@ -40,6 +40,8 @@ import (
 
 	lapi "github.com/Reiers/lantern/api"
 	"github.com/Reiers/lantern/build"
+	hstore "github.com/Reiers/lantern/chain/header/store"
+	"github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	rpcserver "github.com/Reiers/lantern/rpc/server"
 	"github.com/Reiers/lantern/wallet"
@@ -211,6 +213,15 @@ type Daemon struct {
 	rpcServer *rpcserver.Server
 	auth      *rpcserver.Auth
 
+	// Header store + head-change distributor + sync agent. Populated
+	// when !cfg.NoHeaderStore. The distributor backs ChainNotify
+	// (HTTP-RPC subscribers via the chainAPI handler) AND the in-
+	// process HeadChanges() accessor that embedded consumers use to
+	// bypass the HTTP/JSON-RPC out-channel restriction.
+	headerStore *hstore.Store
+	headerSync  *hstore.Sync
+	headNotify  *headnotify.Distributor
+
 	// Internal cancellation: derived from caller's ctx in Start.
 	cancel context.CancelFunc
 }
@@ -230,6 +241,29 @@ func New(cfg Config) (*Daemon, error) {
 
 // Config returns the effective configuration (with defaults applied).
 func (d *Daemon) Config() Config { return d.cfg }
+
+// HeadChanges returns a channel of head-change events from the
+// in-process distributor. The first event is always {Type:"current"}
+// with the current head (or nil if the store hasn't observed a head
+// yet). Cancelling ctx unsubscribes and closes the channel.
+//
+// Returns nil when NoHeaderStore=true (no distributor wired) OR when
+// Start has not yet completed.
+//
+// Embedded consumers (curio-core) call this to drive chain-sched
+// event loops without going through the JSON-RPC ChainNotify path
+// (which can't carry channels over HTTP POST). External consumers
+// reach the same distributor via the standard JSON-RPC ChainNotify
+// when the RPC server is upgraded to WebSocket transport.
+func (d *Daemon) HeadChanges(ctx context.Context) <-chan []lapi.HeadChange {
+	d.mu.Lock()
+	dist := d.headNotify
+	d.mu.Unlock()
+	if dist == nil {
+		return nil
+	}
+	return dist.Subscribe(ctx)
+}
 
 // RPCAddr returns the resolved RPC listen address. Only valid after
 // Start has returned nil (or after Started() returns true).
