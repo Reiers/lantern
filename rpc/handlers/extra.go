@@ -426,11 +426,26 @@ func (c *ChainAPI) EthGetBlockByNumber(ctx context.Context, blockParam string, f
 	if err != nil || ts == nil {
 		return nil, nil // matches Ethereum convention: unknown block returns null
 	}
+	return tipsetToEthBlock(ts), nil
+}
 
-	// Use the first block in the tipset as the canonical block id.
+// tipsetToEthBlock converts a Lantern TipSet to the ETH-shaped block
+// dict used by eth_getBlockByNumber + eth_subscribe(newHeads). Extracted
+// from EthGetBlockByNumber so both call sites share the exact same
+// reshape.
+//
+// All address + hash fields go through the ETH-shape helpers so strict
+// ETH parsers (e.g. go-ethereum types.Header) can JSON-unmarshal the
+// result. Filecoin CIDs become 32-byte hex hashes (via EthHashFromCid).
+// The miner f0-actor becomes 0xff||be64(id). The original CIDs are
+// surfaced in filecoinTipsetCids for callers that know about Filecoin.
+//
+// baseFeePerGas is the parent's base fee (same as the current's on
+// Filecoin since base fee is consensus-determined per tipset).
+func tipsetToEthBlock(ts *types.TipSet) map[string]any {
 	blocks := ts.Blocks()
 	if len(blocks) == 0 {
-		return nil, nil
+		return nil
 	}
 	b := blocks[0]
 
@@ -439,22 +454,6 @@ func (c *ChainAPI) EthGetBlockByNumber(ctx context.Context, blockParam string, f
 		cidStrs[i] = blk.Cid().String()
 	}
 
-	// ETH-shaped block fields. Many Filecoin concepts have no ETH
-	// equivalent; we return zero/empty for those and trust the client
-	// to only consult the fields it cares about (typical viem use is
-	// number + timestamp + hash).
-	// All address + hash fields go through the ETH-shape helpers so
-	// strict ETH parsers (e.g. go-ethereum types.Header) can JSON-
-	// unmarshal the result. Filecoin CIDs become 32-byte hex hashes
-	// (via EthHashFromCid). The miner f0-actor becomes 0xff||be64(id).
-	// We also surface the original CIDs in filecoinTipsetCids for
-	// callers that know about Filecoin and want the full tipset.
-	//
-	// baseFeePerGas is included so EIP-1559 gas-pricing paths
-	// (curio's sender_eth.go: HeaderByNumber -> Header.BaseFee) get a
-	// non-nil value. We use the parent block's base fee since the
-	// current block's is the same on Filecoin (base fee is consensus-
-	// determined at tipset finalisation).
 	baseFeeHex := "0x0"
 	if b.ParentBaseFee.Int != nil {
 		baseFeeHex = "0x" + b.ParentBaseFee.Int.Text(16)
@@ -475,15 +474,13 @@ func (c *ChainAPI) EthGetBlockByNumber(ctx context.Context, blockParam string, f
 		"extraData":        "0x",
 		"size":             "0x0",
 		"gasLimit":         fmt.Sprintf("0x%x", build.BlockGasLimit),
-		"gasUsed":          "0x0", // we don't track per-block gas use
+		"gasUsed":          "0x0",
 		"baseFeePerGas":    baseFeeHex,
 		"timestamp":        fmt.Sprintf("0x%x", b.Timestamp),
-		"transactions":     []string{}, // empty when fullTx=false (we ignore fullTx for now)
+		"transactions":     []string{},
 		"uncles":           []string{},
-		// Filecoin extension: surface the full tipset CIDs so clients
-		// that know about Filecoin can disambiguate sibling blocks.
 		"filecoinTipsetCids": cidStrs,
-	}, nil
+	}
 }
 
 // --- FEVM bridge-forwarding handlers (lantern#30) -----------------------

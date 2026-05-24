@@ -24,6 +24,8 @@ import (
 
 	"golang.org/x/crypto/sha3"
 
+	"github.com/filecoin-project/go-jsonrpc"
+
 	"github.com/Reiers/lantern/api"
 	"github.com/Reiers/lantern/internal/buildinfo"
 )
@@ -252,4 +254,16 @@ func (e *ethAPI) EthGetBlockByHash(ctx context.Context, blockHash string, fullTx
 // event watchers and client-side payment monitoring.
 func (e *ethAPI) EthGetLogs(ctx context.Context, filter any) (any, error) {
 	return e.full.EthGetLogs(ctx, filter)
+}
+
+// EthSubscribe (EIP-1193) registers an event subscription on the WS
+// connection. V1 supports event type "newHeads". Returns the
+// subscription ID; events flow back as eth_subscription notifications.
+func (e *ethAPI) EthSubscribe(ctx context.Context, params jsonrpc.RawParams) (string, error) {
+	return e.full.EthSubscribe(ctx, params)
+}
+
+// EthUnsubscribe cancels a subscription. Returns true if found.
+func (e *ethAPI) EthUnsubscribe(ctx context.Context, id string) (bool, error) {
+	return e.full.EthUnsubscribe(ctx, id)
 }

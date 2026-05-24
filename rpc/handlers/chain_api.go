@@ -14,6 +14,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -106,6 +107,13 @@ type ChainAPI struct {
 	// nil (e.g. wallet-only CLI invocations) those methods return safe
 	// zero values, matching the Phase 9 stub behaviour.
 	NetInfoSource NetInfo
+
+	// eth_subscribe state. ethSubs maps each active subscription ID to
+	// its cancel func. Lazy-initialised on first EthSubscribe call so
+	// cold ChainAPI instances (probe mode, tests) don't carry the
+	// allocation. See rpc/handlers/eth_subscribe.go for the wire flow.
+	ethSubMu sync.Mutex
+	ethSubs  map[EthSubscriptionID]*subscription
 }
 
 // AuthIssuer abstracts the rpc/server Auth type.
@@ -560,13 +568,56 @@ func (c *ChainAPI) StateGetRandomnessFromBeacon(ctx context.Context, pers gscryp
 // entropy mixing - callers that need that should use
 // StateGetRandomnessFromBeacon. PDP ProveTask is one of the callers
 // that wants only the raw digest (see curio/tasks/pdpv0/task_prove.go).
-func (c *ChainAPI) StateGetRandomnessDigestFromBeacon(ctx context.Context, randEpoch abi.ChainEpoch, _ types.TipSetKey) (abi.Randomness, error) {
+//
+// Lookup strategy:
+//
+//  1. Try the local header store (beaconEntryForEpoch). Fastest +
+//     stays on-chain-verified.
+//  2. If the requested epoch is beyond the local head OR the beacon
+//     entry for that epoch isn't in the locally-walked tipsets,
+//     fall back to the VMBridge. Mirrors the EthGetBlockByNumber
+//     fallback pattern (extra.go).
+//
+// Why the fallback matters: PDP ProveTask asks for randomness at the
+// dataset's challenge epoch the moment the proving window opens. If
+// the local header store is even one epoch behind the chain head
+// (normal during sync catch-up), the local path errors with
+// 'cannot draw randomness from future epoch'. Without fallback the
+// prove task burns its MaxFailures budget waiting for sync to catch
+// up - on a slow link or after a header-store cold start, that can
+// exceed the proving window itself.
+func (c *ChainAPI) StateGetRandomnessDigestFromBeacon(ctx context.Context, randEpoch abi.ChainEpoch, tsk types.TipSetKey) (abi.Randomness, error) {
 	entry, err := c.beaconEntryForEpoch(ctx, randEpoch)
-	if err != nil {
-		return nil, err
+	if err == nil {
+		d := lbeacon.BeaconDigest(*entry)
+		return abi.Randomness(d[:]), nil
 	}
-	d := lbeacon.BeaconDigest(*entry)
-	return abi.Randomness(d[:]), nil
+
+	localErr := err
+
+	// Local lookup failed. If we have a bridge, try forwarding to the
+	// upstream node. The upstream returns the same blake2b-256 digest;
+	// we don't lose verifiability here because the digest is itself a
+	// commitment to the beacon entry that the upstream is also
+	// computing from the same DRAND quicknet round.
+	if c.Bridge != nil {
+		params, perr := json.Marshal([]any{int64(randEpoch), tsk})
+		if perr != nil {
+			return nil, xerrors.Errorf("local lookup failed (%w) and bridge marshal failed: %v", localErr, perr)
+		}
+		raw, brErr := c.Bridge.RawJSONRPC(ctx, "Filecoin.StateGetRandomnessDigestFromBeacon", params)
+		if brErr != nil {
+			return nil, xerrors.Errorf("local lookup failed (%w) and bridge fallback failed: %v", localErr, brErr)
+		}
+		var out abi.Randomness
+		if uerr := json.Unmarshal(raw, &out); uerr != nil {
+			return nil, xerrors.Errorf("local lookup failed (%w) and bridge decode failed: %v", localErr, uerr)
+		}
+		log.Infow("StateGetRandomnessDigestFromBeacon: served via bridge fallback",
+			"epoch", randEpoch, "local_err", localErr.Error())
+		return out, nil
+	}
+	return nil, localErr
 }
 
 // StateGetRandomnessFromTickets returns randomness derived from the chain
