@@ -589,6 +589,14 @@ func lanternMethodNameFormatter(namespace, method string) string {
 			stripped = string(stripped[0]|0x20) + stripped[1:]
 		}
 		return "net_" + stripped
+	case "web3":
+		// web3 methods don't have a 'Web3' prefix on the Go side
+		// (just ClientVersion, Sha3). Convert to web3_<lowercase-first>.
+		stripped := method
+		if len(stripped) > 0 {
+			stripped = string(stripped[0]|0x20) + stripped[1:]
+		}
+		return "web3_" + stripped
 	}
 	return namespace + "." + method
 }
