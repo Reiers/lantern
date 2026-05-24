@@ -17,10 +17,15 @@ package server
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	stdbig "math/big"
+	"runtime"
+
+	"golang.org/x/crypto/sha3"
 
 	"github.com/Reiers/lantern/api"
+	"github.com/Reiers/lantern/internal/buildinfo"
 )
 
 // ethAPI implements the subset of api.FullNode that maps to Ethereum
@@ -171,6 +176,56 @@ func (n *netAPI) NetVersion(ctx context.Context) (string, error) {
 // EthGetTransactionByHash forwards to the VMBridge.
 func (e *ethAPI) EthGetTransactionByHash(ctx context.Context, txHash string) (any, error) {
 	return e.full.EthGetTransactionByHash(ctx, txHash)
+}
+
+// web3API implements the small "web3_*" namespace. Wallets and dapps
+// call web3_clientVersion to identify what node they're talking to;
+// without it the wallet treats us as an unknown / unsupported node.
+// EIP-1474 lists this as the canonical client-introspection method.
+type web3API struct {
+	networkName string
+}
+
+func newWeb3API(networkName string) *web3API {
+	return &web3API{networkName: networkName}
+}
+
+// ClientVersion returns the wallet-facing client identifier. Matches
+// go-ethereum's format "<software>/<version>/<os>-<arch>/<lang>" but
+// with our own software/version so wallets logging the field can
+// distinguish a Lantern light client from a full Lotus.
+func (w *web3API) ClientVersion(_ context.Context) (string, error) {
+	net := w.networkName
+	if net == "" {
+		net = "unknown"
+	}
+	return fmt.Sprintf("Lantern/%s/%s/go-%s",
+		buildinfo.BuildVersion(), net, runtime.Version()[2:]), nil
+}
+
+// Sha3 returns keccak256 of the input bytes. Some libraries call this
+// during chain-id discovery flows.
+func (w *web3API) Sha3(_ context.Context, input string) (string, error) {
+	raw := input
+	if len(raw) >= 2 && (raw[:2] == "0x" || raw[:2] == "0X") {
+		raw = raw[2:]
+	}
+	data, err := hex.DecodeString(raw)
+	if err != nil {
+		return "", fmt.Errorf("web3_sha3: invalid hex input: %w", err)
+	}
+	h := keccak256(data)
+	return "0x" + hex.EncodeToString(h), nil
+}
+
+// keccak256 is the small helper for web3_sha3. We avoid pulling in
+// go-ethereum's crypto package here so the rpc/server package stays
+// thin; this is one of two places in the codebase that needs the
+// hash (the other is chain/beacon which has its own blake2b helper).
+func keccak256(data []byte) []byte {
+	h := sha3.NewLegacyKeccak256()
+	h.Write(data)
+	return h.Sum(nil)
 }
 
 // EthGetTransactionByBlockNumberAndIndex forwards to the VMBridge.
