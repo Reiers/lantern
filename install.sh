@@ -2,7 +2,7 @@
 #
 # Lantern installer — pure-Go Filecoin light node.
 #
-#   curl -fsSL https://get.lantern.reiers.io | bash
+#   curl -fsSL https://get.golantern.io | bash
 #
 # Or, from a local checkout:
 #
