@@ -2,6 +2,34 @@
 
 All notable changes to Lantern.
 
+## v1.5.7 (2026-05-28)
+
+The "installer actually upgrades when a new release is out" release.
+
+### Fixed
+
+- **Installer was permanently stuck on whichever binary was installed first.**
+  The skip-download path tested only `is the binary present?` and silently
+  reused stale local binaries forever, even after `lantern` itself had
+  shipped multiple new releases. Symptom: users on v1.2.x-era binaries who
+  re-ran the installer kept getting v1.2.x behaviour (asks for a passphrase
+  every daemon boot because that version writes its keystore under
+  `~/.lantern/keystore` instead of the network-split `~/.lantern/<net>/keystore`
+  used by v1.5+). Reported by Nicklas, 2026-05-28.
+- **New behaviour:** when a local binary exists, the installer fetches the
+  published `.sha256` for the requested version and compares. Match →
+  skip. Differ → upgrade. Offline / sha unreachable → keep the legacy
+  skip-with-warning so offline installs don't break.
+- **Download loop simplified.** The earlier subshell+background+race-read
+  pattern for capturing curl's exit code was flaky in some bash configs
+  (the http_code file wasn't always flushed when read). Replaced with a
+  synchronous curl + direct exit-code capture. Also prints the binary size
+  on success.
+
+### Other
+
+- No source-code changes; binaries are byte-identical to v1.5.6.
+
 ## v1.5.6 (2026-05-28)
 
 The "FilBucket-style installer rewrite" release. Installer-only.
