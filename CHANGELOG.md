@@ -2,6 +2,45 @@
 
 All notable changes to Lantern.
 
+## v1.5.6 (2026-05-28)
+
+The "FilBucket-style installer rewrite" release. Installer-only.
+
+### Changed
+
+- **Full installer rewrite in the FilBucket pattern.** Three concrete things:
+  - **Spinner during binary download.** Old behavior dumped lines like
+    `Trying URL... HTTP 200` to the terminal as each mirror was tried. New
+    behavior shows a single animated braille spinner with the mirror name
+    in dim text, folding to a green ✓ on success.
+  - **Spinner during the bootstrap quorum** showing a running `(N/5
+    sources agreed)` counter instead of streaming every libp2p source
+    result. Final result still shows the anchor epoch.
+  - **Closing block in the FilBucket idiom**: a soft horizontal rule, the
+    binary path, the data dir, a `Next steps` block with four commands,
+    the Curio FULLNODE_API_INFO export, links to docs + source + logs,
+    and a rotating one-line aphorism at the bottom.
+- **Wallet creation guard.** If stdin isn't a TTY (curl|bash, or any
+  installer run with stdin redirected), wallet creation is skipped rather
+  than left to fail mid-passphrase-prompt. The installer prints both the
+  interactive and non-interactive (LANTERN_PASS=...) recovery commands.
+- **Lantern ASCII mini-banner** at the top of the installer, in the same
+  weight as FilBucket's. Cream wordmark, ink-grey lantern, amber accent
+  inside the lantern's body.
+
+### Fixed
+
+- **Closing block was leaking literal `${INK}` and `${BOLD}` strings**
+  when the previous version's printf chains tried to embed shell vars
+  inside the format string. New version uses `%s` substitution
+  consistently.
+
+### Other
+
+- No source-code changes from v1.5.5; binaries are unchanged.
+- `dl-lantern.reiers.io` mirror is still returning 404 from the Hetzner
+  box; tracked separately.
+
 ## v1.5.5 (2026-05-28)
 
 The "installer that doesn't look like raw escape codes, daemon that tells you where the webui is" release.
