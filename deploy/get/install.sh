@@ -85,9 +85,23 @@ preflight() {
   ok "Tools: curl, tar, shasum/sha256sum available"
 
   LANTERN_HOME="${LANTERN_HOME:-$HOME/.lantern}"
-  LANTERN_PREFIX="${LANTERN_PREFIX:-/usr/local/bin}"
   mkdir -p "$LANTERN_HOME"
   ok "Data directory: $LANTERN_HOME"
+
+  # Pick a sensible PATH directory for the symlink. Honor LANTERN_PREFIX if set;
+  # otherwise prefer Homebrew Apple Silicon (/opt/homebrew/bin), then Intel/Linux
+  # /usr/local/bin, then user-local ~/.local/bin. We do NOT assume /usr/local/bin
+  # exists — fresh Apple Silicon Macs without Homebrew don't have it.
+  if [[ -n "${LANTERN_PREFIX:-}" ]]; then
+    : # honor caller
+  elif [[ -d /opt/homebrew/bin ]]; then
+    LANTERN_PREFIX=/opt/homebrew/bin
+  elif [[ -d /usr/local/bin ]]; then
+    LANTERN_PREFIX=/usr/local/bin
+  else
+    LANTERN_PREFIX="$HOME/.local/bin"
+  fi
+  ok "Symlink target: ${LANTERN_PREFIX}/lantern"
 }
 
 # ---------- Download ----------
@@ -107,31 +121,30 @@ download_binary() {
   target="${LANTERN_HOME}/lantern"
 
   # Idempotence: if a binary already exists and matches the latest sha,
-  # skip download.
+  # skip download. We still call install_symlink at the end so the PATH
+  # link is repaired even on a no-op re-run.
   if [[ -x "$target" && "${LANTERN_REINSTALL:-0}" != "1" ]]; then
     if existing_sha=$(sha256_of "$target" 2>/dev/null); then
       info "Existing binary at $target (sha256 $(echo "$existing_sha" | cut -c1-12)...)"
       info "Skipping download (LANTERN_REINSTALL=1 to force)"
       ok "Using existing binary"
+      install_symlink "$target"
       return
     fi
   fi
 
-  # Mirror chain. The Lantern git repo is currently private, so the
-  # GitHub release endpoint returns 404 for anonymous downloads. The
-  # primary mirror is dl-lantern.reiers.io, served from the same
-  # Hetzner host that runs the gateway. GitHub releases are listed as
-  # a fallback so once the repo flips public the chain Just Works
-  # without an installer update.
+  # Mirror chain. GitHub releases is the canonical source (the repo is
+  # public). The dl-lantern.reiers.io mirror is a soft fallback for users
+  # behind networks that block raw GitHub asset CDN.
   if [[ "$LANTERN_VERSION" == "latest" ]]; then
     declare -a urls=(
-      "https://dl-lantern.reiers.io/latest/${bin_name}"
       "https://github.com/Reiers/lantern/releases/latest/download/${bin_name}"
+      "https://dl-lantern.reiers.io/latest/${bin_name}"
     )
   else
     declare -a urls=(
-      "https://dl-lantern.reiers.io/${LANTERN_VERSION}/${bin_name}"
       "https://github.com/Reiers/lantern/releases/download/${LANTERN_VERSION}/${bin_name}"
+      "https://dl-lantern.reiers.io/${LANTERN_VERSION}/${bin_name}"
     )
   fi
 
@@ -196,6 +209,24 @@ build_from_source() {
 install_symlink() {
   local target="$1"
   local link="${LANTERN_PREFIX}/lantern"
+  local dir; dir="$(dirname "$link")"
+
+  # Make sure the prefix dir exists. If it's the user-local fallback we own it,
+  # otherwise we leave it to the user (we should have picked an existing system dir
+  # in preflight, but just in case).
+  if [[ ! -d "$dir" ]]; then
+    if [[ "$dir" == "$HOME"* ]]; then
+      mkdir -p "$dir"
+      ok "Created $dir"
+    else
+      warn "$dir does not exist; falling back to \$HOME/.local/bin"
+      LANTERN_PREFIX="$HOME/.local/bin"
+      link="${LANTERN_PREFIX}/lantern"
+      dir="$LANTERN_PREFIX"
+      mkdir -p "$dir"
+    fi
+  fi
+
   if [[ -L "$link" || -e "$link" ]]; then
     local existing
     existing=$(readlink "$link" 2>/dev/null || echo "$link")
@@ -205,15 +236,33 @@ install_symlink() {
     fi
     info "Replacing existing $link (was: $existing)"
   fi
-  if [[ -w "$(dirname "$link")" ]]; then
+
+  if [[ -w "$dir" ]]; then
     ln -sf "$target" "$link"
     ok "Symlink: $link → $target"
   else
-    info "Need sudo to write $link"
+    info "Need sudo to write $link (system dir, not user-owned)"
     if sudo ln -sf "$target" "$link"; then
       ok "Symlink: $link → $target"
     else
-      warn "Could not create $link. Add $LANTERN_HOME to PATH or run with sudo."
+      warn "Could not create $link. Falling back to user-local install."
+      LANTERN_PREFIX="$HOME/.local/bin"
+      link="${LANTERN_PREFIX}/lantern"
+      mkdir -p "$LANTERN_PREFIX"
+      ln -sf "$target" "$link"
+      ok "Symlink: $link → $target"
+    fi
+  fi
+
+  # PATH check + actionable hint.
+  if ! command -v lantern >/dev/null 2>&1 \
+     || [[ "$(command -v lantern 2>/dev/null)" != "$link" && "$(readlink "$(command -v lantern 2>/dev/null)" 2>/dev/null)" != "$target" ]]; then
+    if [[ ":$PATH:" != *":$LANTERN_PREFIX:"* ]]; then
+      warn "$LANTERN_PREFIX is not in your PATH yet."
+      info "Add this line to your shell profile (~/.zshrc or ~/.bashrc):"
+      info "    export PATH=\"$LANTERN_PREFIX:\$PATH\""
+      info "Then reload with:  exec \$SHELL -l"
+      info "Until then, invoke with the full path:  $target"
     fi
   fi
 }
@@ -324,14 +373,24 @@ closing() {
     token=$(cat "${LANTERN_HOME}/token")
   fi
 
+  # Resolve the canonical command the user should type. If `lantern` is in PATH
+  # via the symlink we just made, use the short form; otherwise show the full path
+  # so the closing copy is always actionable.
+  local cmd="lantern"
+  if ! command -v lantern >/dev/null 2>&1; then
+    cmd="$bin"
+  fi
+
   cat <<EOF
 
   ${CLR_GREEN}✓ Lantern is installed.${CLR_RESET}
 
-  Status:        ${CLR_BOLD}lantern info${CLR_RESET}
-  Chain head:    ${CLR_BOLD}lantern chain head${CLR_RESET}
-  Service:       ${CLR_BOLD}lantern service status${CLR_RESET}
-  Refresh trust: ${CLR_BOLD}lantern repair${CLR_RESET}
+  Binary:        ${CLR_BOLD}${bin}${CLR_RESET}
+
+  Status:        ${CLR_BOLD}${cmd} info${CLR_RESET}
+  Chain head:    ${CLR_BOLD}${cmd} chain head${CLR_RESET}
+  Service:       ${CLR_BOLD}${cmd} service status${CLR_RESET}
+  Refresh trust: ${CLR_BOLD}${cmd} repair${CLR_RESET}
 
 EOF
   if [[ -n "$token" ]]; then
