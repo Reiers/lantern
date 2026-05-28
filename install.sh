@@ -225,14 +225,36 @@ download_binary() {
   LANTERN_VERSION="${LANTERN_VERSION:-latest}"
   local bin_name="lantern-${OS}-${ARCH}"
   local target="${LANTERN_HOME}/lantern"
+  local sha_base
+  if [[ "$LANTERN_VERSION" == "latest" ]]; then
+    sha_base="https://github.com/Reiers/lantern/releases/latest/download/${bin_name}.sha256"
+  else
+    sha_base="https://github.com/Reiers/lantern/releases/download/${LANTERN_VERSION}/${bin_name}.sha256"
+  fi
 
-  # Idempotence: if a binary already exists, skip download. We still call
-  # install_symlink so the PATH link is repaired on re-runs.
+  # Idempotence: if a binary already exists, compare its sha256 to the published
+  # sha256 for the requested version. If they match, skip. If they differ, the
+  # local copy is stale and we should upgrade. If the published sha is unreachable
+  # (e.g. user is offline), fall back to the legacy behaviour (skip download) so
+  # we don't break offline installs.
   if [[ -x "$target" && "${LANTERN_REINSTALL:-0}" != "1" ]]; then
+    local existing_sha
     if existing_sha=$(sha256_of "$target" 2>/dev/null); then
-      ok "Binary present: ${DIM}sha256 ${existing_sha:0:12}…${RESET}  ${DIM}(LANTERN_REINSTALL=1 to force)${RESET}"
-      install_symlink "$target"
-      return
+      local published_sha=""
+      published_sha=$(curl -fsSL --max-time 6 "$sha_base" 2>/dev/null | awk '{print $1}' || true)
+      if [[ -n "$published_sha" && "$published_sha" == "$existing_sha" ]]; then
+        ok "Already on the latest binary  ${DIM}sha256 ${existing_sha:0:12}…${RESET}"
+        install_symlink "$target"
+        return
+      elif [[ -n "$published_sha" ]]; then
+        info "Local binary differs from published release — upgrading"
+        info "  local:     ${DIM}${existing_sha:0:12}…${RESET}"
+        info "  published: ${DIM}${published_sha:0:12}…${RESET}"
+      else
+        ok "Binary present (offline; can't verify against release)  ${DIM}sha256 ${existing_sha:0:12}…${RESET}"
+        install_symlink "$target"
+        return
+      fi
     fi
   fi
 
@@ -255,24 +277,25 @@ download_binary() {
   trap 'rm -rf "$tmp_dir"' EXIT
 
   local bin_url=""
-  local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
   for candidate in "${urls[@]}"; do
-    # Show a spinner while curling. We capture the http code separately.
-    (curl -fsSL -o "$tmp_dir/$bin_name" -w "%{http_code}" "$candidate" >"$tmp_dir/code" 2>"$tmp_dir/err") &
-    local pid=$! i=0
-    while kill -0 "$pid" 2>/dev/null; do
-      printf "\r  ${BLUE}%s${RESET} Fetching ${DIM}%s${RESET}" "${frames[$((i % 10))]}" "${candidate##*/}"
-      i=$((i + 1))
-      sleep 0.1
-    done
-    wait "$pid" || true
-    local http_code; http_code=$(<"$tmp_dir/code" 2>/dev/null) || http_code=000
+    local short="${candidate##*/}"
+    printf "  ${BLUE}⋯${RESET} Fetching ${DIM}%s${RESET}\n" "$short"
+    # Run curl synchronously; capture both stderr and the http code in one shot.
+    # `set -e` is fine here because we deliberately tolerate non-zero curl exits.
+    local http_code=""
+    if http_code=$(curl -fsSL -o "$tmp_dir/$bin_name" -w "%{http_code}" "$candidate" 2>"$tmp_dir/err"); then
+      :
+    else
+      http_code="${http_code:-failed}"
+    fi
     if [[ "$http_code" == "200" ]] && [[ -s "$tmp_dir/$bin_name" ]]; then
-      printf "\r  ${GREEN}✓${RESET} ${DIM}Fetched ${candidate##*/}${RESET}%*s\n" 20 ''
+      local sz; sz=$(stat -f%z "$tmp_dir/$bin_name" 2>/dev/null || stat -c%s "$tmp_dir/$bin_name" 2>/dev/null || echo 0)
+      local mb=$(( sz / 1024 / 1024 ))
+      ok "Fetched ${short}  ${DIM}(${mb} MB)${RESET}"
       bin_url="$candidate"
       break
     else
-      printf "\r  ${AMBER}!${RESET} ${DIM}Mirror returned HTTP ${http_code:-?}, trying next…${RESET}%*s\n" 10 ''
+      warn "Mirror returned HTTP ${http_code:-?}, trying next…"
     fi
   done
 
