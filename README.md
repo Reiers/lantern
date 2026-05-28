@@ -9,14 +9,16 @@
 
   [![CI](https://github.com/Reiers/lantern/actions/workflows/ci.yml/badge.svg)](https://github.com/Reiers/lantern/actions/workflows/ci.yml)
   [![License: Apache 2.0 OR MIT](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](#license)
-  [![Release: v1.2.1](https://img.shields.io/badge/release-v1.2.1-d97a1e.svg)](https://github.com/Reiers/lantern/releases)
+  [![Release: v1.5.3](https://img.shields.io/badge/release-v1.5.3-0090ff.svg)](https://github.com/Reiers/lantern/releases)
   [![Go: 1.25+](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](go.mod)
 
   **One line to install:**
 
   ```sh
-  curl -fsSL https://get.lantern.reiers.io | bash
+  curl -fsSL https://get.golantern.io | bash
   ```
+
+  Website: **[golantern.io](https://golantern.io)** · Source: **[github.com/Reiers/lantern](https://github.com/Reiers/lantern)**
 
 </div>
 
@@ -49,7 +51,7 @@ You pick the mode in the upper-right of the dashboard. The first time you open i
 **One-line install** (macOS or Linux):
 
 ```sh
-curl -fsSL https://get.lantern.reiers.io | bash
+curl -fsSL https://get.golantern.io | bash
 ```
 
 This downloads the latest signed release binary, walks you through a multi-source trust quorum to anchor the node, sets up the wallet, and offers to install Lantern as a background service. Three minutes start to finish.
@@ -335,6 +337,17 @@ The anchor + a recent F3 certificate chain are how Lantern is cryptographically 
 
 ---
 
+## Advisors
+
+Lantern's architecture and PDP-integration work has benefited from technical advisory from the [Curio](https://github.com/filecoin-project/curio) core team:
+
+- **[LexLuthr](https://github.com/LexLuthr)** — Curio core team. Architecture review (Lantern [#10](https://github.com/Reiers/lantern/issues/10)).
+- **[Andrew Jackson / @snadrus](https://github.com/snadrus)** — Curio core team. Bundle-architecture design and PDP-only carve-out review (Lantern [#11](https://github.com/Reiers/lantern/issues/11)).
+
+Advisor roles are non-binding; views and code in this repository are the author's responsibility.
+
+---
+
 ## License
 
 Lantern is dual-licensed:
@@ -353,5 +366,6 @@ Lantern fits Filecoin's natural-element family: **Lotus**, **Forest**, **Aurora*
 ---
 
 <div align="center">
-  <sub>Built with care by <a href="https://github.com/Reiers">TSE Reiersen</a> as part of the Filecoin ecosystem.</sub>
+  <sub>Built by <a href="https://github.com/Reiers">TSE Reiersen</a> as part of the Filecoin ecosystem.</sub><br/>
+  <sub><a href="https://golantern.io">golantern.io</a> · <a href="https://curiocore.io">curiocore.io</a></sub>
 </div>
