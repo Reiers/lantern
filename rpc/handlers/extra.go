@@ -244,8 +244,9 @@ func (c *ChainAPI) EthBlockNumber(_ context.Context) (string, error) {
 
 // EthChainId returns the Ethereum-style chain identifier for the active
 // Filecoin network. Filecoin's mapping:
-//   mainnet     → 314    (0x13a)
-//   calibration → 314159 (0x4cb2f)
+//
+//	mainnet     → 314    (0x13a)
+//	calibration → 314159 (0x4cb2f)
 //
 // These are the published EIP-155 chain IDs; viem and synapse-sdk use
 // them to scope signatures + reject cross-chain replays.
@@ -459,26 +460,26 @@ func tipsetToEthBlock(ts *types.TipSet) map[string]any {
 		baseFeeHex = "0x" + b.ParentBaseFee.Int.Text(16)
 	}
 	return map[string]any{
-		"number":           fmt.Sprintf("0x%x", int64(b.Height)),
-		"hash":             EthHashFromCid(b.Cid()),
-		"parentHash":       firstCidHash(b.Parents),
-		"nonce":            "0x0000000000000000",
-		"sha3Uncles":       "0x0000000000000000000000000000000000000000000000000000000000000000",
-		"logsBloom":        "0x" + zeroPad(512),
-		"transactionsRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
-		"stateRoot":        EthHashFromCid(b.ParentStateRoot),
-		"receiptsRoot":     EthHashFromCid(b.ParentMessageReceipts),
-		"miner":            EthAddressFromFilecoinIDActor(b.Miner),
-		"difficulty":       "0x0",
-		"totalDifficulty":  "0x0",
-		"extraData":        "0x",
-		"size":             "0x0",
-		"gasLimit":         fmt.Sprintf("0x%x", build.BlockGasLimit),
-		"gasUsed":          "0x0",
-		"baseFeePerGas":    baseFeeHex,
-		"timestamp":        fmt.Sprintf("0x%x", b.Timestamp),
-		"transactions":     []string{},
-		"uncles":           []string{},
+		"number":             fmt.Sprintf("0x%x", int64(b.Height)),
+		"hash":               EthHashFromCid(b.Cid()),
+		"parentHash":         firstCidHash(b.Parents),
+		"nonce":              "0x0000000000000000",
+		"sha3Uncles":         "0x0000000000000000000000000000000000000000000000000000000000000000",
+		"logsBloom":          "0x" + zeroPad(512),
+		"transactionsRoot":   "0x0000000000000000000000000000000000000000000000000000000000000000",
+		"stateRoot":          EthHashFromCid(b.ParentStateRoot),
+		"receiptsRoot":       EthHashFromCid(b.ParentMessageReceipts),
+		"miner":              EthAddressFromFilecoinIDActor(b.Miner),
+		"difficulty":         "0x0",
+		"totalDifficulty":    "0x0",
+		"extraData":          "0x",
+		"size":               "0x0",
+		"gasLimit":           fmt.Sprintf("0x%x", build.BlockGasLimit),
+		"gasUsed":            "0x0",
+		"baseFeePerGas":      baseFeeHex,
+		"timestamp":          fmt.Sprintf("0x%x", b.Timestamp),
+		"transactions":       []string{},
+		"uncles":             []string{},
 		"filecoinTipsetCids": cidStrs,
 	}
 }

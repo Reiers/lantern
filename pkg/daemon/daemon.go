@@ -351,7 +351,6 @@ func (d *Daemon) FullNodeAPIInfo() (string, error) {
 
 // Original Start doc continues:
 //
-//
 // On a clean ctx cancellation, Start returns nil. On startup failure,
 // Start returns the error and the daemon is half-built (caller should
 // still call Stop to clean up partial state).

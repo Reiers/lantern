@@ -570,9 +570,10 @@ func jsonRPCError(w http.ResponseWriter, err error) {
 // For the 'eth' namespace, the Go method names already follow the
 // convention `EthBlockNumber`, `EthChainId`, etc., so this formatter
 // strips the 'Eth' prefix and lower-cases the first remaining char:
-//   EthBlockNumber → eth_blockNumber
-//   EthChainId     → eth_chainId
-//   EthGetBalance  → eth_getBalance
+//
+//	EthBlockNumber → eth_blockNumber
+//	EthChainId     → eth_chainId
+//	EthGetBalance  → eth_getBalance
 //
 // Methods that don't start with 'Eth' are still registered (without
 // the prefix-strip) so a future RPC method named e.g. `Subscribe`

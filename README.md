@@ -24,25 +24,26 @@
 
 ---
 
+## TL;DR
+
+Lantern is a pure-Go Filecoin light node. **~40 MB binary, ~1 GB working state, zero CGo, no `filecoin-ffi`, no Rust toolchain.** It serves a Lotus-compatible JSON-RPC (71 / 71 of the Curio `FULLNODE_API` surface, plus the `eth_*` surface needed by FoC clients) and verifies every byte locally against BLS, F3, DRAND, and IPLD content addressing. No trusted RPC provider. No 76 GB snapshot.
+
+**Current release:** [v1.5.3](https://github.com/Reiers/lantern/releases/tag/v1.5.3) on mainnet + calibration. **In production today** as the chain backend embedded in [Curio Core](https://curiocore.io) and as a secondary node on the mainnet SP `f03678816` (sp.reiers.io).
+
 ## What is Lantern?
 
-Lantern is a small Filecoin node that runs on your computer.
+Most people who use Filecoin today rely on a remote provider (Glif, Ankr, web wallets) to tell them what's on chain. That works, but it's trust-by-handshake — the provider sees every query, knows every balance, and could in theory show you the wrong data.
 
-Most people who use Filecoin today rely on a remote provider (Glif, Ankr, web wallets) to tell them what's on the chain. That works, but it's trust-by-handshake — the provider sees every query, knows every balance, and could in theory show you the wrong data.
+The alternative used to be running a full node like Lotus or Forest. That works too, but it means a 76 GB snapshot, hours of sync, ongoing disk growth, and a Rust toolchain. For most users and most embedded use-cases that's overkill.
 
-The alternative used to be running a full node like Lotus or Forest. That works too, but it means a 76 GB snapshot, hours of sync, ongoing disk growth, and a Rust toolchain. For most users that's overkill.
-
-Lantern is the middle path: **a real node with real cryptographic verification, in a 40 MB binary that holds about 150 MB of working state.** It joins the actual Filecoin peer-to-peer network, downloads only the blocks you ask about, and proves to itself that every byte is genuine before showing it to you.
+Lantern is the middle path: a real Filecoin node with real cryptographic verification, in a single static Go binary small enough to ship inside other programs. It joins the actual Filecoin peer-to-peer network, downloads only the blocks you ask about, and proves to itself that every byte is genuine before returning it.
 
 ### Who is this for?
 
-Lantern is built for three audiences, and the dashboard ([opens at install time](#dashboard)) has a mode for each:
-
-- **🌱 Client (the default).** You want to hold your own keys, send and receive FIL, look up balances and miners, without trusting Glif or any custodial RPC. You want your wallet to be **your wallet**.
-- **🪪 SP backup.** You run a Filecoin Storage Provider and you want a redundant chain node next to your primary Lotus or Forest. If the primary goes down during a WdPost window, Curio fails over to Lantern and your sectors stay current.
-- **🔧 Dev.** You're building on Filecoin and want a real Lotus-compatible RPC running on your laptop, not a hosted endpoint with rate limits. Lantern implements 71 of 71 Curio FULLNODE_API methods.
-
-You pick the mode in the upper-right of the dashboard. The first time you open it, it shows you the **Client** view: chain status in plain English, three friendly numbers, an explanation of what's actually happening underneath.
+- **🌱 Filecoin users.** Hold your own keys, send and receive FIL, look up balances and miners, without trusting Glif or any custodial RPC. Your wallet is your wallet.
+- **🪪 SP operators.** Run Lantern as a secondary chain node next to your primary Lotus or Forest. If the primary stalls during a WdPost window, Curio fails over to Lantern and your sectors stay current.
+- **📐 SP / FoC client embedders.** Pull `pkg/daemon` into your Go binary and run a fully verified Filecoin chain backend in-process. [Curio Core](https://github.com/Reiers/curio-core) does exactly this.
+- **🔧 Tooling developers.** A real Lotus-compatible RPC on your laptop, no rate limits. Run `eth_*` against a node you control.
 
 ---
 
@@ -213,34 +214,40 @@ Or use Lantern's own CLI:
 
 ## Status
 
-**Current release: v1.2.1.** Lantern is alpha but production-deployed on at least one mainnet Storage Provider (f03678816, sp.reiers.io) as a secondary chain node.
+**Current release: [v1.5.3](https://github.com/Reiers/lantern/releases/tag/v1.5.3)** — production on mainnet + calibration.
 
 What works today:
 
-- **Sync stays current with Lotus.** Lag = 0 epochs most of the time, lag = 1 epoch transiently during epoch transitions. Gossipsub mesh tuned to Filecoin's exact wire format.
-- **Cold state queries in single seconds.** `StateMinerInfo` against a previously-unseen miner returns in 0.1–1.8s, down from 30s+ in the previous release.
-- **Lotus-compatible JSON-RPC.** 71 of 71 Curio FULLNODE_API methods implemented. Real Curio binaries bind transparently.
-- **VM bridge for block production.** When configured, Lantern can produce blocks for an SP by delegating the post-execution state-root computation to an operator's own sibling Forest or Lotus node.
-- **Embedded operator dashboard.** Three-mode UI, prefers-color-scheme, served on the same listener as `/metrics`.
+- **Sync stays current with Lotus.** Lag = 0 epochs most of the time on mainnet. Gossipsub mesh tuned to Filecoin's exact wire format.
+- **Cold state queries in single seconds.** `StateMinerInfo` against a previously-unseen miner returns in 0.1–1.8s.
+- **Lotus-compatible JSON-RPC.** 71 / 71 of the Curio `FULLNODE_API` surface. Real Curio binaries bind transparently.
+- **`eth_*` surface.** `getBlockByNumber`, `getBalance`, `call`, `estimateGas`, `sendRawTransaction`, `getTransactionCount`, `getTransactionReceipt`, `feeHistory`, `newHeads` subscriptions. Works with wallets, dapps, and the FoC `synapse-sdk` stack.
+- **Embeddable `pkg/daemon`.** Mint an admin JWT in process, serve `/rpc/v1` inline. This is the API [Curio Core](https://curiocore.io) builds on.
+- **VM bridge for FEVM forwarding.** When configured, Lantern can delegate `eth_call` / `eth_estimateGas` / `eth_sendRawTransaction` to an operator's own Forest or Lotus.
+- **Embedded operator dashboard.** Three-mode UI (client / SP / dev), follows OS dark-mode, served on the same listener as `/metrics`.
 
-Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on mainnet — see [`docs/phase8-part-a-results.md`](docs/phase8-part-a-results.md). Every state read tested matched Glif byte-for-byte.
+Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on mainnet — every state read tested matched Glif byte-for-byte.
 
-| Phase | Scope                                                                   | Status      |
-|-------|-------------------------------------------------------------------------|-------------|
-| 1     | Trusted root, header validation, F3 + DRAND verifier                    | ✅ Shipped  |
-| 2     | HAMT/AMT walker, state accessor, gateway proxy                          | ✅ Shipped  |
-| 3     | (folded into Phase 4)                                                   | -           |
-| 4     | Lotus-compatible RPC server, wallet, signing                            | ✅ Shipped  |
-| 5     | StateMiner/Market/VerifiedRegistry - SP-killer state APIs               | ✅ Shipped  |
-| 6     | Persistent header store, libp2p, gossipsub mempool, StateWaitMsg        | ✅ Shipped  |
-| 7     | Pure-Go VM shell, gas estimation, paych vouchers, block production scaffolding | ✅ Shipped  |
-| 8     | Live Curio binding test, FVM bridge, block publisher, DHT, paych byte-exact, TRUST-MODEL.md | ✅ Shipped  |
-| 9     | `ChainNotify` end-to-end + daemon header-store wiring + real Curio bind on lex — the V1.1 unlock | ✅ Shipped  |
-| 10    | Live libp2p stats wired to Curio webui (Net*), Bitswap as primary fetch path, `lantern beacon` subcommand — V1.2 swarm-native delivery | ✅ Shipped  |
-| 11    | One-line installer + multi-source bootstrap quorum + `lantern doctor` / `repair` / `service` + native Mac menu-bar app + tag-triggered release pipeline — V1.2 GA delivery | ✅ Shipped  |
+### Used in production
 
-**71 of 71** methods in the Curio FULLNODE_API surface are implemented after Phase 9; Phase 10 turned the Net*/Eth probe stubs (`NetPeers`, `NetBandwidthStats`, `NetAutoNatStatus`, etc.) into **live data** sourced from the running libp2p host. The V1.1 unlock landed in Phase 9: `ChainNotify` is wired through a head-change distributor (Lotus-style apply/revert events, bounded per-subscriber buffer with drop-slow semantics) and `StateAccountKey` decodes the account actor state. Live-validated against `lotus v1.36` CLI for 6 minutes and against a real Curio 1.28.1 binary on lex for 10 minutes — see [`docs/phase9-part-b-curio-bind.md`](docs/phase9-part-b-curio-bind.md) and [`docs/phase10-part-d-live-bind.md`](docs/phase10-part-d-live-bind.md). The 1 remaining hard-gated stub:
-- `SyncSubmitBlock` is never lit without explicit `AllowBlockSubmit=true` plus a configured bridge. See [`docs/SAFETY-CHECKLIST.md`](docs/SAFETY-CHECKLIST.md) §1.
+- **[Curio Core](https://github.com/Reiers/curio-core)** — pre-alpha Filecoin Onchain Cloud hot-storage provider. Lantern is the embedded chain backend. The full PDP proof loop (deal accept → piece park → proof submit → USDFC settle) runs end-to-end on calibration; 8 successful prove cycles overnight 2026-05-25, 5 on-chain USDFC settles confirmed. Lantern's `pkg/daemon` is what makes this single-binary deployment possible.
+- **`f03678816` / sp.reiers.io** — mainnet Storage Provider running Lantern as a secondary chain node next to Lotus. Curio polls Lantern every ~5s as failover.
+- **`https://gateway.lantern.reiers.io`** — public Lantern-backed HTTP IPLD-block gateway. Live since 2026-05-22.
+
+### Release history (condensed)
+
+| Release | What landed |
+|---|---|
+| v1.5.3 (current) | `web3_clientVersion` + CORS on `/rpc/v1`. `eth_subscribe newHeads`. VMBridge fallback for `StateGetRandomnessDigestFromBeacon`. |
+| v1.5.2 | `StateGetRandomnessDigestFromBeacon` for PDP ProveTask. ETH-shape miner+hash fields in `eth_getBlockByNumber`. |
+| v1.5.0 | Embeddable `pkg/daemon`. Inline JSON-RPC. AdminToken minting. The release that made Curio Core possible. |
+| v1.4.0 | Full `eth_*` coverage. `net_version`. Clean SIGTERM wind-down. |
+| v1.3.0 | Calibration support. Per-network data dir + migration. |
+| v1.2.1 | The SP-failover release. Sync lag 0 epochs ~65% of the time. DHT prefix fix (peer count 4 → 80). |
+
+Full history: [CHANGELOG.md](CHANGELOG.md).
+
+The one method that stays hard-gated: `SyncSubmitBlock` is never lit without explicit `AllowBlockSubmit=true` plus a configured bridge. See [`docs/SAFETY-CHECKLIST.md`](docs/SAFETY-CHECKLIST.md) §1.
 
 ---
 

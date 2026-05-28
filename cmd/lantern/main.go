@@ -222,8 +222,9 @@ func networkDataDir(n build.Network) string {
 // automatically.
 //
 // Migration target is dataDir()/<network>/. Files migrated:
-//   bootstrap-anchor.json, headerstore/, keystore/, jwt-secret,
-//   token, token-read, token-sign, token-write
+//
+//	bootstrap-anchor.json, headerstore/, keystore/, jwt-secret,
+//	token, token-read, token-sign, token-write
 //
 // Anything else at dataDir()/ is left in place (service files, the
 // 'lantern' binary if anyone manually dropped one, future top-level
