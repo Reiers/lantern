@@ -20,35 +20,47 @@
 set -euo pipefail
 
 # ---------- UI helpers ----------
+#
+# Use real ESC bytes via $'\e[..]' so colors render in BOTH printf and
+# cat<<EOF heredocs. The previous '\033[..]' strings only rendered when
+# fed through printf, which is why the banner+closing summary in earlier
+# releases looked like raw escape codes.
 
-CLR_RESET='\033[0m'; CLR_BOLD='\033[1m'
-CLR_RED='\033[0;31m'; CLR_GREEN='\033[0;32m'; CLR_YELLOW='\033[0;33m'
-CLR_BLUE='\033[0;34m'; CLR_CYAN='\033[0;36m'; CLR_DIM='\033[2m'
+CLR_RESET=$'\e[0m'; CLR_BOLD=$'\e[1m'; CLR_DIM=$'\e[2m'
+CLR_RED=$'\e[0;31m'; CLR_GREEN=$'\e[0;32m'; CLR_YELLOW=$'\e[0;33m'
+CLR_BLUE=$'\e[0;34m'; CLR_CYAN=$'\e[0;36m'; CLR_MAGENTA=$'\e[0;35m'
 
-if [[ "${TERM:-}" == "dumb" || ! -t 1 ]]; then
-  CLR_RESET=''; CLR_BOLD=''; CLR_RED=''; CLR_GREEN=''; CLR_YELLOW=''
-  CLR_BLUE=''; CLR_CYAN=''; CLR_DIM=''
+# Disable colors if stdout isn't a TTY or NO_COLOR is set. When run via
+# `curl ... | bash`, stdout IS still a TTY (the user's terminal), so colors
+# are on by default.
+if [[ "${TERM:-}" == "dumb" || ! -t 1 || -n "${NO_COLOR:-}" ]]; then
+  CLR_RESET=''; CLR_BOLD=''; CLR_DIM=''
+  CLR_RED=''; CLR_GREEN=''; CLR_YELLOW=''
+  CLR_BLUE=''; CLR_CYAN=''; CLR_MAGENTA=''
 fi
 
 banner() {
-  cat <<EOF
-
-  ${CLR_CYAN}${CLR_BOLD}🪔  Lantern${CLR_RESET}
-  ${CLR_DIM}Pure-Go Filecoin light node${CLR_RESET}
-  ${CLR_DIM}no CGo, no 76 GB snapshot, no third-party trust${CLR_RESET}
-
-EOF
+  printf '\n'
+  printf '  %s%s🪔  Lantern%s\n' "$CLR_CYAN" "$CLR_BOLD" "$CLR_RESET"
+  printf '  %sPure-Go Filecoin light node%s\n' "$CLR_DIM" "$CLR_RESET"
+  printf '  %sno CGo, no 76 GB snapshot, no third-party trust%s\n' "$CLR_DIM" "$CLR_RESET"
+  printf '\n'
 }
-step()  { printf "\n${CLR_BOLD}▸ %s${CLR_RESET}\n" "$*"; }
-ok()    { printf "    ${CLR_GREEN}✓${CLR_RESET} %s\n" "$*"; }
-warn()  { printf "    ${CLR_YELLOW}⚠${CLR_RESET}  %s\n" "$*"; }
-fail()  { printf "    ${CLR_RED}✗${CLR_RESET} %s\n" "$*" >&2; exit 1; }
-info()  { printf "    ${CLR_DIM}·${CLR_RESET} %s\n" "$*"; }
+step()  { printf '\n%s▸ %s%s\n' "$CLR_BOLD" "$*" "$CLR_RESET"; }
+ok()    { printf '    %s✓%s %s\n' "$CLR_GREEN" "$CLR_RESET" "$*"; }
+warn()  { printf '    %s⚠%s  %s\n' "$CLR_YELLOW" "$CLR_RESET" "$*"; }
+fail()  { printf '    %s✗%s %s\n' "$CLR_RED" "$CLR_RESET" "$*" >&2; exit 1; }
+info()  { printf '    %s·%s %s\n' "$CLR_DIM" "$CLR_RESET" "$*"; }
 ask()   { # ask "question" default_yes_or_no
   local q="$1" def="${2:-y}" reply
   if [[ "${LANTERN_YES:-}" == "1" ]]; then echo "$def"; return; fi
-  if [[ "$def" == "y" ]]; then printf "    ? %s [Y/n] " "$q"; else printf "    ? %s [y/N] " "$q"; fi
-  read -r reply || reply="$def"
+  if [[ "$def" == "y" ]]; then printf '    ? %s [Y/n] ' "$q"; else printf '    ? %s [y/N] ' "$q"; fi
+  # Read from /dev/tty so prompts work when the script is piped through bash.
+  if [[ -r /dev/tty ]]; then
+    read -r reply </dev/tty || reply="$def"
+  else
+    read -r reply || reply="$def"
+  fi
   reply="${reply:-$def}"
   echo "$reply"
 }
@@ -337,15 +349,19 @@ service_setup() {
     default_choice=foreground
   fi
 
-  printf "    How should Lantern run?\n"
-  printf "      ${CLR_BOLD}b${CLR_RESET}) Background service (launchd / systemd user)\n"
-  printf "      ${CLR_BOLD}f${CLR_RESET}) Foreground only (start manually with 'lantern daemon')\n"
-  printf "      ${CLR_BOLD}s${CLR_RESET}) Skip — I'll decide later\n"
+  printf '    How should Lantern run?\n'
+  printf '      %sb%s) Background service (launchd / systemd user)\n' "$CLR_BOLD" "$CLR_RESET"
+  printf "      %sf%s) Foreground only (start manually with 'lantern daemon')\n" "$CLR_BOLD" "$CLR_RESET"
+  printf "      %ss%s) Skip — I'll decide later\n" "$CLR_BOLD" "$CLR_RESET"
   if [[ "${LANTERN_YES:-}" == "1" ]]; then
     choice="b"
   else
-    printf "    Choice [default: ${default_choice:0:1}]: "
-    read -r choice || choice=""
+    printf '    Choice [default: %s]: ' "${default_choice:0:1}"
+    if [[ -r /dev/tty ]]; then
+      read -r choice </dev/tty || choice=""
+    else
+      read -r choice || choice=""
+    fi
     choice="${choice:-${default_choice:0:1}}"
   fi
 
@@ -381,24 +397,28 @@ closing() {
     cmd="$bin"
   fi
 
-  cat <<EOF
-
-  ${CLR_GREEN}✓ Lantern is installed.${CLR_RESET}
-
-  Binary:        ${CLR_BOLD}${bin}${CLR_RESET}
-
-  Status:        ${CLR_BOLD}${cmd} info${CLR_RESET}
-  Chain head:    ${CLR_BOLD}${cmd} chain head${CLR_RESET}
-  Service:       ${CLR_BOLD}${cmd} service status${CLR_RESET}
-  Refresh trust: ${CLR_BOLD}${cmd} repair${CLR_RESET}
-
-EOF
+  printf '\n'
+  printf '  %s%s✓ Lantern is installed.%s\n' "$CLR_GREEN" "$CLR_BOLD" "$CLR_RESET"
+  printf '\n'
+  printf '  %sBinary:%s        %s%s%s\n' "$CLR_DIM" "$CLR_RESET" "$CLR_BOLD" "$bin" "$CLR_RESET"
+  printf '  %sLantern home:%s  %s%s%s\n' "$CLR_DIM" "$CLR_RESET" "$CLR_BOLD" "$LANTERN_HOME" "$CLR_RESET"
+  printf '\n'
+  printf '  %sStart the daemon:%s  %s%s daemon%s\n' "$CLR_DIM" "$CLR_RESET" "$CLR_BOLD" "$cmd" "$CLR_RESET"
+  printf '  %sStatus:%s            %s%s info%s\n' "$CLR_DIM" "$CLR_RESET" "$CLR_BOLD" "$cmd" "$CLR_RESET"
+  printf '  %sChain head:%s        %s%s chain head%s\n' "$CLR_DIM" "$CLR_RESET" "$CLR_BOLD" "$cmd" "$CLR_RESET"
+  printf '  %sRefresh trust:%s     %s%s repair%s\n' "$CLR_DIM" "$CLR_RESET" "$CLR_BOLD" "$cmd" "$CLR_RESET"
   if [[ -n "$token" ]]; then
-    printf "  ${CLR_DIM}Connect Curio / Boost:${CLR_RESET}\n"
-    printf "    export FULLNODE_API_INFO='%s:/ip4/127.0.0.1/tcp/1234/http'\n\n" "$token"
+    printf '\n'
+    printf '  %sConnect Curio / Boost:%s\n' "$CLR_DIM" "$CLR_RESET"
+    printf "    export FULLNODE_API_INFO='%s:/ip4/127.0.0.1/tcp/1234/http'\n" "$token"
   fi
+  printf '\n'
+  printf '  %sDocs:%s   %shttps://golantern.io%s\n' "$CLR_DIM" "$CLR_RESET" "$CLR_CYAN" "$CLR_RESET"
+  printf '  %sSource:%s %shttps://github.com/Reiers/lantern%s\n' "$CLR_DIM" "$CLR_RESET" "$CLR_CYAN" "$CLR_RESET"
+  printf '  %sLogs:%s   tail -f %s/lantern.log\n' "$CLR_DIM" "$CLR_RESET" "$LANTERN_HOME"
+  printf '\n'
 
-  # Closing quote (filbucket-style rotating).
+  # Closing line (rotating).
   local quotes=(
     '"The lighter the node, the brighter the chain."'
     '"Trust the math, not the gateway."'
@@ -406,9 +426,7 @@ EOF
     '"No CGo. No snapshot. No third-party trust."'
   )
   local idx=$((RANDOM % ${#quotes[@]}))
-  printf "  ${CLR_DIM}%s${CLR_RESET}\n\n" "${quotes[$idx]}"
-  printf "  ${CLR_DIM}Lantern home: %s${CLR_RESET}\n" "$LANTERN_HOME"
-  printf "  ${CLR_DIM}Logs:         tail -f %s/lantern.log${CLR_RESET}\n\n" "$LANTERN_HOME"
+  printf '  %s%s%s\n\n' "$CLR_DIM" "${quotes[$idx]}" "$CLR_RESET"
 }
 
 # ---------- main ----------
