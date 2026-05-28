@@ -497,7 +497,14 @@ func cmdDaemon(args []string) error {
 	bitswapFastDL := fs.Duration("bitswap-fast", 1500*time.Millisecond, "Bitswap fast-stage deadline for preferred peers.")
 	bitswapFullDL := fs.Duration("bitswap-full", 5*time.Second, "Bitswap full-stage deadline for swarm broadcast.")
 	preferredPeersStr := fs.String("bitswap-peers", "", "Comma-separated multiaddrs to use as preferred Bitswap peers (e.g. lantern beacon nodes).")
-	metricsListen := fs.String("metrics", "", "Optional listen address for /metrics (Prometheus text exposition). Empty disables.")
+	// --metrics: loopback listener that serves Prometheus /metrics AND the
+	// embedded operator dashboard at /dashboard/. Default is 127.0.0.1:9092
+	// (loopback only) so a fresh `lantern daemon` always has a webui without
+	// the operator passing extra flags. Set to empty (`--metrics=`) to
+	// disable, or `--no-dashboard` to skip dashboard wiring while keeping
+	// /metrics.
+	metricsListen := fs.String("metrics", "127.0.0.1:9092", "Listen address for /metrics + /dashboard. Empty string disables both.")
+	noDashboard := fs.Bool("no-dashboard", false, "Skip serving /dashboard/; /metrics still served if --metrics is set.")
 
 	// Issue #4: VM bridge for block production state-root computation.
 	//
@@ -780,38 +787,44 @@ func cmdDaemon(args []string) error {
 			len(preferred), bitswapFastDL.String(), bitswapFullDL.String())
 	}
 
-	// Phase 10 Part B: optional /metrics endpoint exposes per-source hit
-	// counts so operators can see Bitswap actually carrying load.
-	//
-	// Issue #5: when --metrics is set, also serve the operator dashboard
-	// at /dashboard on the same listener.
+	// Phase 10 Part B: /metrics endpoint exposes per-source hit counts so
+	// operators can see Bitswap carrying load. Issue #5 added the dashboard
+	// on the same listener. v1.5.5 enables both by default on 127.0.0.1:9092
+	// so a fresh `lantern daemon` always has a webui without extra flags.
+	var dashboardURL string
 	if *metricsListen != "" {
-		bridgeTag := ""
-		if chainAPI.Bridge != nil {
-			bridgeTag = chainAPI.Bridge.Provenance()
-		}
-		dash := &dashboardDeps{
-			tr:           tr,
-			store:        store,
-			sync:         sync,
-			host:         p2pHost,
-			bsClient:     bsClient,
-			fetcher:      fetcher,
-			ingestor:     gossipIngestor,
-			vmBridgeTag:  bridgeTag,
-			allowSubmit:  chainAPI.AllowBlockSubmit,
-			network:      "Lantern+" + network.String(),
-			rpcAddr:      *listen,
-			startedAt:    time.Now(),
-			headDelaySec: uint64(build.BlockDelaySecs),
-			dataDirPath:  netDir,
-			gatewayURL:   *gw,
-			hello:        helloSvc,
-			xchg:         xchgSvc,
+		var dash *dashboardDeps
+		if !*noDashboard {
+			bridgeTag := ""
+			if chainAPI.Bridge != nil {
+				bridgeTag = chainAPI.Bridge.Provenance()
+			}
+			dash = &dashboardDeps{
+				tr:           tr,
+				store:        store,
+				sync:         sync,
+				host:         p2pHost,
+				bsClient:     bsClient,
+				fetcher:      fetcher,
+				ingestor:     gossipIngestor,
+				vmBridgeTag:  bridgeTag,
+				allowSubmit:  chainAPI.AllowBlockSubmit,
+				network:      "Lantern+" + network.String(),
+				rpcAddr:      *listen,
+				startedAt:    time.Now(),
+				headDelaySec: uint64(build.BlockDelaySecs),
+				dataDirPath:  netDir,
+				gatewayURL:   *gw,
+				hello:        helloSvc,
+				xchg:         xchgSvc,
+			}
+			dashboardURL = fmt.Sprintf("http://%s/dashboard/", *metricsListen)
 		}
 		go serveMetrics(ctx, *metricsListen, fetcher, bsClient, p2pHost, dash)
 		fmt.Printf("  metrics:  http://%s/metrics\n", *metricsListen)
-		fmt.Printf("  dashboard: http://%s/dashboard/\n", *metricsListen)
+		if dashboardURL != "" {
+			fmt.Printf("  dashboard: %s\n", dashboardURL)
+		}
 	}
 
 	srv, err := server.New(server.Config{
@@ -832,7 +845,13 @@ func cmdDaemon(args []string) error {
 	if dist != nil {
 		go logSyncStats(ctx, sync, dist)
 	}
-	fmt.Println("\nReady. Ctrl-C to stop.")
+	// Final summary banner: surface the two URLs the operator will actually
+	// hit (RPC + dashboard) so they don't get lost in the daemon log.
+	fmt.Println()
+	if dashboardURL != "" {
+		fmt.Println("\033[1mDashboard\033[0m  " + dashboardURL)
+	}
+	fmt.Println("\033[1mReady.\033[0m  Ctrl-C to stop.")
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)

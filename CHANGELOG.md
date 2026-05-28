@@ -2,6 +2,48 @@
 
 All notable changes to Lantern.
 
+## v1.5.5 (2026-05-28)
+
+The "installer that doesn't look like raw escape codes, daemon that tells you where the webui is" release.
+
+### Fixed
+
+- **Installer color codes rendering as literal `\033[..]` text.** The
+  banner and closing summary used `cat <<EOF` heredocs with `${CLR_X}`
+  variables holding `'\033[..]'` string literals. `cat` outputs them
+  verbatim; only `printf` interprets the escapes. Result: the banner
+  showed `\033[0;36m\033[1m🪔 Lantern\033[0m` instead of a coloured
+  banner. Fix: switch color variables to real ESC bytes via `$'\e[..]'`
+  and convert all heredocs to `printf`. Now renders correctly in every
+  output context.
+
+- **Prompts didn't work when piped through `curl ... | bash`.** stdin
+  is the curl response body, not the terminal. All `read` calls now
+  pull from `/dev/tty` when available (with a fallback to stdin when
+  it isn't, for non-interactive CI runs).
+
+### Added
+
+- **Dashboard on by default.** `lantern daemon` now starts a loopback
+  listener on `127.0.0.1:9092` serving `/metrics` AND `/dashboard/`
+  without any extra flags. The dashboard URL is printed prominently
+  at the end of the startup banner, right before `Ready.`, in bold.
+  New flag `--no-dashboard` for operators who want `/metrics` only.
+  Set `--metrics=` (empty string) to disable both.
+
+- **Tighter closing summary in installer.** Aligned column layout,
+  binary path printed alongside the home dir, `Start the daemon:`
+  surfaced as the first action, source + docs links, no more random
+  whitespace drift from the heredoc.
+
+### Other
+
+- No CGo, no FFI, no source-side behavior change beyond the daemon
+  default for `--metrics`. Existing `lantern daemon` invocations
+  continue to work; the only visible change to existing operators is
+  that `:9092` is now claimed by default (override with
+  `--metrics 127.0.0.1:9099` or similar).
+
 ## v1.5.4 (2026-05-28)
 
 The "installer actually works on a fresh Mac" release.
