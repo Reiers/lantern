@@ -2,6 +2,42 @@
 
 All notable changes to Lantern.
 
+## v1.5.4 (2026-05-28)
+
+The "installer actually works on a fresh Mac" release.
+
+### Fixed
+
+- **Installer PATH detection on Apple Silicon.** Previous default symlink
+  target was `/usr/local/bin`, which doesn't exist on fresh Apple Silicon
+  Macs without Homebrew. The installer now picks the first available of:
+  caller-set `LANTERN_PREFIX` → `/opt/homebrew/bin` → `/usr/local/bin`
+  → `~/.local/bin` (created on demand). When the chosen target is not on
+  PATH, the installer prints the exact `export PATH=...` line to add to
+  the shell profile. Reported by Nicklas, 2026-05-28.
+
+- **Symlink self-heal on re-runs.** The symlink was only created from the
+  fresh-download branch; users with an existing binary at `~/.lantern/lantern`
+  but a broken (or missing) PATH symlink could re-run the installer and
+  still end up with `command not found`. `install_symlink` is now invoked
+  from both the download and the skip-download paths.
+
+- **Closing summary always actionable.** The "Status / Chain head / Service"
+  commands in the install summary now resolve to the short `lantern` form
+  if the symlink succeeded, or the full path (`~/.lantern/lantern info`) if
+  it didn't. The full binary path is always shown.
+
+### Changed
+
+- **Mirror order.** `github.com/Reiers/lantern/releases/...` is now the
+  canonical download URL (the repo is public as of 2026-05-28). The
+  `dl-lantern.reiers.io` mirror moves to fallback. The dl mirror is
+  currently returning 404 from the Hetzner box; tracked separately.
+
+### Other
+
+- No source code changes; binaries are byte-identical to v1.5.3.
+
 ## v1.2.1 (2026-05-22)
 
 The SP-failover release. Lantern stays in sync with the network in real
