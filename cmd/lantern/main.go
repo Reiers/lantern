@@ -1146,11 +1146,29 @@ func cmdState(args []string) error {
 
 // --- info ---
 
-func cmdInfo(_ []string) error {
-	dir := dataDir()
+func cmdInfo(args []string) error {
+	fs := flag.NewFlagSet("info", flag.ExitOnError)
+	filNetwork := fs.String("filecoin-network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration")
+	fs.Parse(args)
+
+	filNet := build.Network(*filNetwork)
+	if !filNet.Valid() {
+		return fmt.Errorf("invalid --filecoin-network %q: want one of mainnet, calibration", *filNetwork)
+	}
+
+	// Network-scoped state (token, anchor, keystore) lives under
+	// networkDataDir(): `lantern init` writes the admin token there, not
+	// at the top-level dataDir(). Lift any pre-V1.3 top-level state into
+	// the per-network dir first so upgraded mainnet installs report
+	// correctly; idempotent no-op otherwise. See lantern#27.
+	if err := migrateLegacyDataDir(filNet); err != nil {
+		return fmt.Errorf("migrate legacy data dir: %w", err)
+	}
+	dir := networkDataDir(filNet)
+
 	fmt.Println("Lantern info")
 	fmt.Println("============")
-	fmt.Println("Data dir:", dir)
+	fmt.Printf("Data dir: %s (network: %s)\n", dir, filNet)
 
 	// Read the persisted admin token, if any.
 	tok, err := os.ReadFile(filepath.Join(dir, "token"))
