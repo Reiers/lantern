@@ -519,10 +519,14 @@ func (c *ChainAPI) StateNetworkVersion(_ context.Context, _ types.TipSetKey) (ne
 
 // StateNetworkName returns the network's well-known name. Tier 2 (#63).
 func (c *ChainAPI) StateNetworkName(_ context.Context) (string, error) {
-	if c.NetworkName == "" {
+	switch c.NetworkName {
+	case "calibration":
+		return "calibrationnet", nil
+	case "", "mainnet":
 		return "mainnet", nil
+	default:
+		return c.NetworkName, nil
 	}
-	return c.NetworkName, nil
 }
 
 // StateReadState dumps an actor's state. Tier 3 (#64).
