@@ -27,6 +27,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -542,6 +543,23 @@ func cmdDaemon(args []string) error {
 	netDir := networkDataDir(network)
 	if err := os.MkdirAll(netDir, 0o700); err != nil {
 		return fmt.Errorf("create network data dir: %w", err)
+	}
+
+	// Persist the RPC listen address so `lantern info` reports the port
+	// this daemon actually bound, instead of assuming the 1234 default.
+	// Best-effort: a write failure here must not stop the daemon.
+	if err := writeRPCListen(netDir, *listen); err != nil {
+		fmt.Fprintf(os.Stderr, "  warn: persist rpc-listen: %v\n", err)
+	}
+
+	// Warn loudly when the default 1234 collides with an existing
+	// listener (almost always a local Lotus). Lantern keeps 1234 as the
+	// Lotus-compatible default, but a silent collision is what made
+	// issue #34 confusing: the daemon failed to bind while `info` still
+	// advertised 1234. Surface it with the fix (--listen) inline.
+	if *listen == defaultListen && portInUse(*listen) {
+		fmt.Printf("  ⚠ %s is already in use (Lotus also defaults to 1234).\n"+
+			"    Pass --listen 127.0.0.1:2345 (or any free port) to run alongside it.\n", *listen)
 	}
 
 	// Resolve --header-store default now that network is known.
@@ -1146,35 +1164,135 @@ func cmdState(args []string) error {
 
 // --- info ---
 
-func cmdInfo(_ []string) error {
-	dir := dataDir()
+func cmdInfo(args []string) error {
+	fs := flag.NewFlagSet("info", flag.ExitOnError)
+	networkFlag := fs.String("network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration")
+	listenFlag := fs.String("listen", "", "Override the RPC address to report/probe (default: the address the daemon persisted, else 127.0.0.1:1234)")
+	tokenOnly := fs.Bool("token-only", false, "Print only the admin token (for scripting FULLNODE_API_INFO)")
+	fs.Parse(args)
+
+	network := build.Network(*networkFlag)
+	if !network.Valid() {
+		return fmt.Errorf("invalid --network %q: want one of mainnet, calibration", *networkFlag)
+	}
+	netDir := networkDataDir(network)
+
+	// Resolve the admin token from the per-network data dir (where init
+	// and the daemon mint it since V1.3). Fall back to the pre-V1.3
+	// top-level location so an un-migrated install still reports a token.
+	token, tokenErr := readAdminToken(netDir)
+
+	// --token-only: emit just the raw token (or fail) for scripting.
+	if *tokenOnly {
+		if tokenErr != nil {
+			return fmt.Errorf("no admin token under %s (run `lantern init --filecoin-network %s`)", netDir, network)
+		}
+		fmt.Println(token)
+		return nil
+	}
+
+	// Resolve the RPC address: explicit --listen wins, else the address
+	// the daemon persisted, else the documented default.
+	listen := *listenFlag
+	if listen == "" {
+		listen = readRPCListen(netDir)
+	}
+
 	fmt.Println("Lantern info")
 	fmt.Println("============")
-	fmt.Println("Data dir:", dir)
+	fmt.Printf("Data dir: %s (network: %s)\n", netDir, network)
 
-	// Read the persisted admin token, if any.
-	tok, err := os.ReadFile(filepath.Join(dir, "token"))
-	if err != nil {
-		fmt.Println("Admin token: (not initialised — run `lantern init`)")
+	if tokenErr != nil {
+		fmt.Printf("Admin token: (not initialised — run `lantern init --filecoin-network %s`)\n", network)
 	} else {
-		s := strings.TrimSpace(string(tok))
-		short := s
+		short := token
 		if len(short) > 20 {
 			short = short[:10] + "..." + short[len(short)-6:]
 		}
 		fmt.Printf("Admin token: %s\n", short)
-		fmt.Printf("FULLNODE_API_INFO (assuming daemon on 127.0.0.1:1234):\n  %s:/ip4/127.0.0.1/tcp/1234/http\n", s)
+		fmt.Printf("FULLNODE_API_INFO (daemon on %s):\n  %s:%s\n",
+			listen, token, apiMultiaddr(listen))
 	}
 
-	// Probe local daemon.
+	// Probe the resolved daemon address.
 	hc := &http.Client{Timeout: 1 * time.Second}
-	resp, err := hc.Get("http://127.0.0.1:1234/healthz")
+	resp, err := hc.Get("http://" + listen + "/healthz")
 	if err == nil {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		fmt.Printf("Daemon healthz: %s", string(body))
+		if resp.StatusCode == http.StatusOK {
+			fmt.Printf("Daemon healthz: %s\n", strings.TrimSpace(string(body)))
+		} else {
+			fmt.Printf("Daemon healthz: HTTP %d at %s (is something other than Lantern on this port?)\n",
+				resp.StatusCode, listen)
+		}
 	} else {
-		fmt.Println("Daemon: not running (no listener on 127.0.0.1:1234)")
+		fmt.Printf("Daemon: not running (no listener on %s)\n", listen)
 	}
 	return nil
+}
+
+// readAdminToken reads the admin token from the per-network data dir,
+// falling back to the pre-V1.3 top-level location for un-migrated
+// installs. Returns the trimmed token or an error if neither exists.
+func readAdminToken(netDir string) (string, error) {
+	if b, err := os.ReadFile(filepath.Join(netDir, "token")); err == nil {
+		return strings.TrimSpace(string(b)), nil
+	}
+	// Legacy fallback: pre-V1.3 single-network installs kept the token at
+	// the top-level data dir.
+	if b, err := os.ReadFile(filepath.Join(dataDir(), "token")); err == nil {
+		return strings.TrimSpace(string(b)), nil
+	}
+	return "", fmt.Errorf("no token file in %s", netDir)
+}
+
+// rpcListenFile is where the daemon records the RPC address it bound, so
+// `lantern info` can report the real port instead of assuming 1234.
+const rpcListenFile = "rpc-listen"
+
+// writeRPCListen persists the daemon's RPC listen address under netDir.
+func writeRPCListen(netDir, addr string) error {
+	return os.WriteFile(filepath.Join(netDir, rpcListenFile), []byte(addr+"\n"), 0o600)
+}
+
+// readRPCListen returns the persisted RPC listen address for netDir, or
+// the documented default when none was recorded.
+func readRPCListen(netDir string) string {
+	if b, err := os.ReadFile(filepath.Join(netDir, rpcListenFile)); err == nil {
+		if s := strings.TrimSpace(string(b)); s != "" {
+			return s
+		}
+	}
+	return defaultListen
+}
+
+// apiMultiaddr renders a host:port listen address as the /ip4/.../tcp/.../http
+// multiaddr that FULLNODE_API_INFO expects. Falls back to a 127.0.0.1
+// multiaddr on the resolved port when the host isn't a plain IPv4.
+func apiMultiaddr(listen string) string {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return "/ip4/127.0.0.1/tcp/1234/http"
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.To4() != nil {
+		return fmt.Sprintf("/ip4/%s/tcp/%s/http", host, port)
+	}
+	// Non-IPv4 host (hostname or IPv6): report loopback IPv4 on the port,
+	// which is what a local Curio/Lotus client expects.
+	return fmt.Sprintf("/ip4/127.0.0.1/tcp/%s/http", port)
+}
+
+// portInUse reports whether addr already has a listener (best-effort).
+// Used only to warn about the Lotus/1234 collision; never fatal.
+func portInUse(addr string) bool {
+	c, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = c.Close()
+	return true
 }
