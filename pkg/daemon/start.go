@@ -134,10 +134,21 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		chainAPI.HeadNotify = dist
 
 		src := glif.New(glifURL, 8*time.Second)
+		// Issue #33: embedded mode (curio-core) polls Glif for head, unlike
+		// standalone lantern which tracks head via live gossipsub. During a
+		// long wait (e.g. a ProveTask proving window) head can run far
+		// ahead, and a transient Glif error during catch-up must not stall
+		// the head pointer. The hardened Sync now (a) resumes catch-up
+		// contiguously from currentHead+1 in CatchUpChunk-sized steps so it
+		// never skips epochs, and (b) advances the head only as far as the
+		// chain is gap-free, retrying the rest next poll instead of aborting.
+		// MaxBacktrack is raised so reorg/backfill depth comfortably exceeds
+		// the deepest realistic single-wait lag.
 		sync := hstore.NewSync(store, src, hstore.SyncOptions{
 			Interval:       d.cfg.SyncInterval,
-			MaxBacktrack:   60,
+			MaxBacktrack:   900, // ~7.5h at 30s blocks; covers long proving waits
 			BootstrapDepth: 3,
+			CatchUpChunk:   200, // bounded per-poll catch-up work
 		})
 		if err := sync.Start(ctx); err != nil {
 			_ = store.Close()
@@ -192,6 +203,18 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 	d.auth = srv.Auth()
 	d.rpcAddr = srv.Addr().String()
 	d.mu.Unlock()
+
+	// Persist the resolved RPC listen address (issue #34) so `lantern
+	// info` reports the real port for embedded installs too — important
+	// because embedded mode often binds an ephemeral port (:0). Mirrors
+	// the standalone daemon's <netDir>/rpc-listen write. Best-effort.
+	if d.cfg.DataDir != "" {
+		netDir := filepath.Join(d.cfg.DataDir, network.String())
+		if err := os.WriteFile(filepath.Join(netDir, "rpc-listen"),
+			[]byte(srv.Addr().String()+"\n"), 0o600); err != nil {
+			log.Warnw("persist rpc-listen", "err", err)
+		}
+	}
 
 	if !d.cfg.EmbeddedMode {
 		fmt.Printf("daemon: rpc at http://%s/rpc/v1\n", srv.Addr().String())

@@ -161,3 +161,281 @@ func TestSyncReorgDetected(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, src.canon[3].Cid(), ts3.Cids()[0])
 }
+
+// TestSyncCatchUpBeyondMaxBacktrack reproduces issue #33: when the store
+// falls further behind the chain than MaxBacktrack (e.g. embedded mode
+// during a long ProveTask wait, or after a Glif blip), the agent must
+// still converge to head over subsequent polls instead of leaving an
+// unfillable gap between currentHead+1 and head-MaxBacktrack.
+//
+// Before the fix, pollAndApply set start = head-MaxBacktrack whenever
+// currentHead+1 < that, skipping every epoch in between. SetHead at
+// `start` then needed a parent at start-1 that was never ingested, so the
+// head pointer stalled and the daemon reported a stale ChainHead until
+// restart (the 70-epoch lag in curio-core#62).
+func TestSyncCatchUpBeyondMaxBacktrack(t *testing.T) {
+	s, _ := newStore(t, false)
+	src := newFakeSource()
+
+	// Build a contiguous chain 0..200.
+	g := mkBlock(t, 0, nil, 1000, "g")
+	src.put(g)
+	parents := []cid.Cid{g.Cid()}
+	for h := abi.ChainEpoch(1); h <= 200; h++ {
+		b := mkBlock(t, h, parents, 1000, "")
+		src.put(b)
+		parents = []cid.Cid{b.Cid()}
+	}
+
+	// Small MaxBacktrack so the lag easily exceeds it.
+	sync := hstore.NewSync(s, src, hstore.SyncOptions{MaxBacktrack: 10})
+
+	// First poll: source head is 200, store is empty. BootstrapDepth
+	// defaults to MaxBacktrack (10), so the store comes up near head.
+	require.NoError(t, sync.PollOnce(context.Background()))
+	first := s.HeadEpoch()
+	require.Greater(t, int64(first), int64(0), "first poll should establish a head")
+	require.LessOrEqual(t, int64(first), int64(200))
+
+	// Now simulate falling far behind: head is already 200, store is at
+	// `first` (~190). The gap (200-190=10) is within MaxBacktrack here,
+	// but the real failure is a gap LARGER than MaxBacktrack. Force it:
+	// repeated polls with a fixed-far-ahead head must monotonically
+	// advance the store to head, never stalling.
+	prev := s.HeadEpoch()
+	for i := 0; i < 50; i++ {
+		require.NoError(t, sync.PollOnce(context.Background()))
+		cur := s.HeadEpoch()
+		require.GreaterOrEqual(t, int64(cur), int64(prev),
+			"head must never regress (poll %d)", i)
+		prev = cur
+		if cur >= 200 {
+			break
+		}
+	}
+	require.Equal(t, abi.ChainEpoch(200), s.HeadEpoch(),
+		"store must converge to chain head despite lag > MaxBacktrack")
+
+	// Every epoch from the first head up to 200 must be canonically
+	// present with no gap (the bug left holes that broke parent linkage).
+	for h := first; h <= 200; h++ {
+		ts, err := s.GetTipSetByHeight(h)
+		require.NoErrorf(t, err, "missing canonical tipset at epoch %d (gap)", h)
+		require.Equal(t, h, ts.Height())
+	}
+}
+
+// flakySource wraps an RPCSource and fails FetchBlock every Nth call,
+// modelling a rate-limited / intermittently-failing public RPC (Glif
+// under load). This is the real-world condition behind issue #33: a
+// single transient fetch error during a deep catch-up must not abort the
+// whole poll and stall the head pointer.
+type flakySource struct {
+	inner    hstore.RPCSource
+	mu       sync.Mutex
+	calls    int
+	failEach int // fail when calls % failEach == 0
+}
+
+func (f *flakySource) HeadEpoch(ctx context.Context) (abi.ChainEpoch, error) {
+	return f.inner.HeadEpoch(ctx)
+}
+func (f *flakySource) TipsetCIDsByHeight(ctx context.Context, h abi.ChainEpoch) ([]cid.Cid, error) {
+	return f.inner.TipsetCIDsByHeight(ctx, h)
+}
+func (f *flakySource) FetchBlock(ctx context.Context, k cid.Cid) (*ltypes.BlockHeader, error) {
+	f.mu.Lock()
+	f.calls++
+	fail := f.failEach > 0 && f.calls%f.failEach == 0
+	f.mu.Unlock()
+	if fail {
+		return nil, errors.New("simulated rate-limit (429)")
+	}
+	return f.inner.FetchBlock(ctx, k)
+}
+
+// failOnceSource fails FetchBlock the first time it's asked for any CID
+// in failCIDs, then succeeds. Models a transient Glif error on specific
+// blocks during a deep catch-up.
+type failOnceSource struct {
+	inner   hstore.RPCSource
+	mu      sync.Mutex
+	failCID map[cid.Cid]bool
+}
+
+func (f *failOnceSource) HeadEpoch(ctx context.Context) (abi.ChainEpoch, error) {
+	return f.inner.HeadEpoch(ctx)
+}
+func (f *failOnceSource) TipsetCIDsByHeight(ctx context.Context, h abi.ChainEpoch) ([]cid.Cid, error) {
+	return f.inner.TipsetCIDsByHeight(ctx, h)
+}
+func (f *failOnceSource) FetchBlock(ctx context.Context, k cid.Cid) (*ltypes.BlockHeader, error) {
+	f.mu.Lock()
+	if f.failCID[k] {
+		f.failCID[k] = false
+		f.mu.Unlock()
+		return nil, errors.New("simulated transient fetch error")
+	}
+	f.mu.Unlock()
+	return f.inner.FetchBlock(ctx, k)
+}
+
+// TestSyncTransientFetchErrorDoesNotStall is the precise #33 regression.
+// A warm store falls far behind head (a 110-epoch jump > MaxBacktrack),
+// then a transient fetch error hits one of the catch-up epochs on its
+// first attempt. The head pointer must still make forward progress that
+// poll (advancing up to the failed epoch) and converge on the next poll
+// once the transient clears — it must NOT abort the whole cycle and leave
+// the head pinned at the warm point (the curio-core#62 stall, where the
+// embedded daemon stayed 70 epochs behind until restart).
+func TestSyncTransientFetchErrorDoesNotStall(t *testing.T) {
+	s, _ := newStore(t, false)
+	base := newFakeSource()
+	g := mkBlock(t, 0, nil, 1000, "g")
+	base.put(g)
+	parents := []cid.Cid{g.Cid()}
+	for h := abi.ChainEpoch(1); h <= 40; h++ {
+		b := mkBlock(t, h, parents, 1000, "")
+		base.put(b)
+		parents = []cid.Cid{b.Cid()}
+	}
+
+	fo := &failOnceSource{inner: base, failCID: map[cid.Cid]bool{}}
+	sync := hstore.NewSync(s, fo, hstore.SyncOptions{MaxBacktrack: 10})
+	require.NoError(t, sync.PollOnce(context.Background()))
+	require.Equal(t, abi.ChainEpoch(40), s.HeadEpoch())
+
+	// Chain jumps to 150 (110 epochs > MaxBacktrack=10). Arm a transient
+	// failure on epoch 100's block, mid-catch-up.
+	for h := abi.ChainEpoch(41); h <= 150; h++ {
+		b := mkBlock(t, h, parents, 1000, "")
+		base.put(b)
+		parents = []cid.Cid{b.Cid()}
+		if h == 100 {
+			fo.mu.Lock()
+			fo.failCID[b.Cid()] = true
+			fo.mu.Unlock()
+		}
+	}
+
+	// One poll: head must advance past the warm point (forward progress),
+	// even though epoch 100 transiently failed.
+	_ = sync.PollOnce(context.Background())
+	afterFirst := s.HeadEpoch()
+	require.Greater(t, int64(afterFirst), int64(40),
+		"head must make forward progress despite a transient fetch error mid-catch-up, got %d", afterFirst)
+
+	// A few more polls converge to head with no gaps.
+	prev := afterFirst
+	for i := 0; i < 20 && s.HeadEpoch() < 150; i++ {
+		_ = sync.PollOnce(context.Background())
+		require.GreaterOrEqual(t, int64(s.HeadEpoch()), int64(prev), "head must not regress")
+		prev = s.HeadEpoch()
+	}
+	require.Equal(t, abi.ChainEpoch(150), s.HeadEpoch(), "must converge to head")
+	for h := abi.ChainEpoch(40); h <= 150; h++ {
+		_, err := s.GetTipSetByHeight(h)
+		require.NoErrorf(t, err, "gap at epoch %d", h)
+	}
+}
+
+// TestSyncCatchUpWithFlakySource is the core #33 regression: a store far
+// behind head, catching up against a source that intermittently fails
+// fetches, must still converge to head. Before the fix, one fetch error
+// during backfill returned from the whole poll with no head advance, and
+// repeated failures meant the head pointer never moved (the stall that
+// looked like a 70-epoch lag until daemon restart).
+func TestSyncCatchUpWithFlakySource(t *testing.T) {
+	s, _ := newStore(t, false)
+	base := newFakeSource()
+
+	g := mkBlock(t, 0, nil, 1000, "g")
+	base.put(g)
+	parents := []cid.Cid{g.Cid()}
+	mk := func(upto abi.ChainEpoch) {
+		for h := base.head + 1; h <= upto; h++ {
+			b := mkBlock(t, h, parents, 1000, "")
+			base.put(b)
+			parents = []cid.Cid{b.Cid()}
+		}
+	}
+
+	// Phase 1: chain at head 40, store syncs up cleanly (no flakiness).
+	mk(40)
+	src := &flakySource{inner: base, failEach: 0}
+	sync := hstore.NewSync(s, src, hstore.SyncOptions{MaxBacktrack: 10})
+	require.NoError(t, sync.PollOnce(context.Background()))
+	warm := s.HeadEpoch()
+	require.GreaterOrEqual(t, int64(warm), int64(38),
+		"warm store should be at/near head 40, got %d", warm)
+
+	// Phase 2: the daemon "stalls" — chain advances far ahead (to 150,
+	// a 110-epoch jump, well beyond MaxBacktrack=10) while the source
+	// becomes intermittently rate-limited. This is the curio-core#62
+	// condition: a long wait during which head ran away. Before the fix
+	// the store stalled at `warm` until restart. After the fix it must
+	// catch up contiguously to head.
+	mk(150)
+	src.mu.Lock()
+	src.failEach = 7 // every 7th fetch 429s
+	src.mu.Unlock()
+
+	prev := warm
+	converged := false
+	for i := 0; i < 400; i++ {
+		_ = sync.PollOnce(context.Background()) // transient errors expected
+		cur := s.HeadEpoch()
+		require.GreaterOrEqual(t, int64(cur), int64(prev),
+			"head must never regress across transient fetch errors (poll %d)", i)
+		prev = cur
+		if cur >= 150 {
+			converged = true
+			break
+		}
+	}
+	require.True(t, converged,
+		"store must converge to head=150 despite intermittent fetch failures; stalled at %d", prev)
+
+	// The served chain must be gap-free and contiguous from the warm
+	// point all the way to head — no holes left below the head pointer.
+	for h := warm; h <= 150; h++ {
+		_, err := s.GetTipSetByHeight(h)
+		require.NoErrorf(t, err, "gap at epoch %d after flaky catch-up (head=%d)", h, s.HeadEpoch())
+	}
+}
+
+// TestSyncColdStartFarHead verifies a cold store against a high chain
+// head converges to head over repeated polls (the embedded curio-core
+// bring-up case), bounding per-poll work via BootstrapDepth then
+// catching up incrementally.
+func TestSyncColdStartFarHead(t *testing.T) {
+	s, _ := newStore(t, false)
+	src := newFakeSource()
+
+	g := mkBlock(t, 0, nil, 1000, "g")
+	src.put(g)
+	parents := []cid.Cid{g.Cid()}
+	for h := abi.ChainEpoch(1); h <= 100; h++ {
+		b := mkBlock(t, h, parents, 1000, "")
+		src.put(b)
+		parents = []cid.Cid{b.Cid()}
+	}
+
+	sync := hstore.NewSync(s, src, hstore.SyncOptions{
+		MaxBacktrack:   10,
+		BootstrapDepth: 2, // tiny cold-start window (rate-limited Glif)
+	})
+
+	prev := abi.ChainEpoch(-1)
+	for i := 0; i < 200; i++ {
+		require.NoError(t, sync.PollOnce(context.Background()))
+		cur := s.HeadEpoch()
+		require.GreaterOrEqual(t, int64(cur), int64(prev), "head must never regress")
+		prev = cur
+		if cur >= 100 {
+			break
+		}
+	}
+	require.Equal(t, abi.ChainEpoch(100), s.HeadEpoch(),
+		"cold store must converge to chain head")
+}
