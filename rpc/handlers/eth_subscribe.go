@@ -1,8 +1,13 @@
 // eth_subscribe.go - EIP-1193 subscription support on the WebSocket
-// transport. Closes Lantern#32. V1 supports only the "newHeads" event
-// type; "logs" + "newPendingTransactions" + "syncing" are deferred to
-// follow-on tickets (the filter machinery for "logs" in particular is
-// non-trivial and warrants its own design pass).
+// transport. Closes Lantern#32. Supports the two event types that cover
+// ~95% of wallet/dapp usage: "newHeads" and "logs".
+// "newPendingTransactions" + "syncing" remain deferred (low usage; the
+// former needs a mempool watcher Lantern doesn't index).
+//
+// "logs" is bridge-backed: Lantern has no local event/receipt index, so
+// on each new head we query the VM bridge's eth_getLogs scoped to that
+// block with the caller's filter and push each matching log. See
+// subscribeLogs.
 //
 // Why this matters for the V0.1 turnkey-product vision (curio-core#60):
 // browser wallets (MetaMask, Brave, WalletConnect dapps) expect
@@ -51,6 +56,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 
 	logging "github.com/ipfs/go-log/v2"
 	"golang.org/x/xerrors"
@@ -115,7 +121,7 @@ func (c *ChainAPI) ensureEthSubState() {
 // multiple subs are active on the same connection) and in
 // eth_unsubscribe.
 //
-// V1 supports "newHeads" only. "logs", "newPendingTransactions" and
+// Supports "newHeads" and "logs". "newPendingTransactions" and
 // "syncing" return method-supported-but-event-type-not-supported.
 func (c *ChainAPI) EthSubscribe(ctx context.Context, params jsonrpc.RawParams) (EthSubscriptionID, error) {
 	if c.HeadNotify == nil {
@@ -149,7 +155,17 @@ func (c *ChainAPI) EthSubscribe(ctx context.Context, params jsonrpc.RawParams) (
 	case "newHeads":
 		return c.subscribeNewHeads(ctx, revClient)
 	case "logs":
-		return "", xerrors.New("eth_subscribe(logs): not yet supported by Lantern V1 (Lantern#32 follow-on)")
+		// Optional second arg is the log filter object
+		// ({"address":..., "topics":...}). fromBlock/toBlock are
+		// ignored for subscriptions — we scope each query to the new
+		// head as it arrives.
+		var filter map[string]json.RawMessage
+		if len(rawArgs) > 1 {
+			if err := json.Unmarshal(rawArgs[1], &filter); err != nil {
+				return "", xerrors.Errorf("eth_subscribe(logs): parse filter object: %w", err)
+			}
+		}
+		return c.subscribeLogs(ctx, revClient, filter)
 	case "newPendingTransactions":
 		return "", xerrors.New("eth_subscribe(newPendingTransactions): not yet supported by Lantern V1")
 	case "syncing":
@@ -269,6 +285,131 @@ func (c *ChainAPI) subscribeNewHeads(parentCtx context.Context, revClient EthSub
 	log.Infow("eth_subscribe(newHeads): subscription created",
 		"subscription_id", id)
 	return id, nil
+}
+
+// subscribeLogs starts a subscription that, on every new canonical head,
+// queries eth_getLogs for that block scoped to the caller's filter
+// (address + topics) and pushes each matching log to the client as an
+// eth_subscription notification.
+//
+// Design note (issue #32, option a): Lantern has no local event/receipt
+// index — EthGetLogs forwards to the VM bridge (Forest/Lotus upstream).
+// So rather than scanning tipsets locally, we reuse that bridge path:
+// each new head triggers one bridge eth_getLogs call with
+// fromBlock=toBlock=<new head>. Latency is one block time; cost is one
+// bridge call per active logs-subscription per block. Geth emits one
+// notification per matching log, which we mirror.
+func (c *ChainAPI) subscribeLogs(parentCtx context.Context, revClient EthSubscriberMethods, filter map[string]json.RawMessage) (EthSubscriptionID, error) {
+	if c.Bridge == nil {
+		return "", xerrors.New("eth_subscribe(logs): VM bridge not configured; log subscriptions require --vm-bridge-rpc")
+	}
+	c.ensureEthSubState()
+
+	id, err := newSubscriptionID()
+	if err != nil {
+		return "", xerrors.Errorf("eth_subscribe: generate sub id: %w", err)
+	}
+
+	// Copy the caller's filter, stripping any client-supplied block range
+	// — we own fromBlock/toBlock and set them per head.
+	baseFilter := map[string]json.RawMessage{}
+	for k, v := range filter {
+		switch k {
+		case "fromBlock", "toBlock", "blockHash":
+			// ignored for subscriptions
+		default:
+			baseFilter[k] = v
+		}
+	}
+
+	subCtx, cancel := context.WithCancel(context.Background())
+	c.ethSubMu.Lock()
+	c.ethSubs[id] = &subscription{id: id, cancel: cancel}
+	c.ethSubMu.Unlock()
+
+	headCh := c.HeadNotify.Subscribe(subCtx)
+
+	go func() {
+		defer func() {
+			c.ethSubMu.Lock()
+			delete(c.ethSubs, id)
+			c.ethSubMu.Unlock()
+		}()
+
+		for {
+			select {
+			case <-subCtx.Done():
+				return
+			case batch, ok := <-headCh:
+				if !ok {
+					return
+				}
+				for _, hc := range batch {
+					if hc.Type != "apply" || hc.Val == nil {
+						continue
+					}
+					blockHex := fmt.Sprintf("0x%x", int64(hc.Val.Height()))
+
+					// Build the per-head filter: base + fromBlock=toBlock=head.
+					f := map[string]json.RawMessage{}
+					for k, v := range baseFilter {
+						f[k] = v
+					}
+					bh, _ := json.Marshal(blockHex)
+					f["fromBlock"] = bh
+					f["toBlock"] = bh
+
+					logs, err := c.queryLogs(subCtx, f)
+					if err != nil {
+						// Transient bridge error: log + skip this head,
+						// keep the subscription alive for the next one.
+						log.Debugw("eth_subscribe(logs): getLogs failed for head",
+							"subscription_id", id, "block", blockHex, "err", err)
+						continue
+					}
+
+					for _, lg := range logs {
+						resp := EthSubscriptionResponse{SubscriptionID: id, Result: lg}
+						payload, err := json.Marshal(resp)
+						if err != nil {
+							log.Warnw("eth_subscribe(logs): marshal response",
+								"subscription_id", id, "err", err)
+							continue
+						}
+						if err := revClient.EthSubscription(subCtx, jsonrpc.RawParams(payload)); err != nil {
+							log.Infow("eth_subscribe(logs): client write failed, terminating subscription",
+								"subscription_id", id, "err", err)
+							return
+						}
+					}
+				}
+			}
+		}
+	}()
+
+	log.Infow("eth_subscribe(logs): subscription created", "subscription_id", id)
+	return id, nil
+}
+
+// queryLogs calls the bridge's eth_getLogs with the given filter and
+// returns the result as a slice of raw log objects. The bridge returns
+// an array of EthLog objects; we keep them opaque (interface{}) and pass
+// them through unchanged so the wire shape matches eth_getLogs exactly.
+func (c *ChainAPI) queryLogs(ctx context.Context, filter map[string]json.RawMessage) ([]interface{}, error) {
+	out, err := c.EthGetLogs(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	if out == nil {
+		return nil, nil
+	}
+	logs, ok := out.([]interface{})
+	if !ok {
+		// Some upstreams may return null or a non-array on empty; treat
+		// anything non-array as "no logs" rather than erroring.
+		return nil, nil
+	}
+	return logs, nil
 }
 
 // EthUnsubscribe cancels the subscription with the given ID. Returns
