@@ -10,7 +10,7 @@
 // tests and on the live mainnet daemon; this file is the pure-logic
 // coverage of the ingestor itself.
 
-package main
+package blockingest
 
 import (
 	"context"
@@ -92,7 +92,7 @@ func withStore(t *testing.T, headHeight abi.ChainEpoch) (*hstore.Store, *ltypes.
 
 func TestIngestor_DedupesRepeatEnqueue(t *testing.T) {
 	s, head := withStore(t, 10)
-	ing := newGossipBlockIngestor(s, nil)
+	ing := New(s, nil)
 
 	// Block at head+1 with the right parent.
 	next := mkBlock(t, head.Height()+1, []cid.Cid{head.Blocks()[0].Cid()}, 1000, "next")
@@ -112,7 +112,7 @@ func TestIngestor_DedupesRepeatEnqueue(t *testing.T) {
 
 func TestIngestor_HeightFence(t *testing.T) {
 	s, head := withStore(t, 10)
-	ing := newGossipBlockIngestor(s, nil)
+	ing := New(s, nil)
 	ctx := context.Background()
 
 	// Block at the same height as head. Should be skipped silently
@@ -130,7 +130,7 @@ func TestIngestor_HeightFence(t *testing.T) {
 
 func TestIngestor_SkipsWhenParentsMissing(t *testing.T) {
 	s, head := withStore(t, 10)
-	ing := newGossipBlockIngestor(s, nil)
+	ing := New(s, nil)
 	ctx := context.Background()
 
 	// Block at head+5 (jump ahead). Its parent CID won't be in the store.
@@ -144,7 +144,7 @@ func TestIngestor_SkipsWhenParentsMissing(t *testing.T) {
 
 func TestIngestor_InstallsAtHeadPlusOne(t *testing.T) {
 	s, head := withStore(t, 10)
-	ing := newGossipBlockIngestor(s, nil)
+	ing := New(s, nil)
 	ctx := context.Background()
 
 	next := mkBlock(t, head.Height()+1, []cid.Cid{head.Blocks()[0].Cid()}, 1000, "next")
@@ -158,7 +158,7 @@ func TestIngestor_InstallsAtHeadPlusOne(t *testing.T) {
 
 func TestIngestor_EnqueueDropsWhenChannelFull(t *testing.T) {
 	s, _ := withStore(t, 1)
-	ing := newGossipBlockIngestor(s, nil)
+	ing := New(s, nil)
 
 	// Don't start Run(); the channel buffer fills and Enqueue drops.
 	// Send buffer+5 messages; the last 5 should be dropped.
@@ -177,7 +177,7 @@ func TestIngestor_EnqueueDropsWhenChannelFull(t *testing.T) {
 
 func TestIngestor_EnqueueIgnoresNilHeader(t *testing.T) {
 	s, _ := withStore(t, 1)
-	ing := newGossipBlockIngestor(s, nil)
+	ing := New(s, nil)
 
 	ing.Enqueue(nil)
 	ing.Enqueue(&ltypes.BlockMsg{Header: nil})
@@ -239,7 +239,7 @@ func TestIngestor_InlineBackfillFillsGap(t *testing.T) {
 	src.register(ep12)
 	// ep13 is the gossipsub-arrived block; not registered as we don't fetch it
 
-	ing := newGossipBlockIngestor(s, src)
+	ing := New(s, src)
 	ing.process(context.Background(), &ltypes.BlockMsg{Header: ep13})
 
 	require.Equal(t, uint64(1), ing.backfilled.Load(), "backfill should fire")
@@ -258,7 +258,7 @@ func TestIngestor_InlineBackfillRespectsCapsToSkip(t *testing.T) {
 	unknownParent := mkCID(t, "unknown-parent-at-19")
 	far := mkBlock(t, 20, []cid.Cid{unknownParent}, 1000, "far")
 
-	ing := newGossipBlockIngestor(s, src)
+	ing := New(s, src)
 	ing.process(context.Background(), &ltypes.BlockMsg{Header: far})
 
 	require.Equal(t, uint64(0), ing.installed.Load(), "too-big gap must not install")

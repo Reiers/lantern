@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/filecoin-project/go-state-types/abi"
@@ -49,9 +50,11 @@ import (
 	"github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/chain/types"
+	"github.com/Reiers/lantern/net/blockingest"
 	"github.com/Reiers/lantern/net/combined"
 	"github.com/Reiers/lantern/net/glif"
 	"github.com/Reiers/lantern/net/hsync"
+	llibp2p "github.com/Reiers/lantern/net/libp2p"
 	"github.com/Reiers/lantern/rpc/handlers"
 	rpcserver "github.com/Reiers/lantern/rpc/server"
 	"github.com/Reiers/lantern/state/hamt"
@@ -134,18 +137,27 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		chainAPI.HeadNotify = dist
 
 		src := glif.New(glifURL, 8*time.Second)
-		// Issue #33: embedded mode (curio-core) polls Glif for head, unlike
-		// standalone lantern which tracks head via live gossipsub. During a
-		// long wait (e.g. a ProveTask proving window) head can run far
-		// ahead, and a transient Glif error during catch-up must not stall
-		// the head pointer. The hardened Sync now (a) resumes catch-up
-		// contiguously from currentHead+1 in CatchUpChunk-sized steps so it
-		// never skips epochs, and (b) advances the head only as far as the
-		// chain is gap-free, retrying the rest next poll instead of aborting.
-		// MaxBacktrack is raised so reorg/backfill depth comfortably exceeds
-		// the deepest realistic single-wait lag.
+
+		// #40: when libp2p is enabled, gossipsub is the PRIMARY head
+		// source (0-1 epoch latency, no upstream-RPC dependency) and the
+		// polling Sync drops to a relaxed cadence as the catch-up fallback,
+		// matching standalone cmd/lantern. When libp2p is disabled (the
+		// curio-core default today), Sync stays at the configured interval
+		// as the sole head source.
+		libp2pEnabled := !d.cfg.NoLibp2p && d.cfg.P2PListen != ""
+		syncInterval := d.cfg.SyncInterval
+		if libp2pEnabled {
+			syncInterval = 30 * time.Second
+		}
+
+		// Issue #33: the hardened Sync resumes catch-up contiguously from
+		// currentHead+1 in CatchUpChunk-sized steps (never skips epochs),
+		// and advances head only as far as the chain is gap-free (retrying
+		// the rest next poll rather than aborting). MaxBacktrack is raised
+		// so reorg/backfill depth comfortably exceeds the deepest realistic
+		// single-wait lag.
 		sync := hstore.NewSync(store, src, hstore.SyncOptions{
-			Interval:       d.cfg.SyncInterval,
+			Interval:       syncInterval,
 			MaxBacktrack:   900, // ~7.5h at 30s blocks; covers long proving waits
 			BootstrapDepth: 3,
 			CatchUpChunk:   200, // bounded per-poll catch-up work
@@ -163,12 +175,23 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 
 		log.Infow("header store wired",
 			"path", hsPath,
-			"sync_interval", d.cfg.SyncInterval,
+			"sync_interval", syncInterval,
 			"notify_buf", d.cfg.NotifyBufSize,
+			"gossipsub", libp2pEnabled,
 			"embedded", d.cfg.EmbeddedMode)
 		if !d.cfg.EmbeddedMode {
 			fmt.Printf("daemon: header store %s (sync every %s, buf=%d)\n",
-				hsPath, d.cfg.SyncInterval, d.cfg.NotifyBufSize)
+				hsPath, syncInterval, d.cfg.NotifyBufSize)
+		}
+
+		// #40: mount libp2p host + gossipsub block ingestor for live head
+		// tracking. Best-effort: a libp2p failure must not sink the daemon
+		// (the polling Sync still tracks head). src doubles as the
+		// ingestor's bounded inline-backfill source for head+N>1 arrivals.
+		if libp2pEnabled {
+			if err := d.startGossipHead(ctx, store, src, network, chainAPI); err != nil {
+				log.Warnw("gossipsub head-tracking unavailable; falling back to polling Sync", "err", err)
+			}
 		}
 	}
 
@@ -230,11 +253,14 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 	srv := d.rpcServer
 	sync := d.headerSync
 	store := d.headerStore
+	host := d.p2pHost
 	d.rpcServer = nil
 	d.auth = nil
 	d.headerSync = nil
 	d.headerStore = nil
 	d.headNotify = nil
+	d.p2pHost = nil
+	d.ingestor = nil
 	d.started = false
 	d.mu.Unlock()
 
@@ -242,6 +268,11 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 		if err := srv.Stop(ctx); err != nil {
 			return fmt.Errorf("stop rpc server: %w", err)
 		}
+	}
+	// Close the libp2p host (stops gossipsub + DHT). The ingestor
+	// goroutine self-terminates on ctx cancellation. Best-effort.
+	if host != nil {
+		_ = host.Close()
 	}
 	// Shut down header-sync before closing the store: Sync writes
 	// SetHead asynchronously, and Close on an open Badger handle while
@@ -255,6 +286,80 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// startGossipHead brings up the libp2p host + Kademlia DHT discovery +
+// the gossipsub block ingestor (#40), so the embedded daemon tracks head
+// over /fil/blocks/<network> with the same 0-1 epoch latency as the
+// standalone daemon, instead of relying solely on Glif polling.
+//
+// The ingestor installs gossiped blocks into the same header store the
+// polling Sync writes; SetHead serializes them. src is the bounded
+// inline-backfill source for head+N>1 arrivals. On any setup error the
+// caller logs and continues on the polling Sync (best-effort).
+func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src blockingest.BackfillSource, network build.Network, chainAPI *handlers.ChainAPI) error {
+	listeners := splitCSV(d.cfg.P2PListen)
+	host, err := llibp2p.New(ctx, llibp2p.HostConfig{
+		ListenAddrs:    listeners,
+		BootstrapPeers: network.BootstrapPeers(),
+		MinPeers:       20,
+		MaxPeers:       200,
+	})
+	if err != nil {
+		return fmt.Errorf("start libp2p host: %w", err)
+	}
+
+	// Net* RPC methods (Curio's webui consumes these) get real data.
+	if chainAPI != nil {
+		chainAPI.NetInfoSource = host.NetInfo()
+	}
+
+	// DHT discovery so peer count climbs past the bootstrap floor and the
+	// gossipsub mesh fills. Non-fatal: gossipsub still works on bootstrap
+	// peers alone, just with fewer mesh members.
+	if err := host.EnableDHT(ctx, llibp2p.DHTOptions{
+		BootstrapPeers: network.BootstrapPeers(),
+		NetworkName:    network.NetworkName(),
+	}); err != nil {
+		log.Warnw("libp2p EnableDHT failed; continuing without DHT discovery", "err", err)
+	}
+
+	if host.PubSub == nil {
+		_ = host.Close()
+		return fmt.Errorf("libp2p host has no pubsub instance")
+	}
+
+	ing, _, err := blockingest.Start(ctx, host.PubSub, store, src, network.GossipTopicBlocks())
+	if err != nil {
+		_ = host.Close()
+		return fmt.Errorf("start gossipsub block ingestor: %w", err)
+	}
+
+	d.mu.Lock()
+	d.p2pHost = host
+	d.ingestor = ing
+	d.mu.Unlock()
+
+	log.Infow("gossipsub head-tracking active",
+		"peer_id", host.ID().String(),
+		"topic", network.GossipTopicBlocks())
+	if !d.cfg.EmbeddedMode {
+		fmt.Printf("daemon: gossipsub head-tracking on %s (libp2p id=%s)\n",
+			network.GossipTopicBlocks(), host.ID())
+	}
+	return nil
+}
+
+// splitCSV splits a comma-separated string, trimming spaces and dropping
+// empties.
+func splitCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // fetchTrustedHead probes the primary gateway's /state/root endpoint,
