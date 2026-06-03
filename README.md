@@ -9,7 +9,7 @@
 
   [![CI](https://github.com/Reiers/lantern/actions/workflows/ci.yml/badge.svg)](https://github.com/Reiers/lantern/actions/workflows/ci.yml)
   [![License: Apache 2.0 OR MIT](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](#license)
-  [![Release: v1.5.7](https://img.shields.io/badge/release-v1.5.7-0090ff.svg)](https://github.com/Reiers/lantern/releases)
+  [![Release: v1.5.8](https://img.shields.io/badge/release-v1.5.8-0090ff.svg)](https://github.com/Reiers/lantern/releases)
   [![Go: 1.25+](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](go.mod)
 
   **One line to install:**
@@ -28,7 +28,7 @@
 
 Lantern is a pure-Go Filecoin light node. **~40 MB binary, ~1 GB working state, zero CGo, no `filecoin-ffi`, no Rust toolchain.** It serves a Lotus-compatible JSON-RPC (71 / 71 of the Curio `FULLNODE_API` surface, plus the `eth_*` surface needed by FoC clients) and verifies every byte locally against BLS, F3, DRAND, and IPLD content addressing. No trusted RPC provider. No 76 GB snapshot.
 
-**Current release:** [v1.5.7](https://github.com/Reiers/lantern/releases/tag/v1.5.7) on mainnet + calibration. **In production today** as the chain backend embedded in [Curio Core](https://curiocore.io) and as a secondary node on the mainnet SP `f03678816` (sp.reiers.io).
+**Current release:** [v1.5.8](https://github.com/Reiers/lantern/releases/tag/v1.5.8) on mainnet + calibration. **In production today** as the chain backend embedded in [Curio Core](https://curiocore.io) and as a secondary node on the mainnet SP `f03678816` (sp.reiers.io).
 
 ## What is Lantern?
 
@@ -214,7 +214,7 @@ Or use Lantern's own CLI:
 
 ## Status
 
-**Current release: [v1.5.7](https://github.com/Reiers/lantern/releases/tag/v1.5.7)** — production on mainnet + calibration.
+**Current release: [v1.5.8](https://github.com/Reiers/lantern/releases/tag/v1.5.8)** — production on mainnet + calibration.
 
 What works today:
 
@@ -238,7 +238,8 @@ Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on m
 
 | Release | What landed |
 |---|---|
-| v1.5.7 (current) | Installer rewrite in the FilBucket pattern: animated spinners, FilBucket-style closing block with `Next steps`, ASCII banner, wallet-skip when stdin isn't a TTY. No source changes from v1.5.5. |
+| v1.5.8 (current) | Embedded `pkg/daemon` gossipsub head-tracking (0-1 epoch, #40). `eth_subscribe("logs")` over WS (#32). Hardened header-store catch-up so embedded mode can't stall (#33). `lantern info` per-network token + real RPC port + `--token-only`/`--network` (#34, #35). `StateNetworkName` returns the well-known name (#36). |
+| v1.5.7 | Installer upgrades when the published SHA differs (was permanently stuck on whichever binary was installed first). No source changes. |
 | v1.5.5 | Dashboard on by default at `http://127.0.0.1:9092/dashboard/`. Installer color-rendering hotfix (real ESC bytes). Installer prompts work when piped through `curl \| bash`. |
 | v1.5.4 | Installer PATH-detection hotfix for fresh Apple Silicon Macs. Symlink self-heal on re-runs. No source code changes from v1.5.3. |
 | v1.5.3 | `web3_clientVersion` + CORS on `/rpc/v1`. `eth_subscribe newHeads`. VMBridge fallback for `StateGetRandomnessDigestFromBeacon`. |

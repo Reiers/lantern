@@ -2,6 +2,87 @@
 
 All notable changes to Lantern.
 
+## v1.5.8 (2026-06-03)
+
+The "embedded mode grows up" release. Five fixes/features, driven largely
+by the curio-core integration and by external adopters running Lantern
+standalone (thanks @beck-8). The headline: the embedded daemon
+(`pkg/daemon`, used by curio-core) can no longer fall behind the chain,
+and now tracks head over gossipsub at the same 0-1 epoch latency as the
+standalone daemon.
+
+### Added
+
+- **`eth_subscribe("logs")`** over WebSocket, alongside the existing
+  `newHeads` subscription (#32). Together these cover ~95% of
+  wallet/dapp usage. `logs` is bridge-backed: on each new head Lantern
+  queries the VM bridge's `eth_getLogs` scoped to that block with the
+  caller's address/topics filter and pushes each match as an
+  `eth_subscription` notification (one per log, matching Geth). Transient
+  bridge errors keep the subscription alive; a client write failure
+  self-terminates and cleans up. Subscriptions previously had **zero**
+  test coverage; this release adds 8 tests (push/skip/unsubscribe/
+  self-clean/WS-required for newHeads, per-head filtering/error-survival/
+  bridge-required for logs). `newPendingTransactions` + `syncing` remain
+  deferred (low usage).
+- **Gossipsub head-tracking in `pkg/daemon`** (#40). The embedded daemon
+  can now mount a libp2p host + Kademlia DHT + the gossipsub block
+  ingestor and track head over `/fil/blocks/<network>` at 0-1 epoch
+  latency, with no upstream-RPC dependency for head-following — the same
+  path the standalone daemon has always used. When libp2p is enabled
+  (`P2PListen != "" && !NoLibp2p`), gossipsub is the primary head source
+  and the polling Sync drops to a 30s relaxed cadence as the catch-up
+  fallback. The ingestor was extracted from `cmd/lantern` (package main)
+  into a new importable package `net/blockingest`; the standalone daemon
+  is byte-identical in behaviour. New `Daemon.Host()` and
+  `Daemon.GossipStats()` accessors for observability.
+- **`lantern info --token-only` and `--network`** (#34, #35).
+  `--token-only` (already documented in the README, never actually
+  implemented) emits just the raw admin token for scripting
+  `FULLNODE_API_INFO`. `--network` lets you inspect a calibration install.
+
+### Fixed
+
+- **Embedded head store could fall behind the chain and stall** (#33,
+  curio-core#62). The `pkg/daemon` polling catch-up, on a transient Glif
+  error or a deep lag during a long wait (e.g. a ProveTask proving
+  window), could leave the head pointer stale until daemon restart — a
+  ~70-epoch lag in the field. The Sync agent is now hardened: catch-up
+  resumes **contiguously** from `currentHead+1` and is bounded per-poll
+  by a new `CatchUpChunk` (never skips epochs); the head pointer **never
+  advances past a fetch hole** (a failed-fetch epoch is distinguished
+  from a null round and blocks head-advance until retried); and a single
+  backfill error is **non-fatal** (stop-and-retry next poll instead of
+  aborting the whole cycle). Embedded `MaxBacktrack` raised 60 → 900
+  (~7.5h at 30s blocks) to cover the deepest realistic single-wait lag.
+- **`lantern info` reported "not initialised" for initialised installs**
+  (#35, reported by @beck-8). `info` read the admin token from the
+  top-level data dir, but since v1.3 `init` + the daemon mint it under
+  the per-network dir (`~/.lantern/<network>/token`). Now reads
+  per-network with a legacy top-level fallback for un-migrated installs.
+- **`lantern info` advertised the wrong RPC port** (#34, reported by
+  @beck-8). The `FULLNODE_API_INFO` line and the `/healthz` probe
+  hardcoded `127.0.0.1:1234`, so a daemon on another port showed the
+  wrong endpoint and a `404` healthz. The daemon now persists its actual
+  `--listen` address to `<netDir>/rpc-listen`, and `info` reports/probes
+  that (overridable with `info --listen`). 1234 stays the
+  Lotus-compatible default, but the daemon now warns loudly at startup
+  when 1234 is already in use (the common local-Lotus collision), with a
+  concrete `--listen` alternative.
+- **`StateNetworkName` returned the internal network value, not the
+  well-known name** (#36, fixed by @beck-8). On calibration it returned
+  `"calibration"` instead of `"calibrationnet"`, which made Curio reject
+  the chain node with `Network mismatch ... node is on calibration`.
+
+### Notes
+
+- curio-core still runs with `NoLibp2p: true`, so it keeps using the
+  (now-hardened) polling path until it opts into gossipsub head-tracking.
+  That opt-in plus a 0-1 epoch latency soak is tracked in curio-core#74.
+- No public API removals. `eth_subscribe`/`eth_unsubscribe`,
+  `StateNetworkName`, and `lantern info` flags are additive or
+  bug-fix-only.
+
 ## v1.5.7 (2026-05-28)
 
 The "installer actually upgrades when a new release is out" release.
