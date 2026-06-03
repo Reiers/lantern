@@ -58,6 +58,15 @@ type SyncOptions struct {
 	// set this small (1–3) so startup is quick; subsequent polls catch
 	// up incrementally.
 	BootstrapDepth abi.ChainEpoch
+	// CatchUpChunk caps how many epochs the warm-store catch-up advances
+	// in a single poll. When the store falls behind by more than this,
+	// each poll ingests a contiguous chunk of this size starting from
+	// currentHead+1, so lag decreases monotonically without skipping
+	// epochs (issue #33). 0 means "no cap" (advance straight to head).
+	// Default 200 — large enough that normal operation (0–2 epochs
+	// behind) is a single chunk, bounded enough that a deep backlog
+	// against rate-limited RPC is paced over several polls.
+	CatchUpChunk abi.ChainEpoch
 	// OnReorg is fired (after Store.SetHead) when the new head's parent
 	// chain replaced canonical pointers at one or more epochs. The
 	// argument is the divergence epoch (the deepest epoch whose
@@ -97,6 +106,9 @@ func NewSync(s *Store, src RPCSource, opts SyncOptions) *Sync {
 	}
 	if opts.BootstrapDepth == 0 {
 		opts.BootstrapDepth = opts.MaxBacktrack
+	}
+	if opts.CatchUpChunk == 0 {
+		opts.CatchUpChunk = 200
 	}
 	return &Sync{store: s, src: src, opts: opts}
 }
@@ -174,17 +186,31 @@ func (s *Sync) pollAndApply(ctx context.Context) error {
 		return nil
 	}
 
-	// Walk forward from max(currentHead+1, head-window) to head.
-	// On a cold start (currentHead < 0) use BootstrapDepth instead of
-	// MaxBacktrack so the first poll completes quickly against
-	// rate-limited public RPC providers; later polls catch up.
-	window := s.opts.MaxBacktrack
+	// Decide the [start, target] window to ingest this poll.
+	//
+	// Warm store (currentHead >= 0): always resume CONTIGUOUSLY from
+	// currentHead+1. The old code set start = head-MaxBacktrack whenever
+	// the store was further behind than MaxBacktrack, which skipped every
+	// epoch in between and left an unfillable gap — the head pointer then
+	// stalled (issue #33 / curio-core#62, the 70-epoch lag). To bound
+	// per-poll cost during a deep catch-up we instead cap how far FORWARD
+	// we advance in one poll (CatchUpChunk); subsequent polls continue
+	// from where this one stopped, so lag strictly decreases without ever
+	// creating a hole.
+	//
+	// Cold start (currentHead < 0): begin near head using BootstrapDepth
+	// so the first poll completes quickly against rate-limited public RPC;
+	// later polls catch up incrementally.
+	var start, target abi.ChainEpoch
 	if currentHead < 0 {
-		window = s.opts.BootstrapDepth
-	}
-	start := head - window
-	if currentHead+1 > start && currentHead >= 0 {
+		start = head - s.opts.BootstrapDepth
+		target = head
+	} else {
 		start = currentHead + 1
+		target = head
+		if chunk := s.opts.CatchUpChunk; chunk > 0 && target-start+1 > chunk {
+			target = start + chunk - 1
+		}
 	}
 	if start < 0 {
 		start = 0
@@ -199,43 +225,66 @@ func (s *Sync) pollAndApply(ctx context.Context) error {
 		}
 	}
 
-	// Pre-fetch each epoch's blocks. Errors are recorded but not
-	// fatal — individual epochs may legitimately fail (null rounds,
-	// transient Glif 5xx) without sinking the whole sync cycle.
-	newTSs := make(map[abi.ChainEpoch]*ltypes.TipSet, int(head-start+1))
-	for ep := start; ep <= head; ep++ {
+	// Pre-fetch each epoch's blocks. A fetch ERROR (transient Glif 5xx /
+	// 429) is distinct from a null round (legitimately empty epoch): the
+	// former must block head-advance past that epoch so we retry it next
+	// poll; the latter is skipped over normally. We track failed epochs
+	// explicitly so the apply loop can stop at the first hole instead of
+	// advancing the head pointer past missing data (issue #33).
+	newTSs := make(map[abi.ChainEpoch]*ltypes.TipSet, int(target-start+1))
+	fetchFailed := make(map[abi.ChainEpoch]bool)
+	for ep := start; ep <= target; ep++ {
 		ts, err := s.fetchAndPersistTipset(ctx, ep)
 		if err != nil {
 			s.recordErr(fmt.Errorf("fetch epoch %d: %w", ep, err))
 			log.Debugw("sync: fetch epoch failed", "epoch", ep, "err", err)
+			fetchFailed[ep] = true
 			continue
 		}
 		if ts == nil {
-			continue
+			continue // null round
 		}
 		newTSs[ep] = ts
 	}
 
-	// Backfill parents for each new tipset. This catches the reorg
-	// case where divergence is deeper than `start`: the new tip's parent
-	// chain branches off at some epoch we've already canonicalized to a
-	// different fork, and that parent header isn't yet in store.
+	// Apply tipsets in strict epoch order. backfillParents handles the
+	// reorg case where divergence is deeper than `start` (the new tip's
+	// parent chain branches off at an epoch already canonicalized to a
+	// different fork). On a cold start (currentHead < 0) backfill is
+	// skipped — the only alternative is walking back to genesis, which
+	// would block startup for hours against rate-limited public RPC;
+	// subsequent polls catch up incrementally.
 	//
-	// On a cold start (currentHead < 0) we skip backfill entirely — the
-	// only sensible alternative is to walk back to genesis (millions of
-	// epochs), which would block startup for hours against rate-limited
-	// public RPC. Subsequent polls catch up incrementally.
+	// We advance the head pointer
+	// only as far as the chain is CONTIGUOUS. The moment we hit an epoch
+	// that failed to fetch, we stop advancing the head and leave the rest
+	// for the next poll. This is the core #33 fix: previously the loop
+	// skipped failed/missing epochs but kept calling SetHead for later
+	// ones, advancing the head pointer past holes (a head that points at
+	// data with missing ancestors). Now lag decreases monotonically and
+	// the served head is always backed by a gap-free chain.
+	//
+	// A single backfill error is likewise non-fatal: we record it, stop
+	// advancing at that epoch, and retry next poll, instead of aborting
+	// the whole cycle (which under sustained rate-limiting meant the head
+	// never moved at all).
 	added := 0
 	skipBackfill := currentHead < 0
-	for ep := start; ep <= head; ep++ {
+	for ep := start; ep <= target; ep++ {
+		if fetchFailed[ep] {
+			// Hole: stop here. Next poll resumes from this epoch.
+			log.Debugw("sync: stopping head-advance at fetch hole", "epoch", ep)
+			break
+		}
 		ts, ok := newTSs[ep]
 		if !ok {
-			continue
+			continue // null round: no tipset, but not a hole
 		}
 		if !skipBackfill {
 			if err := s.backfillParents(ctx, ts); err != nil {
 				s.recordErr(err)
-				return err
+				log.Debugw("sync: backfill failed, stopping head-advance", "epoch", ep, "err", err)
+				break
 			}
 		}
 		if err := s.store.SetHead(ctx, ts); err != nil {
