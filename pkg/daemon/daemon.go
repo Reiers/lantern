@@ -43,6 +43,8 @@ import (
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	"github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
+	"github.com/Reiers/lantern/net/blockingest"
+	llibp2p "github.com/Reiers/lantern/net/libp2p"
 	rpcserver "github.com/Reiers/lantern/rpc/server"
 	"github.com/Reiers/lantern/wallet"
 )
@@ -222,6 +224,14 @@ type Daemon struct {
 	headerSync  *hstore.Sync
 	headNotify  *headnotify.Distributor
 
+	// libp2p host + gossipsub block ingestor. Populated when libp2p is
+	// enabled (P2PListen != "" && !NoLibp2p) and a header store is wired.
+	// When present, gossipsub is the primary head source (0-1 epoch
+	// latency) and headerSync runs at a relaxed cadence as the catch-up
+	// fallback. See lantern#40.
+	p2pHost  *llibp2p.Host
+	ingestor *blockingest.Ingestor
+
 	// Internal cancellation: derived from caller's ctx in Start.
 	cancel context.CancelFunc
 }
@@ -297,6 +307,28 @@ func (d *Daemon) HeadEpoch() abi.ChainEpoch {
 		return 0
 	}
 	return d.tr.Epoch
+}
+
+// Host returns the libp2p host, or nil when libp2p is disabled
+// (NoLibp2p / empty P2PListen) or Start hasn't completed. See #40.
+func (d *Daemon) Host() *llibp2p.Host {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.p2pHost
+}
+
+// GossipStats returns a snapshot of gossipsub block-ingestor counters
+// and true when gossipsub head-tracking is active. Returns (zero, false)
+// when running on the polling Sync alone. Useful for verifying the
+// 0-1 epoch latency soak in #40.
+func (d *Daemon) GossipStats() (blockingest.Stats, bool) {
+	d.mu.Lock()
+	ing := d.ingestor
+	d.mu.Unlock()
+	if ing == nil {
+		return blockingest.Stats{}, false
+	}
+	return ing.Stats(), true
 }
 
 // Start brings the daemon up: fetches the trusted head, opens the

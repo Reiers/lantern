@@ -1,380 +1,50 @@
-// Gossipsub block ingestor.
+// Gossipsub block ingestor wiring for the standalone daemon.
 //
-// Issue #1: the daemon learns about new chain heads by polling an upstream
-// Lotus-compatible JSON-RPC source every 6 seconds (chain/header/store/sync.go).
-// Mainnet block time is 30 seconds, so even at our most aggressive poll
-// cadence we sit a stable 1 epoch behind Lotus on the same box. The lag is
-// not a peer-propagation problem; it's a poll-cadence problem.
+// The ingestor logic itself now lives in the importable package
+// net/blockingest, so the embedded daemon (pkg/daemon, used by
+// curio-core) can mount the same gossipsub head-tracker. See lantern#40.
 //
-// The fix is to subscribe to /fil/blocks/testnetnet on gossipsub via the
-// existing net/blockpub package. When a block arrives over gossipsub at
-// the head+1 epoch, install it into the header store immediately, rather
-// than waiting for the next 6-second poll.
+// This file keeps cmd/lantern's local names (startGossipBlocks +
+// type aliases) so the rest of cmd/lantern and its tests are unchanged;
+// it is a thin delegation layer over net/blockingest.
 //
-// The polling Sync agent stays in place as a catch-up fallback for any
-// block that gossipsub missed (connectivity blips, late-joining the mesh,
-// etc.). When gossipsub is active we lift the poll interval to 30s so we
-// don't hammer the upstream during normal operation.
-//
-// Concurrency model: blockpub's OnBlock callback fires from its own read
-// goroutine. We funnel into a single processor goroutine via a channel
-// so head installs are serialized cleanly against the polling Sync.
+// Issue #1 background (why gossipsub at all): the daemon otherwise learns
+// new heads by polling an upstream Lotus-compatible RPC every 6s, while
+// mainnet block time is 30s, so we sit a stable 1 epoch behind. Joining
+// /fil/blocks/<network> on gossipsub installs new heads immediately. The
+// polling Sync agent stays as a catch-up fallback for anything gossipsub
+// misses; when gossipsub is active the operator lifts the poll interval.
 
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
-	"sync/atomic"
 	"time"
 
-	abi "github.com/filecoin-project/go-state-types/abi"
-	"github.com/ipfs/go-cid"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 
-	"github.com/Reiers/lantern/chain/header"
 	hstore "github.com/Reiers/lantern/chain/header/store"
-	ltypes "github.com/Reiers/lantern/chain/types"
+	"github.com/Reiers/lantern/net/blockingest"
 	"github.com/Reiers/lantern/net/blockpub"
 )
 
-// parentBackfillSource is the minimal RPC surface the ingestor uses for
-// inline backfill when a gossipsub block arrives at head+N with N>1.
-//
-// We don't recurse arbitrarily deep; backfillCap (set on the ingestor)
-// limits how many epochs of catch-up we do per gossipsub event before
-// deferring to the polling Sync agent. This keeps the gossipsub goroutine
-// responsive and prevents a malicious peer from pinning us with a
-// head-of-genesis announcement.
-type parentBackfillSource interface {
-	TipsetCIDsByHeight(ctx context.Context, h abi.ChainEpoch) ([]cid.Cid, error)
-	FetchBlock(ctx context.Context, k cid.Cid) (*ltypes.BlockHeader, error)
-}
+// Local aliases so existing cmd/lantern code + tests keep their names
+// while the implementation lives in net/blockingest.
+type gossipBlockIngestor = blockingest.Ingestor
 
-// gossipBlockIngestor consumes block announcements from gossipsub and
-// installs them into the header store as new heads.
-//
-// One ingestor per daemon. Owns the deduplication state.
-type gossipBlockIngestor struct {
-	store *hstore.Store
+var newGossipBlockIngestor = blockingest.New
 
-	// src is the optional inline-backfill RPC source. Recommended in
-	// production. With src set, head+N>1 blocks land immediately via a
-	// bounded backfill burst (capped by backfillCap) instead of waiting
-	// for the polling Sync's 6-second cycle.
-	src parentBackfillSource
-
-	// backfillCap caps the depth of inline backfill in epochs. Default 3.
-	backfillCap abi.ChainEpoch
-
-	// incoming carries decoded blocks from blockpub's read goroutine to
-	// the single processor goroutine. Bounded so a runaway peer can't
-	// blow our memory.
-	incoming chan *ltypes.BlockMsg
-
-	// seen tracks header CIDs we've already processed in this run, so a
-	// duplicate gossipsub announcement (libp2p replays during dial
-	// churn) is a no-op. Bounded by simple LRU-by-insertion-order via
-	// the seenOrder slice.
-	seen      map[cid.Cid]struct{}
-	seenOrder []cid.Cid
-	seenCap   int
-
-	// Stats are observable via lantern info / metrics endpoint.
-	received         atomic.Uint64
-	dedup            atomic.Uint64
-	installed        atomic.Uint64
-	skipped          atomic.Uint64
-	rejected         atomic.Uint64
-	backfilled       atomic.Uint64
-	backfillFailed   atomic.Uint64
-	lastInstallEpoch atomic.Int64
-}
-
-// newGossipBlockIngestor builds an ingestor wired to the header store.
-//
-// src may be nil; when nil, blocks at head+N>1 are skipped and the
-// polling Sync's backfill path handles them on its next cycle.
-//
-// Caller is responsible for calling Run once and Close on shutdown.
-func newGossipBlockIngestor(store *hstore.Store, src parentBackfillSource) *gossipBlockIngestor {
-	return &gossipBlockIngestor{
-		store:       store,
-		src:         src,
-		backfillCap: 3,
-		incoming:    make(chan *ltypes.BlockMsg, 64),
-		seen:        make(map[cid.Cid]struct{}, 256),
-		seenCap:     512,
-	}
-}
-
-// Enqueue is the OnBlock callback handed to blockpub. Non-blocking: drops
-// when the processor is behind so the gossipsub read loop never stalls.
-func (g *gossipBlockIngestor) Enqueue(blk *ltypes.BlockMsg) {
-	if blk == nil || blk.Header == nil {
-		return
-	}
-	g.received.Add(1)
-	select {
-	case g.incoming <- blk:
-	default:
-		// Processor is behind. Dropping is safe because the polling
-		// Sync agent will pick the head up within 30s and we'll just
-		// have missed the latency improvement for this one epoch.
-		g.skipped.Add(1)
-	}
-}
-
-// Run is the processor loop. Blocks until ctx is cancelled.
-func (g *gossipBlockIngestor) Run(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case blk := <-g.incoming:
-			g.process(ctx, blk)
-		}
-	}
-}
-
-// process is the single point where a gossiped block becomes a header-store
-// head. Validation is intentionally narrow: blockpub already did the CBOR
-// shape + signature-presence check. We add:
-//
-//   - CID re-derive (defense in depth against a malicious peer that crafts
-//     a block whose declared CID lies; superficiallyValid doesn't check this)
-//   - Dedupe against the seen set
-//   - Height fence: refuse blocks at epoch <= our current head
-//   - Parent fetch: if we don't have the parents in the store, skip and let
-//     the polling Sync's backfill path handle it
-//
-// We do NOT do full ValidateHeader here; the polling Sync's backfill of
-// the parent chain triggers ValidateTipsetShape via SetHead, and the
-// upstream gateway re-verifies every IPLD block on fetch. The trust path
-// remains: F3 anchor -> SetHead -> content-addressed state queries.
-func (g *gossipBlockIngestor) process(ctx context.Context, blk *ltypes.BlockMsg) {
-	bh := blk.Header
-	headerCID := bh.Cid()
-
-	// Dedupe.
-	if _, ok := g.seen[headerCID]; ok {
-		g.dedup.Add(1)
-		return
-	}
-	g.markSeen(headerCID)
-
-	// Defense in depth: re-derive the CID and verify against the header.
-	// Cheap to do, cheap to forget; if a malicious peer manages to slip
-	// a malformed block past blockpub's shape check we catch it here.
-	if err := header.VerifyBlockHeaderCID(bh, headerCID); err != nil {
-		g.rejected.Add(1)
-		return
-	}
-
-	// Height fence: only act on blocks that advance our head.
-	curHead := g.store.HeadEpoch()
-	if bh.Height <= curHead {
-		// Block at or behind our head. Either a sibling tipset (handled
-		// by the polling Sync's reorg detection) or a stale rebroadcast.
-		// Either way, no work to do here.
-		return
-	}
-
-	// Parent linkage: if any parent isn't in the store, try inline
-	// backfill (bounded by backfillCap epochs) using our RPC source.
-	// When src is nil, fall back to the prior behaviour of skipping
-	// and letting the polling Sync's 6s cycle handle it.
-	parents := bh.Parents
-	if !g.allParentsPresent(parents) {
-		if g.src == nil {
-			g.skipped.Add(1)
-			return
-		}
-		if err := g.inlineBackfill(ctx, bh); err != nil {
-			g.backfillFailed.Add(1)
-			g.skipped.Add(1)
-			return
-		}
-		g.backfilled.Add(1)
-		if !g.allParentsPresent(parents) {
-			g.skipped.Add(1)
-			return
-		}
-	}
-
-	// Multi-block tipsets at the same height: Filecoin allows up to
-	// BlocksPerEpoch (typically 5) winning miners per epoch. Each
-	// announces its own block separately. We install each as it
-	// arrives; SetHead's reorg / tipset assembly logic takes care of
-	// merging by epoch. For epochs with a single block in this run, the
-	// install is straightforward.
-	ts, err := ltypes.NewTipSet([]*ltypes.BlockHeader{bh})
+// startGossipBlocks brings up the blockpub subscription + ingestor + the
+// standalone stats log loop. Returns the ingestor (for stats / shutdown)
+// + the publisher, or nil + error.
+func startGossipBlocks(ctx context.Context, ps *pubsub.PubSub, store *hstore.Store, src blockingest.BackfillSource, topic string) (*gossipBlockIngestor, *blockpub.Publisher, error) {
+	ing, pub, err := blockingest.Start(ctx, ps, store, src, topic)
 	if err != nil {
-		g.rejected.Add(1)
-		return
+		return nil, nil, err
 	}
-
-	if err := g.store.SetHead(ctx, ts); err != nil {
-		g.rejected.Add(1)
-		return
-	}
-	g.installed.Add(1)
-	g.lastInstallEpoch.Store(int64(bh.Height))
-}
-
-// allParentsPresent returns true if every parent CID is already in the
-// header store. Cheap point-check, no fetch.
-func (g *gossipBlockIngestor) allParentsPresent(parents []cid.Cid) bool {
-	for _, pc := range parents {
-		if _, err := g.store.Get(pc); err != nil {
-			return false
-		}
-	}
-	return true
-}
-
-// inlineBackfill walks from the first missing parent epoch up to (but
-// not including) bh.Height, fetching missing tipsets via the RPC source
-// and installing each as we go. Bounded by backfillCap.
-//
-// Bound is by epoch-depth, not by attempted-fetch count, because
-// per-epoch fetches are themselves bounded (tipsets cap out at
-// BlocksPerEpoch=5 blocks).
-func (g *gossipBlockIngestor) inlineBackfill(ctx context.Context, bh *ltypes.BlockHeader) error {
-	curHead := g.store.HeadEpoch()
-	needFrom := curHead + 1
-	needTo := bh.Height - 1
-	if needFrom > needTo {
-		return nil // nothing to backfill
-	}
-	gap := needTo - needFrom + 1
-	if gap > g.backfillCap {
-		return fmt.Errorf("backfill gap %d > cap %d", gap, g.backfillCap)
-	}
-
-	bctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	for ep := needFrom; ep <= needTo; ep++ {
-		cids, err := g.src.TipsetCIDsByHeight(bctx, ep)
-		if err != nil {
-			return fmt.Errorf("backfill cids @ %d: %w", ep, err)
-		}
-		if len(cids) == 0 {
-			continue // null-round epoch
-		}
-		blocks := make([]*ltypes.BlockHeader, 0, len(cids))
-		for _, c := range cids {
-			if b, gerr := g.store.Get(c); gerr == nil {
-				blocks = append(blocks, b)
-				continue
-			}
-			b, ferr := g.src.FetchBlock(bctx, c)
-			if ferr != nil {
-				return fmt.Errorf("backfill fetch %s: %w", c, ferr)
-			}
-			if verr := header.VerifyBlockHeaderCID(b, c); verr != nil {
-				return fmt.Errorf("backfill cid verify @ %d: %w", ep, verr)
-			}
-			blocks = append(blocks, b)
-		}
-		ts, err := ltypes.NewTipSet(blocks)
-		if err != nil {
-			return fmt.Errorf("backfill tipset @ %d: %w", ep, err)
-		}
-		if err := g.store.SetHead(ctx, ts); err != nil {
-			return fmt.Errorf("backfill set head @ %d: %w", ep, err)
-		}
-	}
-	return nil
-}
-
-// markSeen inserts the CID into the dedupe set with simple LRU eviction.
-func (g *gossipBlockIngestor) markSeen(c cid.Cid) {
-	g.seen[c] = struct{}{}
-	g.seenOrder = append(g.seenOrder, c)
-	if len(g.seenOrder) > g.seenCap {
-		evict := g.seenOrder[0]
-		g.seenOrder = g.seenOrder[1:]
-		delete(g.seen, evict)
-	}
-}
-
-// Stats returns a snapshot of counters for observability.
-type gossipBlockStats struct {
-	Received         uint64
-	Dedup            uint64
-	Installed        uint64
-	Skipped          uint64
-	Rejected         uint64
-	Backfilled       uint64
-	BackfillFailed   uint64
-	LastInstallEpoch abi.ChainEpoch
-}
-
-// Stats returns a snapshot of counters.
-func (g *gossipBlockIngestor) Stats() gossipBlockStats {
-	return gossipBlockStats{
-		Received:         g.received.Load(),
-		Dedup:            g.dedup.Load(),
-		Installed:        g.installed.Load(),
-		Skipped:          g.skipped.Load(),
-		Rejected:         g.rejected.Load(),
-		Backfilled:       g.backfilled.Load(),
-		BackfillFailed:   g.backfillFailed.Load(),
-		LastInstallEpoch: abi.ChainEpoch(g.lastInstallEpoch.Load()),
-	}
-}
-
-// startGossipBlocks brings up the blockpub subscription + ingestor + log
-// loop. Returns the ingestor (for stats / shutdown) or nil + error.
-//
-// Side effects:
-//   - Joins /fil/blocks/<network> on gossipsub
-//   - Starts the ingestor goroutine
-//   - Starts a periodic stats log every 60s (matches the existing [sync]
-//     stat cadence so operators see both side by side)
-func startGossipBlocks(ctx context.Context, ps *pubsub.PubSub, store *hstore.Store, src parentBackfillSource, topic string) (*gossipBlockIngestor, *blockpub.Publisher, error) {
-	if ps == nil || store == nil {
-		return nil, nil, fmt.Errorf("startGossipBlocks: ps and store are required")
-	}
-	ing := newGossipBlockIngestor(store, src)
-	pub, err := blockpub.New(ctx, ps, blockpub.Config{
-		OnBlock: ing.Enqueue,
-		Topic:   topic,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("blockpub.New: %w", err)
-	}
-	go ing.Run(ctx)
-	go logGossipBlockStats(ctx, ing, pub)
+	go blockingest.StatsLogger(ctx, ing, pub, 60*time.Second,
+		func(format string, args ...any) { fmt.Fprintf(os.Stderr, format, args...) })
 	return ing, pub, nil
 }
-
-// logGossipBlockStats prints a one-line stats summary every 60s so the
-// operator can confirm gossipsub is carrying the load.
-func logGossipBlockStats(ctx context.Context, ing *gossipBlockIngestor, pub *blockpub.Publisher) {
-	t := time.NewTicker(60 * time.Second)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			s := ing.Stats()
-			published, received, rejected := pub.Stats()
-			fmt.Fprintf(os.Stderr,
-				"  [gossip-block] sub-rcv=%d sub-rej=%d ing-rcv=%d installed=%d dedup=%d skipped=%d rejected=%d backfilled=%d backfillFail=%d lastEpoch=%d published=%d\n",
-				received, rejected,
-				s.Received, s.Installed, s.Dedup, s.Skipped, s.Rejected,
-				s.Backfilled, s.BackfillFailed,
-				s.LastInstallEpoch, published,
-			)
-		}
-	}
-}
-
-// _ keeps the bytes import alive even when the rest of the file is
-// reshuffled later. Block-decode in process() does not currently use it.
-var _ = bytes.NewReader
