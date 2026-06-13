@@ -535,11 +535,21 @@ func (c *ChainAPI) StateReadState(ctx context.Context, a address.Address, _ type
 	if err != nil {
 		return nil, err
 	}
-	// Lantern returns the raw head bytes as `State` — Phase 5 will type
-	// the field according to the actor's Code CID.
 	headBytes, err := c.BlockGetter.Get(ctx, act.Head)
 	if err != nil {
 		return nil, err
+	}
+	// lantern#3 Part A: for known system actors (power/market/verifreg) decode
+	// the head CBOR into the versioned go-state-types struct so `State`
+	// JSON-marshals with Lotus-compatible field names. Unknown actors and EVM
+	// contracts fall back to the historical raw-bytes behaviour (backward
+	// compatible; EVM eth_call is lantern#3 Part B).
+	if decoded, ok, derr := decodeSystemActorState(c.systemActorRegistry(ctx), act.Code, headBytes); derr == nil && ok {
+		return &api.ActorState{
+			Balance: act.Balance,
+			Code:    act.Code,
+			State:   decoded,
+		}, nil
 	}
 	return &api.ActorState{
 		Balance: act.Balance,
