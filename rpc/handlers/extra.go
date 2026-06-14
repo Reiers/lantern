@@ -289,6 +289,31 @@ func (c *ChainAPI) EthGasPrice(_ context.Context) (string, error) {
 	return fmt.Sprintf("0x%x", build.MinimumBaseFee), nil
 }
 
+// EthBaseFee returns the base fee for the next block as a hex-quantity string
+// (lotus #13615, eth_baseFee). On Filecoin the base fee is consensus-determined
+// per tipset, so the head tipset's ParentBaseFee is the correct next-block base
+// fee. Lantern serves this from its own locally-validated head (no bridge round
+// trip); it falls back to the VMBridge, then to MinimumBaseFee, so the method
+// always returns a usable quantity for tx builders.
+func (c *ChainAPI) EthBaseFee(ctx context.Context) (string, error) {
+	if c.HeaderStore != nil {
+		if ts, err := c.HeaderStore.GetTipSetByHeight(abi.ChainEpoch(c.HeaderStore.HeadEpoch())); err == nil && ts != nil {
+			if blocks := ts.Blocks(); len(blocks) > 0 && blocks[0].ParentBaseFee.Int != nil {
+				return "0x" + blocks[0].ParentBaseFee.Int.Text(16), nil
+			}
+		}
+	}
+	if c.Bridge != nil {
+		if raw, err := c.Bridge.RawJSONRPC(ctx, "eth_baseFee", []byte("[]")); err == nil {
+			var s string
+			if json.Unmarshal(raw, &s) == nil && s != "" {
+				return s, nil
+			}
+		}
+	}
+	return fmt.Sprintf("0x%x", build.MinimumBaseFee), nil
+}
+
 // EthSyncing returns false because Lantern is a light client — we're
 // always anchored to our trust root, so there's no 'syncing' state
 // the way a full node has. Returns `false` (not an object) to match

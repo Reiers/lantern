@@ -185,6 +185,9 @@ type FullNode interface {
 	EthGetTransactionCount(ctx context.Context, addr string, blockParam any) (string, error)
 	EthGetTransactionReceipt(ctx context.Context, txHash string) (any, error)
 	EthFeeHistory(ctx context.Context, blockCount string, newestBlock string, rewardPercentiles []float64) (any, error)
+	// EthBaseFee returns the base fee for the next block as a hex-quantity
+	// string (lotus #13615). No params.
+	EthBaseFee(ctx context.Context) (string, error)
 	EthGetTransactionByHash(ctx context.Context, txHash string) (any, error)
 	EthGetTransactionByBlockNumberAndIndex(ctx context.Context, blockParam string, index string) (any, error)
 	EthGetCode(ctx context.Context, addr string, blockParam any) (string, error)

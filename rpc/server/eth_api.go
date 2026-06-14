@@ -143,6 +143,12 @@ func (e *ethAPI) EthFeeHistory(ctx context.Context, blockCount string, newestBlo
 	return e.full.EthFeeHistory(ctx, blockCount, newestBlock, rewardPercentiles)
 }
 
+// EthBaseFee returns the base fee for the next block (lotus #13615), as a
+// hex-quantity string. No params.
+func (e *ethAPI) EthBaseFee(ctx context.Context) (string, error) {
+	return e.full.EthBaseFee(ctx)
+}
+
 // netAPI implements the small "net_*" namespace. Go-ethereum's
 // ethclient.NetworkID() calls net_version (returns the chain ID as a
 // decimal string). Adding the entire namespace as a sibling to eth_*
