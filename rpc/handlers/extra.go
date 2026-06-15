@@ -389,7 +389,16 @@ func (c *ChainAPI) EthGetBalance(ctx context.Context, addrHex string, _ any) (st
 		}
 	}
 
-	actor, _, err := c.Accessor.GetActor(ctx, filAddr)
+	// Resolve against the LIVE head's state root, not the boot TrustedRoot.
+	// The boot anchor is frozen at daemon-start state, so any account
+	// created after boot (e.g. a freshly faucet-funded address) is invisible
+	// to it and reads as 0 even though it has a balance on chain. Fall back
+	// to the boot accessor only when no live head is available.
+	acc := c.Accessor
+	if live, ok := c.liveAccessor(); ok {
+		acc = live
+	}
+	actor, _, err := acc.GetActor(ctx, filAddr)
 	if err != nil {
 		// Unknown actor returns 0 balance, matching Ethereum convention
 		// for never-used addresses.

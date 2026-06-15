@@ -540,9 +540,22 @@ var ErrTipSetNotFound = errors.New("lantern: tipset not in local store (only cur
 
 // ----------------- State reads (R) -----------------
 
+// accForReads returns the accessor to use for current-state reads. It
+// prefers an accessor anchored at the LIVE head (so accounts/actors
+// created after daemon boot are visible) and falls back to the boot
+// TrustedRoot accessor when no live head is available. See #48: the boot
+// anchor is frozen at start-of-day state, making post-boot accounts read
+// as empty/zero even though they exist on chain.
+func (c *ChainAPI) accForReads() *accessor.Accessor {
+	if live, ok := c.liveAccessor(); ok {
+		return live
+	}
+	return c.Accessor
+}
+
 // StateGetActor reads an actor at a tipset. Tier 1 (#44 — the hot one).
 func (c *ChainAPI) StateGetActor(ctx context.Context, a address.Address, _ types.TipSetKey) (*types.Actor, error) {
-	act, _, err := c.Accessor.GetActor(ctx, a)
+	act, _, err := c.accForReads().GetActor(ctx, a)
 	if err != nil {
 		return nil, err
 	}
@@ -557,7 +570,7 @@ func (c *ChainAPI) StateGetActor(ctx context.Context, a address.Address, _ types
 
 // StateLookupID resolves any-protocol address to ID address. Tier 1 (#25).
 func (c *ChainAPI) StateLookupID(ctx context.Context, a address.Address, _ types.TipSetKey) (address.Address, error) {
-	id, _, err := c.Accessor.LookupID(ctx, a)
+	id, _, err := c.accForReads().LookupID(ctx, a)
 	return id, err
 }
 
@@ -575,7 +588,7 @@ func (c *ChainAPI) StateAccountKey(ctx context.Context, a address.Address, _ typ
 		return a, nil
 	}
 	// Otherwise load the account actor's state and read PubkeyAddress.
-	as, _, err := c.Accessor.LoadAccount(ctx, a)
+	as, _, err := c.accForReads().LoadAccount(ctx, a)
 	if err != nil {
 		return address.Undef, fmt.Errorf("StateAccountKey load account %s: %w", a, err)
 	}
@@ -604,7 +617,7 @@ func (c *ChainAPI) StateNetworkName(_ context.Context) (string, error) {
 
 // StateReadState dumps an actor's state. Tier 3 (#64).
 func (c *ChainAPI) StateReadState(ctx context.Context, a address.Address, _ types.TipSetKey) (*api.ActorState, error) {
-	act, _, err := c.Accessor.GetActor(ctx, a)
+	act, _, err := c.accForReads().GetActor(ctx, a)
 	if err != nil {
 		return nil, err
 	}
@@ -1099,7 +1112,7 @@ func (c *ChainAPI) WalletSignMessage(ctx context.Context, a address.Address, msg
 // WalletBalance reads the balance via StateGetActor at the trusted head.
 // Tier 1 (#14).
 func (c *ChainAPI) WalletBalance(ctx context.Context, a address.Address) (big.Int, error) {
-	act, _, err := c.Accessor.GetActor(ctx, a)
+	act, _, err := c.accForReads().GetActor(ctx, a)
 	if err != nil {
 		// Treat "not found" as zero balance — matches Lotus behaviour
 		// for never-funded addresses.

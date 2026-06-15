@@ -32,6 +32,32 @@ import (
 	"github.com/Reiers/lantern/state/accessor"
 )
 
+// liveAccessor returns a state accessor anchored at the LIVE chain head's
+// parent state root, rather than the boot-time TrustedRoot the daemon was
+// started with. The boot anchor can be thousands of epochs behind on a
+// long-running daemon, which makes every accessor read (balance, nonce,
+// actor state) stale — a freshly-created account is invisible until the
+// boot root happens to catch up, which it never does on its own.
+//
+// Returns (accessor, ok). ok=false when no header store / live head is
+// available, in which case callers should fall back to c.Accessor (the
+// boot anchor) so behaviour degrades gracefully instead of erroring.
+func (c *ChainAPI) liveAccessor() (*accessor.Accessor, bool) {
+	if c.Accessor == nil || c.BlockGetter == nil || c.HeaderStore == nil {
+		return nil, false
+	}
+	head := c.HeaderStore.Head()
+	if head == nil {
+		return nil, false
+	}
+	liveRoot := head.ParentState()
+	if !liveRoot.Defined() {
+		return nil, false
+	}
+	liveTR := &trustedroot.TrustedRoot{Epoch: head.Height(), StateRoot: liveRoot}
+	return accessor.New(liveTR, c.BlockGetter), true
+}
+
 // liveActorNonce reads addr's actor nonce anchored at the LIVE chain head
 // rather than the boot TrustedRoot. Nonce is collision-sensitive: a stale
 // read (boot anchor can be thousands of epochs behind on a long-running
