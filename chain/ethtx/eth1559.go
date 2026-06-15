@@ -321,6 +321,37 @@ func (tx *Eth1559Tx) TxHash() ([32]byte, error) {
 	return out, nil
 }
 
+// EncodeSigned returns the full signed EIP-1559 envelope (type byte ||
+// signed RLP) — the bytes a client would pass to eth_sendRawTransaction.
+// Exported so callers (and tests) can construct raw txs without a wallet.
+func (tx *Eth1559Tx) EncodeSigned() ([]byte, error) {
+	return tx.signedRLP()
+}
+
+// SigningHash exposes the keccak256 hash that must be signed to produce a
+// valid signature for this tx (the preimage ecrecover runs against).
+func (tx *Eth1559Tx) SigningHash() ([]byte, error) {
+	return tx.signingHash()
+}
+
+// SetSignature fills V/R/S from a 65-byte [R||S||V] recoverable signature
+// (the shape go-crypto.Sign returns).
+func (tx *Eth1559Tx) SetSignature(sig []byte) error {
+	if len(sig) != eip1559SigLen {
+		return fmt.Errorf("ethtx: signature must be %d bytes, got %d", eip1559SigLen, len(sig))
+	}
+	tx.R = bytesToBigInt(sig[0:32])
+	tx.S = bytesToBigInt(sig[32:64])
+	tx.V = big.NewIntUnsigned(uint64(sig[64]))
+	return nil
+}
+
+func bytesToBigInt(b []byte) big.Int {
+	var m mathbig.Int
+	m.SetBytes(b)
+	return big.NewFromGo(&m)
+}
+
 func (tx *Eth1559Tx) signedRLP() ([]byte, error) {
 	fields := []interface{}{
 		uintToRLP(tx.ChainID),

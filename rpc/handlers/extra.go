@@ -598,24 +598,8 @@ func (c *ChainAPI) EthCall(ctx context.Context, callObj any, blockParam any) (st
 // indexed message lookups + execution result reconstruction which Lantern
 // doesn't run today. Returns nil when the tx isn't found (caller will
 // retry; the standard go-ethereum receipt poll loop expects this shape).
-func (c *ChainAPI) EthGetTransactionReceipt(ctx context.Context, txHash string) (any, error) {
-	if c.Bridge == nil {
-		return nil, errBridgeUnconfigured
-	}
-	params, err := json.Marshal([]any{txHash})
-	if err != nil {
-		return nil, xerrors.Errorf("marshal eth_getTransactionReceipt params: %w", err)
-	}
-	raw, err := c.Bridge.RawJSONRPC(ctx, "eth_getTransactionReceipt", params)
-	if err != nil {
-		return nil, xerrors.Errorf("bridge eth_getTransactionReceipt: %w", err)
-	}
-	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, xerrors.Errorf("decode eth_getTransactionReceipt result: %w", err)
-	}
-	return out, nil
-}
+// EthGetTransactionReceipt moved to extra_writepath_tx.go (lantern#45
+// Stage 5: local resolve for txs we originated, bridge fallback otherwise).
 
 // EthFeeHistory returns historical gas fee data used by tx builders to
 // suggest EIP-1559 priority fees. Forwarded to the upstream VM bridge
@@ -646,24 +630,8 @@ func (c *ChainAPI) EthFeeHistory(ctx context.Context, blockCount string, newestB
 //
 // Note: clients sign locally; Lantern never touches their private
 // keys. We just relay the wire bytes.
-func (c *ChainAPI) EthSendRawTransaction(ctx context.Context, signedTxHex string) (string, error) {
-	if c.Bridge == nil {
-		return "", errBridgeUnconfigured
-	}
-	params, err := json.Marshal([]any{signedTxHex})
-	if err != nil {
-		return "", xerrors.Errorf("marshal eth_sendRawTransaction params: %w", err)
-	}
-	raw, err := c.Bridge.RawJSONRPC(ctx, "eth_sendRawTransaction", params)
-	if err != nil {
-		return "", xerrors.Errorf("bridge eth_sendRawTransaction: %w", err)
-	}
-	var txHash string
-	if err := json.Unmarshal(raw, &txHash); err != nil {
-		return "", xerrors.Errorf("decode eth_sendRawTransaction result: %w", err)
-	}
-	return txHash, nil
-}
+// EthSendRawTransaction moved to extra_writepath_tx.go (lantern#45 Stage
+// 4: local decode + MpoolPush, bridge fallback only on decode failure).
 
 // firstCidOrEmpty returns the first CID's string or a 32-byte zero hex.
 func firstCidOrEmpty(cs []cid.Cid) string {

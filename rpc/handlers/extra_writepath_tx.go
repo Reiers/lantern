@@ -1,0 +1,263 @@
+package handlers
+
+// Local FEVM write-path broadcast + confirm (lantern#45, Stages 4-5).
+//
+// Stage 4: eth_sendRawTransaction — decode the signed EIP-1559 tx
+//   (chain/ethtx), convert to a Filecoin SignedMessage, publish via the
+//   gossipsub mempool (MpoolPush). Returns the eth tx hash. Records the
+//   eth-hash -> Filecoin-msg-CID mapping so the receipt lookup (Stage 5)
+//   can find it.
+//
+// Stage 5: eth_getTransactionReceipt — resolve the eth hash to the
+//   Filecoin msg CID (from the send-time map), StateSearchMsg for the
+//   on-chain receipt, and shape an eth receipt with the fields the
+//   curio-core #81 watcher reads (status, blockNumber, transactionHash,
+//   gasUsed). Returns nil until found, matching the go-ethereum poll loop.
+//
+// Both keep a bridge fallback. sendRawTransaction falls back only when the
+// tx can't be decoded or the mempool isn't wired (NOT after a successful
+// local publish — double-broadcast would be wrong). The receipt falls back
+// to the bridge when the hash isn't in our local map (e.g. a tx we didn't
+// originate) so external lookups still work during rollout.
+
+import (
+	"context"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"sync"
+
+	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/exitcode"
+	"github.com/ipfs/go-cid"
+
+	"github.com/Reiers/lantern/api"
+
+	"github.com/Reiers/lantern/chain/ethtx"
+	"github.com/Reiers/lantern/chain/types"
+)
+
+// maxSentTxTracked bounds the eth-hash -> msg-CID map. The SP's own
+// write->confirm loop only needs a handful of in-flight txs tracked at
+// once; the cap protects against unbounded growth if receipts are never
+// polled. Oldest entries are evicted FIFO.
+const maxSentTxTracked = 4096
+
+// sentTxIndex maps a lowercase 0x eth tx hash to the Filecoin message CID
+// we published for it, so eth_getTransactionReceipt can find the on-chain
+// result. Populated by eth_sendRawTransaction.
+type sentTxIndex struct {
+	mu    sync.Mutex
+	byEth map[string]cid.Cid
+	order []string // FIFO eviction
+}
+
+func (s *sentTxIndex) put(ethHash string, msgCID cid.Cid) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.byEth == nil {
+		s.byEth = make(map[string]cid.Cid, 64)
+	}
+	if _, exists := s.byEth[ethHash]; exists {
+		return
+	}
+	if len(s.order) >= maxSentTxTracked {
+		oldest := s.order[0]
+		s.order = s.order[1:]
+		delete(s.byEth, oldest)
+	}
+	s.byEth[ethHash] = msgCID
+	s.order = append(s.order, ethHash)
+}
+
+func (s *sentTxIndex) get(ethHash string) (cid.Cid, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.byEth[ethHash]
+	return c, ok
+}
+
+// sentTx returns the per-ChainAPI sent-tx index, lazily initialised.
+func (c *ChainAPI) sentTx() *sentTxIndex {
+	c.sentTxOnce.Do(func() {
+		c.sentTxIdx = &sentTxIndex{}
+	})
+	return c.sentTxIdx
+}
+
+// EthSendRawTransaction broadcasts a signed raw tx. lantern#45 Stage 4:
+// decoded locally and published via MpoolPush, with bridge fallback only
+// when we can't decode or the mempool isn't wired.
+func (c *ChainAPI) EthSendRawTransaction(ctx context.Context, signedTxHex string) (string, error) {
+	raw, derr := decodeHexData(signedTxHex)
+	if derr == nil && c.Mpool != nil {
+		tx, err := ethtx.ParseSignedEIP1559(raw)
+		if err == nil {
+			smsg, err := tx.ToSignedFilecoinMessage()
+			if err == nil {
+				ethHash, err := tx.TxHash()
+				if err == nil {
+					msgCID, perr := c.MpoolPush(ctx, smsg)
+					if perr == nil {
+						hashHex := "0x" + hex.EncodeToString(ethHash[:])
+						c.sentTx().put(strings.ToLower(hashHex), msgCID)
+						log.Debugw("eth_sendRawTransaction: published locally",
+							"ethHash", hashHex, "msgCID", msgCID, "from", smsg.Message.From)
+						return hashHex, nil
+					}
+					// Publish failed AFTER a clean decode: this is a real
+					// error, not a "can't serve locally". Do NOT fall back
+					// to the bridge (would risk a double broadcast if the
+					// gossipsub publish partially succeeded). Surface it.
+					return "", fmt.Errorf("local mpool publish: %w", perr)
+				}
+			}
+		}
+		// Decode/convert failure: fall through to bridge (maybe a legacy
+		// tx, or a shape we don't support yet).
+		log.Debugw("eth_sendRawTransaction: local path declined, bridging", "err", err)
+	}
+
+	if c.Bridge == nil {
+		return "", errBridgeUnconfigured
+	}
+	params, err := json.Marshal([]any{signedTxHex})
+	if err != nil {
+		return "", fmt.Errorf("marshal eth_sendRawTransaction params: %w", err)
+	}
+	rawResp, err := c.Bridge.RawJSONRPC(ctx, "eth_sendRawTransaction", params)
+	if err != nil {
+		return "", fmt.Errorf("bridge eth_sendRawTransaction: %w", err)
+	}
+	var txHash string
+	if err := json.Unmarshal(rawResp, &txHash); err != nil {
+		return "", fmt.Errorf("decode eth_sendRawTransaction result: %w", err)
+	}
+	return txHash, nil
+}
+
+// EthGetTransactionReceipt returns the receipt for a tx. lantern#45 Stage
+// 5: for txs we originated (in the sent-tx index), resolve the Filecoin
+// msg CID and StateSearchMsg locally; otherwise fall back to the bridge.
+// Returns nil (not an error) when not yet on-chain, matching the standard
+// go-ethereum receipt poll loop.
+func (c *ChainAPI) EthGetTransactionReceipt(ctx context.Context, txHash string) (any, error) {
+	if out, served, err := c.localEthGetTransactionReceipt(ctx, txHash); served {
+		return out, err
+	}
+	if c.Bridge == nil {
+		return nil, errBridgeUnconfigured
+	}
+	params, err := json.Marshal([]any{txHash})
+	if err != nil {
+		return nil, fmt.Errorf("marshal eth_getTransactionReceipt params: %w", err)
+	}
+	raw, err := c.Bridge.RawJSONRPC(ctx, "eth_getTransactionReceipt", params)
+	if err != nil {
+		return nil, fmt.Errorf("bridge eth_getTransactionReceipt: %w", err)
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("decode eth_getTransactionReceipt result: %w", err)
+	}
+	return out, nil
+}
+
+// localEthGetTransactionReceipt resolves a receipt locally for a tx we
+// originated. Returns (receiptOrNil, served, err). served==false means
+// "we don't know this hash, fall back to the bridge".
+func (c *ChainAPI) localEthGetTransactionReceipt(ctx context.Context, txHash string) (any, bool, error) {
+	if c.HeaderStore == nil {
+		return nil, false, nil
+	}
+	msgCID, ok := c.sentTx().get(strings.ToLower(txHash))
+	if !ok {
+		return nil, false, nil // not ours -> bridge
+	}
+	lookup, err := c.StateSearchMsg(ctx, types.TipSetKey{}, msgCID, 0, false)
+	if err != nil {
+		return nil, false, nil // degrade to bridge on lookup error
+	}
+	if lookup == nil {
+		// Known tx, not yet on-chain. Serve a definitive "pending" (nil)
+		// so the poll loop keeps polling locally rather than hitting the
+		// bridge for a tx only we can resolve.
+		return nil, true, nil
+	}
+	return ethReceiptFromLookup(txHash, lookup), true, nil
+}
+
+// ethReceiptFromLookup shapes the eth-receipt JSON object from a Filecoin
+// MsgLookup. We populate the fields go-ethereum clients (and the
+// curio-core #81 watcher) read: status, blockNumber, transactionHash,
+// gasUsed, blockHash, transactionIndex, cumulativeGasUsed, logs,
+// logsBloom. status = 1 when the message exit code is Ok, else 0.
+func ethReceiptFromLookup(txHash string, lookup *api.MsgLookup) map[string]any {
+	status := "0x0"
+	if lookup.Receipt.ExitCode == exitcode.Ok {
+		status = "0x1"
+	}
+	blockNum := "0x" + abiEpochHex(lookup.Height)
+
+	// blockHash: first CID of the including tipset, hashed into a 32-byte
+	// eth-shaped hash slot. Clients mostly key off blockNumber + status;
+	// we provide a stable non-empty hash from the tipset key.
+	blockHash := tipsetEthHash(lookup.TipSet)
+
+	return map[string]any{
+		"transactionHash":   strings.ToLower(txHash),
+		"transactionIndex":  "0x0",
+		"blockHash":         blockHash,
+		"blockNumber":       blockNum,
+		"cumulativeGasUsed": "0x" + uint64Hex(uint64(lookup.Receipt.GasUsed)),
+		"gasUsed":           "0x" + uint64Hex(uint64(lookup.Receipt.GasUsed)),
+		"status":            status,
+		"logs":              []any{},
+		"logsBloom":         "0x" + strings.Repeat("00", 256),
+		"type":              "0x2",
+	}
+}
+
+// abiEpochHex / uint64Hex format quantities without a leading-zero-padded
+// hex (eth QUANTITY encoding: minimal hex, "0x0" for zero).
+func abiEpochHex(e abi.ChainEpoch) string {
+	if e <= 0 {
+		return "0"
+	}
+	return uint64Hex(uint64(e))
+}
+
+func uint64Hex(v uint64) string {
+	if v == 0 {
+		return "0"
+	}
+	const digits = "0123456789abcdef"
+	var buf [16]byte
+	i := len(buf)
+	for v > 0 {
+		i--
+		buf[i] = digits[v&0xf]
+		v >>= 4
+	}
+	return string(buf[i:])
+}
+
+// tipsetEthHash derives a stable 32-byte 0x hash from a tipset key for the
+// receipt's blockHash field. Not consensus-meaningful; clients key off
+// blockNumber + status. We use the first block CID's bytes, right-padded.
+func tipsetEthHash(tsk types.TipSetKey) string {
+	cids := tsk.Cids()
+	if len(cids) == 0 {
+		return "0x" + strings.Repeat("00", 32)
+	}
+	b := cids[0].Bytes()
+	var out [32]byte
+	// Use the multihash digest tail (skip CID prefix) for entropy.
+	if len(b) >= 32 {
+		copy(out[:], b[len(b)-32:])
+	} else {
+		copy(out[32-len(b):], b)
+	}
+	return "0x" + hex.EncodeToString(out[:])
+}

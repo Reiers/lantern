@@ -83,6 +83,13 @@ type ChainAPI struct {
 	localEthCallServed         uint64
 	localEthCallBridgeFallback uint64
 
+	// sentTxIdx maps eth tx hashes we broadcast (eth_sendRawTransaction,
+	// lantern#45 Stage 4) to their Filecoin message CIDs, so the receipt
+	// lookup (Stage 5) can resolve them locally. Lazily initialised via
+	// sentTx().
+	sentTxOnce sync.Once
+	sentTxIdx  *sentTxIndex
+
 	// OnLocalMiss, when set, is invoked with the lowercase 0x-prefixed
 	// `to` address every time an eth_call can't be served locally and
 	// falls back to the bridge (lantern#44 adaptive warming). curio-core
