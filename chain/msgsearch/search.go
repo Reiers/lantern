@@ -24,7 +24,6 @@ import (
 
 	abi "github.com/filecoin-project/go-state-types/abi"
 	"github.com/ipfs/go-cid"
-	cbg "github.com/whyrusleeping/cbor-gen"
 
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	ltypes "github.com/Reiers/lantern/chain/types"
@@ -108,7 +107,10 @@ func (s *Searcher) Find(ctx context.Context, fromEpoch abi.ChainEpoch, msgCID ci
 			return nil, ErrNotFound
 		}
 		receiptsRoot := child.Blocks()[0].ParentMessageReceipts
-		recRaw, _, err := amt.Lookup(ctx, receiptsRoot, idx, s.Block, nil)
+		// ParentMessageReceipts is a legacy (v2) AMT: 3-field root, implicit
+		// width 8. Loading it with the v4 loader fails with "wrong number of
+		// fields". Use the v2 path.
+		recRaw, _, err := amt.LookupV2(ctx, receiptsRoot, idx, s.Block)
 		if err != nil {
 			return nil, fmt.Errorf("fetch receipt %d from %s: %w", idx, receiptsRoot, err)
 		}
@@ -238,38 +240,9 @@ func (s *Searcher) fetchMsgMeta(ctx context.Context, metaCID cid.Cid) ([]cid.Cid
 	return bls, secp, nil
 }
 
-// enumerateAMTCIDs walks an AMT-of-CIDs and returns them in index order.
+// enumerateAMTCIDs walks a block's message AMT-of-CIDs in index order.
+// Block message AMTs (BlsMessages / SecpkMessages) are legacy (v2) AMTs, so
+// we enumerate via the v2 ForEach path.
 func (s *Searcher) enumerateAMTCIDs(ctx context.Context, root cid.Cid) ([]cid.Cid, error) {
-	if !root.Defined() {
-		return nil, nil
-	}
-	var out []cid.Cid
-	// AMTs are 0-indexed and contiguous for the message indices.
-	// Use Lookup until we get ErrNotFound; on filecoin the number of
-	// messages per block is bounded.
-	for i := uint64(0); i < 100_000; i++ {
-		raw, _, err := amt.Lookup(ctx, root, i, s.Block, nil)
-		if err != nil {
-			if errors.Is(err, amt.ErrNotFound) {
-				return out, nil
-			}
-			return nil, err
-		}
-		// Each value is a CBOR-encoded CID (tagged 42).
-		c, err := decodeCBORCID(raw)
-		if err != nil {
-			return nil, fmt.Errorf("decode amt[%d] CID: %w", i, err)
-		}
-		out = append(out, c)
-	}
-	return out, fmt.Errorf("AMT too large at root %s", root)
-}
-
-// decodeCBORCID decodes a single CBOR-encoded CID value.
-func decodeCBORCID(raw []byte) (cid.Cid, error) {
-	var d cbg.CborCid
-	if err := d.UnmarshalCBOR(bytes.NewReader(raw)); err != nil {
-		return cid.Undef, err
-	}
-	return cid.Cid(d), nil
+	return amt.ForEachV2CIDs(ctx, root, s.Block)
 }
