@@ -695,7 +695,16 @@ func (c *ChainAPI) NetAutoNatStatus(_ context.Context) (api.NatInfo, error) {
 
 // EthGetTransactionByHash returns a previously-broadcast transaction
 // by its hash, or null if not found.
+//
+// Local-first for txs we originated: the curio-core #81 eth watcher polls
+// this to learn a sent tx's pending/mined status. We resolve it from the
+// send-time index + StateSearchMsg (same path as the receipt), so the
+// write-confirm loop runs with the bridge disabled. Falls back to the
+// bridge for hashes we didn't originate (external lookups during rollout).
 func (c *ChainAPI) EthGetTransactionByHash(ctx context.Context, txHash string) (any, error) {
+	if out, served, err := c.localEthGetTransactionByHash(ctx, txHash); served {
+		return out, err
+	}
 	return c.forwardEth(ctx, "eth_getTransactionByHash", []any{txHash})
 }
 

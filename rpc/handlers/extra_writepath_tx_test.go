@@ -11,6 +11,7 @@ import (
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/ipfs/go-cid"
 
+	"github.com/Reiers/lantern/api"
 	"github.com/Reiers/lantern/chain/ethtx"
 	"github.com/Reiers/lantern/chain/types"
 )
@@ -139,14 +140,14 @@ func TestEthGetTransactionReceipt_UnknownFallsBack(t *testing.T) {
 func TestSentTxIndex_PutGet(t *testing.T) {
 	idx := &sentTxIndex{}
 	c1, _ := cid.Parse("bafy2bzacecnamqgqmifpluoeldx7zzglxcljo6oja4vrmtj7432rphldpdmm2")
-	idx.put("0xaaa", c1)
+	idx.put("0xaaa", sentTxRecord{msgCID: c1})
 	if got, ok := idx.get("0xaaa"); !ok || got != c1 {
 		t.Fatal("put/get failed")
 	}
 	if _, ok := idx.get("0xbbb"); ok {
 		t.Fatal("unexpected hit")
 	}
-	idx.put("0xaaa", c1) // idempotent
+	idx.put("0xaaa", sentTxRecord{msgCID: c1}) // idempotent
 	if len(idx.order) != 1 {
 		t.Fatalf("dup put grew order to %d", len(idx.order))
 	}
@@ -157,5 +158,41 @@ func TestUint64Hex(t *testing.T) {
 		if got := uint64Hex(in); got != want {
 			t.Fatalf("uint64Hex(%d)=%s want %s", in, got, want)
 		}
+	}
+}
+
+// ethTxFromRecord shapes pending (null block fields) vs mined (block set).
+func TestEthTxFromRecord_PendingVsMined(t *testing.T) {
+	to := [20]byte{0xde, 0xad}
+	rec := sentTxRecord{
+		from: [20]byte{0xaa, 0xbb},
+		tx: &ethtx.Eth1559Tx{
+			ChainID: 314159, Nonce: 7, To: &to,
+			Value:    big.NewInt(1000),
+			GasLimit: 21000,
+		},
+	}
+	// Pending: no lookup -> block fields null.
+	p := ethTxFromRecord("0xABCDEF", rec, nil)
+	if p["blockNumber"] != nil || p["blockHash"] != nil || p["transactionIndex"] != nil {
+		t.Fatalf("pending tx should have null block fields: %#v", p)
+	}
+	if p["hash"] != "0xabcdef" {
+		t.Fatalf("hash not lowercased: %v", p["hash"])
+	}
+	if p["nonce"] != "0x7" {
+		t.Fatalf("nonce wrong: %v", p["nonce"])
+	}
+	if p["to"] != "0x"+hex.EncodeToString(to[:]) {
+		t.Fatalf("to wrong: %v", p["to"])
+	}
+	// Mined: lookup with height set -> block fields populated.
+	lk := &api.MsgLookup{Height: 0x3a1819, TipSet: types.TipSetKey{}}
+	m := ethTxFromRecord("0xABCDEF", rec, lk)
+	if m["blockNumber"] != "0x3a1819" {
+		t.Fatalf("mined blockNumber wrong: %v", m["blockNumber"])
+	}
+	if m["transactionIndex"] != "0x0" {
+		t.Fatalf("mined txIndex wrong: %v", m["transactionIndex"])
 	}
 }

@@ -29,6 +29,7 @@ import (
 	"sync"
 
 	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-state-types/exitcode"
 	"github.com/ipfs/go-cid"
 
@@ -44,20 +45,29 @@ import (
 // polled. Oldest entries are evicted FIFO.
 const maxSentTxTracked = 4096
 
-// sentTxIndex maps a lowercase 0x eth tx hash to the Filecoin message CID
-// we published for it, so eth_getTransactionReceipt can find the on-chain
-// result. Populated by eth_sendRawTransaction.
+// sentTxRecord is what we remember about a tx we broadcast: the Filecoin
+// message CID (for receipt/by-hash resolution) plus the parsed eth tx so
+// eth_getTransactionByHash can return a full tx object locally.
+type sentTxRecord struct {
+	msgCID cid.Cid
+	tx     *ethtx.Eth1559Tx
+	from   [20]byte
+}
+
+// sentTxIndex maps a lowercase 0x eth tx hash to the record we published
+// for it, so eth_getTransactionReceipt and eth_getTransactionByHash can
+// resolve locally. Populated by eth_sendRawTransaction.
 type sentTxIndex struct {
 	mu    sync.Mutex
-	byEth map[string]cid.Cid
+	byEth map[string]sentTxRecord
 	order []string // FIFO eviction
 }
 
-func (s *sentTxIndex) put(ethHash string, msgCID cid.Cid) {
+func (s *sentTxIndex) put(ethHash string, rec sentTxRecord) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.byEth == nil {
-		s.byEth = make(map[string]cid.Cid, 64)
+		s.byEth = make(map[string]sentTxRecord, 64)
 	}
 	if _, exists := s.byEth[ethHash]; exists {
 		return
@@ -67,15 +77,28 @@ func (s *sentTxIndex) put(ethHash string, msgCID cid.Cid) {
 		s.order = s.order[1:]
 		delete(s.byEth, oldest)
 	}
-	s.byEth[ethHash] = msgCID
+	s.byEth[ethHash] = rec
 	s.order = append(s.order, ethHash)
 }
 
+// get returns the msg CID for a tracked tx (back-compat helper for the
+// receipt path).
 func (s *sentTxIndex) get(ethHash string) (cid.Cid, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	c, ok := s.byEth[ethHash]
-	return c, ok
+	rec, ok := s.byEth[ethHash]
+	if !ok {
+		return cid.Undef, false
+	}
+	return rec.msgCID, true
+}
+
+// getRecord returns the full record for a tracked tx.
+func (s *sentTxIndex) getRecord(ethHash string) (sentTxRecord, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.byEth[ethHash]
+	return rec, ok
 }
 
 // sentTx returns the per-ChainAPI sent-tx index, lazily initialised.
@@ -126,7 +149,8 @@ func (c *ChainAPI) EthSendRawTransaction(ctx context.Context, signedTxHex string
 			return "", fmt.Errorf("local mpool publish: %w", perr)
 		}
 		hashHex := "0x" + hex.EncodeToString(ethHash[:])
-		c.sentTx().put(strings.ToLower(hashHex), msgCID)
+		sender, _ := tx.Sender()
+		c.sentTx().put(strings.ToLower(hashHex), sentTxRecord{msgCID: msgCID, tx: tx, from: sender})
 		log.Infow("eth_sendRawTransaction: published locally",
 			"ethHash", hashHex, "msgCID", msgCID, "from", smsg.Message.From)
 		return hashHex, nil
@@ -201,6 +225,75 @@ func (c *ChainAPI) localEthGetTransactionReceipt(ctx context.Context, txHash str
 		return nil, true, nil
 	}
 	return ethReceiptFromLookup(txHash, lookup), true, nil
+}
+
+// localEthGetTransactionByHash resolves a tx object locally for a tx we
+// originated. Returns (txObjOrNil, served, err). served==false means "we
+// don't know this hash, fall back to the bridge". For a known tx we return
+// the tx object with blockHash/blockNumber set once it's on-chain, or null
+// block fields while still pending (the shape go-ethereum's TransactionByHash
+// uses to report isPending).
+func (c *ChainAPI) localEthGetTransactionByHash(ctx context.Context, txHash string) (any, bool, error) {
+	if c.HeaderStore == nil {
+		return nil, false, nil
+	}
+	rec, ok := c.sentTx().getRecord(strings.ToLower(txHash))
+	if !ok || rec.tx == nil {
+		log.Debugw("eth_getTransactionByHash: tx not in local sent index, bridging", "txHash", txHash)
+		return nil, false, nil // not ours -> bridge
+	}
+	lookup, err := c.StateSearchMsg(ctx, types.TipSetKey{}, rec.msgCID, 0, false)
+	if err != nil {
+		log.Debugw("eth_getTransactionByHash: StateSearchMsg error, bridging", "txHash", txHash, "msgCID", rec.msgCID, "err", err)
+		return nil, false, nil // degrade to bridge on lookup error
+	}
+	// lookup==nil => known tx, not yet mined: return the tx with null block
+	// fields (pending). lookup!=nil => mined: include blockHash/blockNumber.
+	return ethTxFromRecord(txHash, rec, lookup), true, nil
+}
+
+// ethTxFromRecord shapes the eth tx JSON object the way go-ethereum's
+// TransactionByHash expects. blockHash/blockNumber are null while pending.
+func ethTxFromRecord(txHash string, rec sentTxRecord, lookup *api.MsgLookup) map[string]any {
+	tx := rec.tx
+	obj := map[string]any{
+		"hash":                 strings.ToLower(txHash),
+		"from":                 "0x" + hex.EncodeToString(rec.from[:]),
+		"nonce":                "0x" + uint64Hex(tx.Nonce),
+		"value":                "0x" + bigHex(&tx.Value),
+		"gas":                  "0x" + uint64Hex(tx.GasLimit),
+		"maxFeePerGas":         "0x" + bigHex(&tx.MaxFeePerGas),
+		"maxPriorityFeePerGas": "0x" + bigHex(&tx.MaxPriorityFeePerGas),
+		"input":                "0x" + hex.EncodeToString(tx.Input),
+		"chainId":              "0x" + uint64Hex(tx.ChainID),
+		"type":                 "0x2",
+		"v":                    "0x" + bigHex(&tx.V),
+		"r":                    "0x" + bigHex(&tx.R),
+		"s":                    "0x" + bigHex(&tx.S),
+		"transactionIndex":     nil,
+		"blockHash":            nil,
+		"blockNumber":          nil,
+	}
+	if tx.To != nil {
+		obj["to"] = "0x" + hex.EncodeToString(tx.To[:])
+	} else {
+		obj["to"] = nil
+	}
+	if lookup != nil {
+		obj["blockNumber"] = "0x" + abiEpochHex(lookup.Height)
+		obj["blockHash"] = tipsetEthHash(lookup.TipSet)
+		obj["transactionIndex"] = "0x0"
+	}
+	return obj
+}
+
+// bigHex formats a state-types big.Int as minimal hex (no 0x prefix),
+// "0" for zero/nil.
+func bigHex(v *big.Int) string {
+	if v == nil || v.Int == nil || v.Sign() == 0 {
+		return "0"
+	}
+	return v.Text(16)
 }
 
 // ethReceiptFromLookup shapes the eth-receipt JSON object from a Filecoin
