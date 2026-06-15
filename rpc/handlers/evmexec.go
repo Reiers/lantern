@@ -194,7 +194,9 @@ func (c *ChainAPI) localEthCall(ctx context.Context, call ethCallObject) (string
 	res, err := evm.Call(be, from, evm.BytesToAddress(toRaw), input)
 	if err != nil {
 		// A local execution fault (e.g. an opcode we don't support yet)
-		// is NOT a definitive answer; fall back to the bridge.
+		// is NOT a definitive answer; fall back to the bridge. Record the
+		// reason so we can see what local coverage is still missing.
+		log.Debugw("eth_call: local exec fault, will fall back", "to", call.To, "reason", err.Error())
 		return "", false, nil
 	}
 	if res.Reverted {
