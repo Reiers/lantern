@@ -112,12 +112,21 @@ func Get(ctx context.Context, root cid.Cid, slot [KeyLen]byte, bg hamt.BlockGett
 			}
 			return nil, path, ErrNotFound
 		default:
-			// Link: consume the extension bits (shared prefix) before
-			// descending, so the next-level index is taken from the
-			// correct key position.
+			// Link with an optional extension (a shared key-bit prefix that
+			// compresses the path). ref-fvm semantics (node.rs match_extension):
+			// the extension's `length` bits must MATCH the key's next bits,
+			// compared bit_width at a time. A full match -> descend; a partial
+			// match means the key diverges from the stored path, so the slot
+			// is absent (NOT a deeper descent -- consuming blindly here was the
+			// bug that ran the key off its end on deep FWSS trees).
 			if p.extLen > 0 {
-				if err := hb.Consume(int(p.extLen)); err != nil {
-					return nil, path, fmt.Errorf("kamt extension consume: %w", err)
+				matched, err := matchExtension(hb, p.extBytes, int(p.extLen), BitWidth)
+				if err != nil {
+					return nil, path, fmt.Errorf("kamt extension at node %s: %w", cur, err)
+				}
+				if matched != int(p.extLen) {
+					// Partial match: key diverges from the extension path.
+					return nil, path, ErrNotFound
 				}
 			}
 			cur = p.link

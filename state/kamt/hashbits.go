@@ -46,6 +46,41 @@ func (h *hashBits) Consume(n int) error {
 	return nil
 }
 
+// matchExtension compares an extension's `length` path bits (held in
+// pathBytes, MSB-first) against the key's next bits, consuming bit_width
+// bits at a time, and returns the number of bits matched. It mirrors
+// ref-fvm Extension::longest_match: it consumes from the key only the bits
+// that match the extension. A return value < length means the key diverges
+// (the caller treats that as slot-absent); == length means a full match and
+// the caller descends.
+func matchExtension(hb *hashBits, pathBytes []byte, length, bitWidth int) (int, error) {
+	path := &hashBits{b: pathBytes}
+	matched := 0
+	for matched < length {
+		take := bitWidth
+		if rem := length - matched; rem < take {
+			take = rem
+		}
+		// Snapshot the key cursor so a non-matching window doesn't consume
+		// key bits (ref-fvm restores `hashed_key.consumed` on mismatch).
+		before := hb.consumed
+		keyChunk, err := hb.Next(take)
+		if err != nil {
+			return matched, err
+		}
+		extChunk, err := path.Next(take)
+		if err != nil {
+			return matched, err
+		}
+		if keyChunk != extChunk {
+			hb.consumed = before // un-consume the mismatched window
+			return matched, nil
+		}
+		matched += take
+	}
+	return matched, nil
+}
+
 func (h *hashBits) nextBit() (int, error) {
 	byteIdx := h.consumed / 8
 	if byteIdx >= len(h.b) {
