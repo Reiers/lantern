@@ -91,32 +91,45 @@ func (c *ChainAPI) sentTx() *sentTxIndex {
 // when we can't decode or the mempool isn't wired.
 func (c *ChainAPI) EthSendRawTransaction(ctx context.Context, signedTxHex string) (string, error) {
 	raw, derr := decodeHexData(signedTxHex)
-	if derr == nil && c.Mpool != nil {
+	switch {
+	case derr != nil:
+		// Not even valid hex: nothing local to do, let the bridge try.
+		log.Debugw("eth_sendRawTransaction: local path declined (bad hex), bridging", "err", derr)
+	case c.Mpool == nil:
+		// The gossipsub mempool publisher was never wired (or failed to
+		// join the topic at boot). This is the silent-fallback trap that
+		// caused the #46 bridge-off failure, so log it loudly: a writing
+		// SP cannot go bridge-off until this is non-nil.
+		log.Warnw("eth_sendRawTransaction: local path UNAVAILABLE (mpool not wired), bridging")
+	default:
 		tx, err := ethtx.ParseSignedEIP1559(raw)
-		if err == nil {
-			smsg, err := tx.ToSignedFilecoinMessage()
-			if err == nil {
-				ethHash, err := tx.TxHash()
-				if err == nil {
-					msgCID, perr := c.MpoolPush(ctx, smsg)
-					if perr == nil {
-						hashHex := "0x" + hex.EncodeToString(ethHash[:])
-						c.sentTx().put(strings.ToLower(hashHex), msgCID)
-						log.Debugw("eth_sendRawTransaction: published locally",
-							"ethHash", hashHex, "msgCID", msgCID, "from", smsg.Message.From)
-						return hashHex, nil
-					}
-					// Publish failed AFTER a clean decode: this is a real
-					// error, not a "can't serve locally". Do NOT fall back
-					// to the bridge (would risk a double broadcast if the
-					// gossipsub publish partially succeeded). Surface it.
-					return "", fmt.Errorf("local mpool publish: %w", perr)
-				}
-			}
+		if err != nil {
+			log.Debugw("eth_sendRawTransaction: local path declined (parse), bridging", "err", err)
+			break
 		}
-		// Decode/convert failure: fall through to bridge (maybe a legacy
-		// tx, or a shape we don't support yet).
-		log.Debugw("eth_sendRawTransaction: local path declined, bridging", "err", err)
+		smsg, err := tx.ToSignedFilecoinMessage()
+		if err != nil {
+			log.Debugw("eth_sendRawTransaction: local path declined (convert), bridging", "err", err)
+			break
+		}
+		ethHash, err := tx.TxHash()
+		if err != nil {
+			log.Debugw("eth_sendRawTransaction: local path declined (txhash), bridging", "err", err)
+			break
+		}
+		msgCID, perr := c.MpoolPush(ctx, smsg)
+		if perr != nil {
+			// Publish failed AFTER a clean decode: this is a real error,
+			// not a "can't serve locally". Do NOT fall back to the bridge
+			// (would risk a double broadcast if the gossipsub publish
+			// partially succeeded). Surface it.
+			return "", fmt.Errorf("local mpool publish: %w", perr)
+		}
+		hashHex := "0x" + hex.EncodeToString(ethHash[:])
+		c.sentTx().put(strings.ToLower(hashHex), msgCID)
+		log.Infow("eth_sendRawTransaction: published locally",
+			"ethHash", hashHex, "msgCID", msgCID, "from", smsg.Message.From)
+		return hashHex, nil
 	}
 
 	if c.Bridge == nil {
