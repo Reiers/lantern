@@ -9,7 +9,7 @@
 
   [![CI](https://github.com/Reiers/lantern/actions/workflows/ci.yml/badge.svg)](https://github.com/Reiers/lantern/actions/workflows/ci.yml)
   [![License: Apache 2.0 OR MIT](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](#license)
-  [![Release: v1.5.8](https://img.shields.io/badge/release-v1.5.8-0090ff.svg)](https://github.com/Reiers/lantern/releases)
+  [![Release: v1.7.7](https://img.shields.io/badge/release-v1.7.7-0090ff.svg)](https://github.com/Reiers/lantern/releases)
   [![Go: 1.25+](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](go.mod)
 
   **One line to install:**
@@ -28,7 +28,7 @@
 
 Lantern is a pure-Go Filecoin light node. **~40 MB binary, ~1 GB working state, zero CGo, no `filecoin-ffi`, no Rust toolchain.** It serves a Lotus-compatible JSON-RPC (71 / 71 of the Curio `FULLNODE_API` surface, plus the `eth_*` surface needed by FoC clients) and verifies every byte locally against BLS, F3, DRAND, and IPLD content addressing. No trusted RPC provider. No 76 GB snapshot.
 
-**Current release:** [v1.5.8](https://github.com/Reiers/lantern/releases/tag/v1.5.8) on mainnet + calibration. **In production today** as the chain backend embedded in [Curio Core](https://curiocore.io) and as a secondary node on the mainnet SP `f03678816` (sp.reiers.io).
+**Current release:** [v1.7.7](https://github.com/Reiers/lantern/releases/tag/v1.7.7) on mainnet + calibration. **In production today** as the chain backend embedded in [Curio Core](https://curiocore.io) and as a secondary node on the mainnet SP `f03678816` (sp.reiers.io).
 
 ## What is Lantern?
 
@@ -129,7 +129,7 @@ Beacons announce themselves in the DHT under `lantern/beacon/v1` and serve Bitsw
 Two, named explicitly:
 
 1. **The embedded genesis CID and F3 trust anchor** - baked into the binary at build time. If a malicious build is shipped, those could be wrong. Mitigations on the roadmap: reproducible builds, multiple independent maintainers re-pinning, community cross-validation of the anchor at install time.
-2. **The optional FVM bridge** (off by default) - if you opt in, Lantern delegates the small subset of VM operations its pure-Go shell can't execute (EVM contracts, some complex builtin actor methods) to a node you configure. Documented as a soft-trust point in [`TRUST-MODEL.md`](TRUST-MODEL.md).
+2. **The optional FVM bridge** (fallback only) - FEVM contract *reads* (`eth_call`) now execute locally in a pure-Go EVM interpreter against verified state, so the bridge is no longer on the read path. It remains as an automatic fallback for the narrow set of VM operations the pure-Go shell doesn't yet cover (some complex builtin-actor methods, and the write path while [#45](https://github.com/Reiers/lantern/issues/45)/[#46](https://github.com/Reiers/lantern/issues/46) land). When used, it delegates to a node you configure - documented as a soft-trust point in [`TRUST-MODEL.md`](TRUST-MODEL.md).
 
 For everything else - wallet, balance queries, miner info, market deals, deal status, paych vouchers, state of any actor - zero third-party trust. Just BLS signatures, content-addressed blocks, and your local CPU verifying the math.
 
@@ -214,7 +214,7 @@ Or use Lantern's own CLI:
 
 ## Status
 
-**Current release: [v1.5.8](https://github.com/Reiers/lantern/releases/tag/v1.5.8)** — production on mainnet + calibration.
+**Current release: [v1.7.7](https://github.com/Reiers/lantern/releases/tag/v1.7.7)** — production on mainnet + calibration.
 
 What works today:
 
@@ -222,8 +222,9 @@ What works today:
 - **Cold state queries in single seconds.** `StateMinerInfo` against a previously-unseen miner returns in 0.1–1.8s.
 - **Lotus-compatible JSON-RPC.** 71 / 71 of the Curio `FULLNODE_API` surface. Real Curio binaries bind transparently.
 - **`eth_*` surface.** `getBlockByNumber`, `getBalance`, `call`, `estimateGas`, `sendRawTransaction`, `getTransactionCount`, `getTransactionReceipt`, `feeHistory`, `newHeads` subscriptions. Works with wallets, dapps, and the FoC `synapse-sdk` stack.
+- **Local FEVM `eth_call` — zero-Glif reads.** A pure-Go EVM interpreter executes contract reads against locally-verified state (no `filecoin-ffi`, no Rust). An adaptive prefetcher warms contract storage on each head advance and self-expands on misses. Proven on calibration: a 220-read sample served **100% locally, zero bridge fallback.**
 - **Embeddable `pkg/daemon`.** Mint an admin JWT in process, serve `/rpc/v1` inline. This is the API [Curio Core](https://curiocore.io) builds on.
-- **VM bridge for FEVM forwarding.** When configured, Lantern can delegate `eth_call` / `eth_estimateGas` / `eth_sendRawTransaction` to an operator's own Forest or Lotus.
+- **VM bridge as optional fallback.** FEVM reads run locally by default; the bridge to an operator's own Forest/Lotus is kept as an automatic safety net during rollout and can be disabled. The remaining work to retire it entirely for *writing* providers is tracked in [#45](https://github.com/Reiers/lantern/issues/45) / [#46](https://github.com/Reiers/lantern/issues/46).
 - **Embedded operator dashboard.** Three-mode UI (client / SP / dev), follows OS dark-mode, served on the same listener as `/metrics`.
 
 Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on mainnet — every state read tested matched Glif byte-for-byte.
@@ -238,7 +239,9 @@ Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on m
 
 | Release | What landed |
 |---|---|
-| v1.5.8 (current) | Embedded `pkg/daemon` gossipsub head-tracking (0-1 epoch, #40). `eth_subscribe("logs")` over WS (#32). Hardened header-store catch-up so embedded mode can't stall (#33). `lantern info` per-network token + real RPC port + `--token-only`/`--network` (#34, #35). `StateNetworkName` returns the well-known name (#36). |
+| v1.7.x (current) | **Local FEVM write path** — local `eth_getTransactionCount` (live-head-anchored nonce), `eth_estimateGas`, a pure-Go EIP-1559 tx codec (`chain/ethtx`), `eth_sendRawTransaction` via gossipsub mempool, and `eth_getTransactionReceipt` via `StateSearchMsg` ([#45](https://github.com/Reiers/lantern/issues/45)). Deterministic `eth_unsubscribe`. |
+| v1.6.x – v1.7.2 | **Local FEVM `eth_call` — the zero-Glif read keystone** ([#43](https://github.com/Reiers/lantern/issues/43)). Pure-Go EVM interpreter over verified KAMT storage; embedded state-block prefetcher with adaptive warming + deep-trie walk retry ([#44](https://github.com/Reiers/lantern/issues/44)). Read path proven 100% local on calibration. |
+| v1.5.8 | Embedded `pkg/daemon` gossipsub head-tracking (0-1 epoch, #40). `eth_subscribe("logs")` over WS (#32). Hardened header-store catch-up so embedded mode can't stall (#33). `lantern info` per-network token + real RPC port + `--token-only`/`--network` (#34, #35). `StateNetworkName` returns the well-known name (#36). |
 | v1.5.7 | Installer upgrades when the published SHA differs (was permanently stuck on whichever binary was installed first). No source changes. |
 | v1.5.5 | Dashboard on by default at `http://127.0.0.1:9092/dashboard/`. Installer color-rendering hotfix (real ESC bytes). Installer prompts work when piped through `curl \| bash`. |
 | v1.5.4 | Installer PATH-detection hotfix for fresh Apple Silicon Macs. Symlink self-heal on re-runs. No source code changes from v1.5.3. |
@@ -276,14 +279,14 @@ The Phase 7 VM is a **gas-accurate execution shell**, not a complete FVM. It:
 
 The shell alone is enough for: wallet sends, gas estimation, mempool participation, `StateWaitMsg`, and most of Curio's read-path operations.
 
-## FVM bridge (optional, opt-in)
+## FVM bridge (fallback only)
 
-For operators who need full VM coverage - EVM contract calls, complex multisig operations, or block production with a real state root - Lantern V1 supports an opt-in **side-channel bridge** to a trusted Forest or Lotus node. The bridge is bounded to two operations:
+FEVM contract reads (`eth_call` / `eth_estimateGas`) now execute **locally** in Lantern's pure-Go EVM interpreter against verified KAMT state, so the bridge is no longer required for the read path. For the residual VM operations the pure-Go path doesn't yet cover, Lantern supports an opt-in **side-channel bridge** to a trusted Forest or Lotus node, bounded to:
 
-1. Non-`Send` `StateCall` execution
+1. Non-`Send` `StateCall` execution **not yet served locally** (kept as an automatic fallback during rollout; the write path is being retired off the bridge in [#45](https://github.com/Reiers/lantern/issues/45)/[#46](https://github.com/Reiers/lantern/issues/46))
 2. `ParentStateRoot` computation for block production
 
-The bridge is **not** used for header verification, F3 finality, state reads (HAMT lookups), DRAND randomness, or any of Lantern's core trust-critical paths - those remain entirely self-verified.
+The bridge is **not** used for header verification, F3 finality, state reads (HAMT lookups), DRAND randomness, local FEVM `eth_call`, or any of Lantern's core trust-critical paths - those remain entirely self-verified.
 
 Default daemon has no bridge configured. Operators who want it configure their own trusted node and accept that node as a documented soft-trust point. See [`TRUST-MODEL.md`](TRUST-MODEL.md) for the full attacker analysis.
 
