@@ -55,6 +55,7 @@ import (
 	"github.com/Reiers/lantern/net/glif"
 	"github.com/Reiers/lantern/net/hsync"
 	llibp2p "github.com/Reiers/lantern/net/libp2p"
+	"github.com/Reiers/lantern/net/mpool"
 	"github.com/Reiers/lantern/rpc/handlers"
 	rpcserver "github.com/Reiers/lantern/rpc/server"
 	"github.com/Reiers/lantern/state/hamt"
@@ -382,6 +383,26 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 	if err != nil {
 		_ = host.Close()
 		return fmt.Errorf("start gossipsub block ingestor: %w", err)
+	}
+
+	// lantern#45 Stage 4: wire the gossipsub mempool publisher on the same
+	// pubsub instance, so eth_sendRawTransaction can broadcast SP txs over
+	// /fil/msgs/<network> locally instead of forwarding to the bridge.
+	// Best-effort: a mpool wiring failure must not sink head-tracking, it
+	// just leaves eth_sendRawTransaction on the bridge fallback.
+	if chainAPI != nil {
+		mp, mperr := mpool.New(ctx, host.PubSub, mpool.Config{
+			Topic: network.GossipTopicMessages(),
+		})
+		if mperr != nil {
+			log.Warnw("mpool publisher unavailable; eth_sendRawTransaction stays on bridge", "err", mperr)
+		} else {
+			chainAPI.Mpool = mp
+			d.mu.Lock()
+			d.mpool = mp
+			d.mu.Unlock()
+			log.Infow("gossipsub mempool publisher wired", "topic", network.GossipTopicMessages())
+		}
 	}
 
 	d.mu.Lock()
