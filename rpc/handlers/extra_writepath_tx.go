@@ -186,10 +186,12 @@ func (c *ChainAPI) localEthGetTransactionReceipt(ctx context.Context, txHash str
 	}
 	msgCID, ok := c.sentTx().get(strings.ToLower(txHash))
 	if !ok {
+		log.Debugw("eth_getTransactionReceipt: tx not in local sent index, bridging", "txHash", txHash)
 		return nil, false, nil // not ours -> bridge
 	}
 	lookup, err := c.StateSearchMsg(ctx, types.TipSetKey{}, msgCID, 0, false)
 	if err != nil {
+		log.Debugw("eth_getTransactionReceipt: StateSearchMsg error, bridging", "txHash", txHash, "msgCID", msgCID, "err", err)
 		return nil, false, nil // degrade to bridge on lookup error
 	}
 	if lookup == nil {
