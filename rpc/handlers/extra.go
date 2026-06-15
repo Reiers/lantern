@@ -550,10 +550,13 @@ func (c *ChainAPI) EthCall(ctx context.Context, callObj any, blockParam any) (st
 		if res, served, err := c.localEthCall(ctx, call); served {
 			// served==true is a definitive answer (success or revert).
 			if err != nil {
+				log.Debugw("eth_call: served locally (revert)", "to", call.To)
 				return "", err // revertError -> RPC maps to code 3
 			}
+			log.Debugw("eth_call: served locally", "to", call.To)
 			return res, nil
 		}
+		log.Debugw("eth_call: local miss, falling back to bridge", "to", call.To)
 	}
 
 	if c.Bridge == nil {
