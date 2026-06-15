@@ -12,6 +12,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/builtin"
@@ -35,6 +37,12 @@ type evmBackend struct {
 	chainID uint64
 	blockNo uint64
 	tstamp  uint64
+
+	// bg is the retry-wrapped BlockGetter used for bytecode + KAMT
+	// storage reads. Replaces the bare c.BlockGetter for the eth_call
+	// hot path so lazy-fetch misses get a real second chance before we
+	// declare "not served locally" (lantern#44).
+	bg hamt.BlockGetter
 }
 
 // GetCode resolves addr -> EVM actor -> bytecode (CID + hash verified).
@@ -43,7 +51,7 @@ func (b *evmBackend) GetCode(a evm.Address) ([]byte, error) {
 	if err != nil || !ok {
 		return nil, err // miss -> empty code (not an error to callers)
 	}
-	return actors.FetchBytecode(b.ctx, st, b.c.BlockGetter)
+	return actors.FetchBytecode(b.ctx, st, b.bg)
 }
 
 // GetStorage reads slot `key` from addr's contract storage KAMT.
@@ -52,7 +60,7 @@ func (b *evmBackend) GetStorage(a evm.Address, key uint256.Int) (uint256.Int, er
 	if err != nil || !ok {
 		return uint256.Int{}, err
 	}
-	v, _, err := kamt.GetU256(b.ctx, st.StorageRoot(), key.ToBig(), b.c.BlockGetter)
+	v, _, err := kamt.GetU256(b.ctx, st.StorageRoot(), key.ToBig(), b.bg)
 	if err != nil {
 		return uint256.Int{}, err
 	}
@@ -91,7 +99,7 @@ func (b *evmBackend) loadEVMActor(a evm.Address) (actors.EVMState, bool, error) 
 	if err != nil {
 		return nil, false, nil
 	}
-	st, err := actors.LoadEVM(b.ctx, actor.Code, actor.Head, b.c.BlockGetter, b.reg)
+	st, err := actors.LoadEVM(b.ctx, actor.Code, actor.Head, b.bg, b.reg)
 	if err != nil {
 		// Not an EVM actor (e.g. account/placeholder) -> not a contract.
 		return nil, false, nil
@@ -182,6 +190,19 @@ func (c *ChainAPI) localEthCall(ctx context.Context, call ethCallObject) (string
 		}
 	}
 
+	// Wrap the BlockGetter with a retry layer for the eth_call hot path
+	// (lantern#44). Retries are bounded by LocalFEVMFetchRetries +
+	// LocalFEVMFetchTimeout; zero values mean transparent passthrough.
+	retries := c.LocalFEVMFetchRetries
+	total := c.LocalFEVMFetchTimeout
+	if retries == 0 && total == 0 {
+		// Sensible defaults: 2 retries inside an 8s budget. Cheap
+		// robustness against cold storage-trie blocks under load.
+		retries = 2
+		total = 8 * time.Second
+	}
+	bg := newRetryingBlockGetter(c.BlockGetter, retries, total)
+
 	be := &evmBackend{
 		ctx:     ctx,
 		c:       c,
@@ -189,7 +210,28 @@ func (c *ChainAPI) localEthCall(ctx context.Context, call ethCallObject) (string
 		reg:     actors.DefaultRegistry(),
 		chainID: chainIDForNetwork(c.NetworkName),
 		blockNo: blockNo,
+		bg:      bg,
 	}
+
+	// Override the accessor's view of the blockstore so its actor lookups
+	// also benefit from the retry layer. We rebuild the accessor at the
+	// live head above; rebuild once more so it uses bg, not c.BlockGetter.
+	if acc != nil {
+		if c.HeaderStore != nil {
+			if head := c.HeaderStore.Head(); head != nil {
+				liveRoot := head.ParentState()
+				if liveRoot.Defined() {
+					liveTR := &trustedroot.TrustedRoot{
+						Epoch:     head.Height(),
+						StateRoot: liveRoot,
+					}
+					be.acc = accessor.New(liveTR, bg)
+				}
+			}
+		}
+	}
+
+	atomic.AddUint64(&c.localEthCallTotal, 1)
 
 	res, err := evm.Call(be, from, evm.BytesToAddress(toRaw), input)
 	if err != nil {

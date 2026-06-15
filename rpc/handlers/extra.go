@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	stdbig "math/big"
+	"sync/atomic"
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
@@ -549,6 +550,7 @@ func (c *ChainAPI) EthCall(ctx context.Context, callObj any, blockParam any) (st
 		}
 		if res, served, err := c.localEthCall(ctx, call); served {
 			// served==true is a definitive answer (success or revert).
+			atomic.AddUint64(&c.localEthCallServed, 1)
 			if err != nil {
 				log.Debugw("eth_call: served locally (revert)", "to", call.To)
 				return "", err // revertError -> RPC maps to code 3
@@ -556,6 +558,7 @@ func (c *ChainAPI) EthCall(ctx context.Context, callObj any, blockParam any) (st
 			log.Debugw("eth_call: served locally", "to", call.To)
 			return res, nil
 		}
+		atomic.AddUint64(&c.localEthCallBridgeFallback, 1)
 		log.Debugw("eth_call: local miss, falling back to bridge", "to", call.To)
 	}
 

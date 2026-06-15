@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/filecoin-project/go-address"
@@ -67,6 +68,20 @@ type ChainAPI struct {
 	// forward to the VMBridge unconditionally (lantern#43 Part B). Default
 	// false: local-exec-first with bridge fallback.
 	LocalFEVMDisabled bool
+
+	// LocalFEVMFetchRetries and LocalFEVMFetchTimeout configure the
+	// retry-on-miss wrapper used for bytecode + KAMT storage block reads
+	// inside eth_call (lantern#44). Zero values fall back to sensible
+	// defaults inside localEthCall (2 retries, 8s total budget). Set
+	// either to a negative value to disable retries entirely.
+	LocalFEVMFetchRetries int
+	LocalFEVMFetchTimeout time.Duration
+
+	// localEthCall counters (lantern#44 observability). Loaded via
+	// LocalEthCallStats(); written only by EthCall and localEthCall.
+	localEthCallTotal          uint64
+	localEthCallServed         uint64
+	localEthCallBridgeFallback uint64
 
 	// BeaconParams is the drand-round mapping for the active network.
 	// Defaults to mainnet quicknet if zero-value.
@@ -174,6 +189,17 @@ func (c *ChainAPI) WithHeaderStore(s *hstore.Store) *ChainAPI {
 func (c *ChainAPI) WithBridge(b bridge.Bridge) *ChainAPI {
 	c.Bridge = b
 	return c
+}
+
+// LocalEthCallStats returns a snapshot of the local-eth_call counters
+// (lantern#44). Total = both served + bridge_fallback paths; a healthy
+// embedded daemon with state-block availability should approach
+// Served/Total = 1.0.
+func (c *ChainAPI) LocalEthCallStats() (total, served, bridgeFallback uint64) {
+	total = atomic.LoadUint64(&c.localEthCallTotal)
+	served = atomic.LoadUint64(&c.localEthCallServed)
+	bridgeFallback = atomic.LoadUint64(&c.localEthCallBridgeFallback)
+	return
 }
 
 // ----------------- Node admin (N) -----------------
