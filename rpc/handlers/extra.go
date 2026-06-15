@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	stdbig "math/big"
+	"strings"
 	"sync/atomic"
 
 	"github.com/filecoin-project/go-address"
@@ -560,6 +561,12 @@ func (c *ChainAPI) EthCall(ctx context.Context, callObj any, blockParam any) (st
 		}
 		atomic.AddUint64(&c.localEthCallBridgeFallback, 1)
 		log.Debugw("eth_call: local miss, falling back to bridge", "to", call.To)
+		// Adaptive warming (lantern#44): feed the missed contract back to
+		// the prefetcher so it's warm next head advance. Non-blocking;
+		// curio-core's hook dedups + caps internally.
+		if c.OnLocalMiss != nil && call.To != "" {
+			c.OnLocalMiss(strings.ToLower(call.To))
+		}
 	}
 
 	if c.Bridge == nil {

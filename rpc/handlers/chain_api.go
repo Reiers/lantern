@@ -83,6 +83,18 @@ type ChainAPI struct {
 	localEthCallServed         uint64
 	localEthCallBridgeFallback uint64
 
+	// OnLocalMiss, when set, is invoked with the lowercase 0x-prefixed
+	// `to` address every time an eth_call can't be served locally and
+	// falls back to the bridge (lantern#44 adaptive warming). curio-core
+	// wires this to the state prefetcher so the missed contract's state
+	// subtree is warmed on the next head advance, after which subsequent
+	// reads of that contract serve locally. This turns the prefetch
+	// warm-list from a static guess into a self-expanding set and is the
+	// mechanism that closes the last read-path bridge dependency (linked
+	// contracts like FilecoinPay that aren't in the seed list). Must be
+	// cheap + non-blocking; the handler calls it on the hot path.
+	OnLocalMiss func(addr string)
+
 	// BeaconParams is the drand-round mapping for the active network.
 	// Defaults to mainnet quicknet if zero-value.
 	BeaconParams lbeacon.QuicknetParams

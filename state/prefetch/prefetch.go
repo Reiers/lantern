@@ -69,6 +69,12 @@ type Prefetcher struct {
 	lastRun  map[string]time.Time // keyed by canonical eth-address (lowercase hex)
 	inflight map[string]bool      // keyed by canonical eth-address; prevents overlap
 
+	// dynAddrs holds addresses learned at runtime via AddAddr (lantern#44
+	// adaptive warming): contracts an eth_call locally missed and fell
+	// back to the bridge for. They're merged with cfg.Addrs on every
+	// Trigger. Capped at maxDynAddrs to bound memory/walk cost.
+	dynAddrs map[string]struct{} // canonical lowercase key -> present
+
 	// stats
 	runs           atomic.Uint64
 	walks          atomic.Uint64
@@ -105,11 +111,59 @@ func New(cfg Config, bg hamt.BlockGetter) *Prefetcher {
 // Trigger runs a prefetch pass against the given header. Returns
 // immediately; walks run on internal goroutines (so head-advance is
 // never blocked). Safe to call from a Store.OnHeadChange callback.
+// maxDynAddrs caps the runtime-learned address set so a pathological
+// caller (or hostile client spraying eth_call to random addresses)
+// can't grow the per-head walk unboundedly.
+const maxDynAddrs = 64
+
+// AddAddr registers a contract address discovered at runtime (typically
+// from an eth_call local miss) so the prefetcher warms its state subtree
+// on the next head advance. Idempotent, thread-safe, cheap, and bounded
+// by maxDynAddrs. Unparseable input is ignored. This is the seam
+// curio-core wires to ChainAPI.OnLocalMiss for self-expanding read-path
+// coverage (lantern#44).
+func (p *Prefetcher) AddAddr(raw string) {
+	if p == nil {
+		return
+	}
+	addr, ok := parseEthAddr(raw)
+	if !ok {
+		return
+	}
+	key := canonicalKey(addr)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.dynAddrs == nil {
+		p.dynAddrs = make(map[string]struct{}, 8)
+	}
+	if _, exists := p.dynAddrs[key]; exists {
+		return
+	}
+	if len(p.dynAddrs) >= maxDynAddrs {
+		return
+	}
+	p.dynAddrs[key] = struct{}{}
+	log.Debugw("prefetch: learned address from eth_call miss", "addr", "0x"+key, "dyn_total", len(p.dynAddrs))
+}
+
+// addrSnapshot returns the merged static + dynamic address list to walk.
+func (p *Prefetcher) addrSnapshot() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]string, 0, len(p.cfg.Addrs)+len(p.dynAddrs))
+	out = append(out, p.cfg.Addrs...)
+	for k := range p.dynAddrs {
+		out = append(out, k)
+	}
+	return out
+}
+
 func (p *Prefetcher) Trigger(ctx context.Context, head *ltypes.TipSet) {
 	if p == nil || head == nil {
 		return
 	}
-	if len(p.cfg.Addrs) == 0 {
+	addrs := p.addrSnapshot()
+	if len(addrs) == 0 {
 		return
 	}
 	stateRoot := head.ParentState()
@@ -127,7 +181,7 @@ func (p *Prefetcher) Trigger(ctx context.Context, head *ltypes.TipSet) {
 	tr := &trustedroot.TrustedRoot{Epoch: epoch, StateRoot: stateRoot}
 	acc := accessor.New(tr, p.bg)
 
-	for _, raw := range p.cfg.Addrs {
+	for _, raw := range addrs {
 		addr, ok := parseEthAddr(raw)
 		if !ok {
 			log.Debugw("prefetch: skipping unparseable address", "addr", raw)
@@ -337,4 +391,3 @@ func ethToFilecoin(raw [20]byte) (address.Address, error) {
 var (
 	_ = errors.New
 )
-

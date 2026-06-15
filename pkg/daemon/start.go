@@ -229,6 +229,16 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 	chainAPI.LocalFEVMFetchRetries = d.cfg.FEVMFetchRetries
 	chainAPI.LocalFEVMFetchTimeout = d.cfg.FEVMFetchTimeout
 
+	// lantern#44 adaptive warming: when an eth_call misses locally and
+	// falls back to the bridge, feed the contract address to the
+	// prefetcher so its state is warm on the next head advance. This is
+	// what lets the read path reach zero-bridge over a few epochs even
+	// for linked contracts (e.g. FilecoinPay) not in the static seed
+	// list. No-op if the prefetcher isn't wired.
+	if pf := d.fevmPrefetch; pf != nil {
+		chainAPI.OnLocalMiss = pf.AddAddr
+	}
+
 	// Stash for accessor-style reads (LocalEthCallStats, etc.).
 	d.mu.Lock()
 	d.chainAPI = chainAPI
