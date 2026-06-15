@@ -50,7 +50,7 @@ type TrustedRoot struct {
 }
 
 // HeaderSource yields headers in epoch-ascending order. The default
-// implementation in cmd/lantern-phase1 reads from a Lotus RPC; production
+// implementation in examples/historical/phase1 reads from a Lotus RPC; production
 // code will swap in a libp2p header sync.
 type HeaderSource interface {
 	// Tipset returns the tipset at the given epoch, or an error if it

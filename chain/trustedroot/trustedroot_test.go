@@ -57,7 +57,7 @@ func mkBlock(t *testing.T, h abi.ChainEpoch, parents []cid.Cid, label string) *l
 
 // TestBuild_RoundTrip wires Build with stub sources to confirm the pipeline
 // compiles and persists/loads correctly. Real F3 cert verification needs
-// real BLS-signed certs and is exercised by cmd/lantern-phase1.
+// real BLS-signed certs and is exercised by examples/historical/phase1.
 func TestBuild_PersistAndLoad(t *testing.T) {
 	dir := t.TempDir()
 	db, err := badger.Open(badger.DefaultOptions(dir).WithLogger(nil))

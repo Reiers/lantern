@@ -1,7 +1,7 @@
 // Gas estimation helpers built on top of the VM shell.
 //
 // These methods are designed to be called by rpc/handlers and the
-// stand-alone lantern-phase7 demo. They implement the same shape as
+// stand-alone examples/historical/phase7 demo. They implement the same shape as
 // Lotus' GasEstimateMessageGas / GasEstimateFeeCap /
 // GasEstimateGasPremium / GasEstimateGasLimit, but with two important
 // differences:
@@ -20,7 +20,7 @@
 //
 // Cross-check methodology
 //
-// Phase 7's lantern-phase7 demo picks ~10 real mainnet messages from
+// Phase 7's examples/historical/phase7 demo picks ~10 real mainnet messages from
 // Phase 6's gossipsub mempool stream, calls GasEstimateMessageGas on
 // each, and compares against the actual on-chain GasLimit / GasFeeCap /
 // GasPremium values. We expect order-of-magnitude agreement — the

@@ -314,10 +314,12 @@ rpc/           Lotus-compatible JSON-RPC server + handlers
 wallet/        encrypted-at-rest keystore + Wallet facade
 api/           Lotus-shape FullNode interface
 cmd/
-  lantern/             user-facing CLI
-  lantern-gateway/     HTTP gateway server (deployed at gateway.lantern.reiers.io)
-  lantern-f3-anchor/   tool that captures a fresh F3 trust anchor from a Forest/Lotus node
-  lantern-phase{1..7}/ end-to-end demos per phase
+  lantern/                  user-facing CLI / daemon
+  lantern-gateway/          HTTP gateway server (deployed at gateway.lantern.reiers.io)
+  lantern-f3-anchor/        tool that captures a fresh F3 trust anchor from a Forest/Lotus node
+  lantern-lotus-compat-test/ Lotus RPC client compatibility checker
+examples/
+  historical/phase{1,2,5,6,7}/ archived per-phase end-to-end build-up demos
 
 SCOPE.md              full project scope
 MODULES.md            module layout + lift-vs-reimplement decisions
