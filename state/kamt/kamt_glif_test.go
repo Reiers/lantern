@@ -128,3 +128,33 @@ func base(s string) int {
 	}
 	return 10
 }
+
+// TestKAMT_DeepTreeStorage_GlifParity covers a contract with a deeper KAMT
+// (a 240-bit extension at depth 2, leaf reached on the final 1-bit window
+// of the 256-bit key) -- the case that exposed the final-window clamping +
+// extension-matching bugs. Contract 0x09a0fdc2..., calibration.
+func TestKAMT_DeepTreeStorage_GlifParity(t *testing.T) {
+	if os.Getenv("LANTERN_KAMT_GLIF_TEST") != "1" {
+		t.Skip("set LANTERN_KAMT_GLIF_TEST=1")
+	}
+	root, err := cid.Parse("bafy2bzacecymylqnhrqgrc3pjhkygr6abmhdk4tu27gkaz4vzxpyimyt32ju4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bg := &glifBlockGetter{url: "https://api.calibration.node.glif.io/rpc/v1", hc: &http.Client{Timeout: 20 * time.Second}}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	want := map[int64]string{0: "0x1", 1: "0x4609", 2: "0x0"}
+	for slot, exp := range want {
+		got, _, err := GetU256(ctx, root, big.NewInt(slot), bg)
+		if err != nil {
+			t.Fatalf("slot %d: %v", slot, err)
+		}
+		expBI, _ := new(big.Int).SetString(exp[2:], 16)
+		if got.Cmp(expBI) != 0 {
+			t.Errorf("slot %d: got 0x%x want %s", slot, got, exp)
+		} else {
+			t.Logf("slot %d == 0x%x  ✓ (deep tree, matches Glif)", slot, got)
+		}
+	}
+}

@@ -12,10 +12,11 @@ import "fmt"
 type hashBits struct {
 	b        []byte
 	consumed int // bits consumed so far
+	length   int // total bits available (defaults to len(b)*8)
 }
 
 func newHashBits(b []byte) *hashBits {
-	return &hashBits{b: b}
+	return &hashBits{b: b, length: len(b) * 8}
 }
 
 // Next consumes the next `n` bits (n <= 8 in practice for bit_width) and
@@ -23,6 +24,15 @@ func newHashBits(b []byte) *hashBits {
 func (h *hashBits) Next(n int) (int, error) {
 	if n <= 0 || n > 32 {
 		return 0, fmt.Errorf("hashBits.Next: bad width %d", n)
+	}
+	if h.consumed >= h.length {
+		return 0, fmt.Errorf("hashBits: out of bits at position %d (key %d bits)", h.consumed, h.length)
+	}
+	// ref-fvm semantics: only take what's left. Consuming bit_width bits at
+	// a time from a 256-bit key leaves a short final window (e.g. 1 bit) at
+	// the bottom of the tree; clamp rather than error.
+	if rem := h.length - h.consumed; n > rem {
+		n = rem
 	}
 	v := 0
 	for i := 0; i < n; i++ {
@@ -54,7 +64,9 @@ func (h *hashBits) Consume(n int) error {
 // (the caller treats that as slot-absent); == length means a full match and
 // the caller descends.
 func matchExtension(hb *hashBits, pathBytes []byte, length, bitWidth int) (int, error) {
-	path := &hashBits{b: pathBytes}
+	// The extension path bits live in pathBytes; its logical length is the
+	// extension's bit length, not the byte length.
+	path := &hashBits{b: pathBytes, length: length}
 	matched := 0
 	for matched < length {
 		take := bitWidth
