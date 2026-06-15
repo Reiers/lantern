@@ -195,11 +195,34 @@ func (c *ChainAPI) WithBridge(b bridge.Bridge) *ChainAPI {
 // (lantern#44). Total = both served + bridge_fallback paths; a healthy
 // embedded daemon with state-block availability should approach
 // Served/Total = 1.0.
-func (c *ChainAPI) LocalEthCallStats() (total, served, bridgeFallback uint64) {
+//
+// Not a JSON-RPC method (lower-case start; suppressed in the registered
+// surface). Embedded callers reach it via the ChainAPI handle.
+func (c *ChainAPI) localEthCallStatsSnapshot() (total, served, bridgeFallback uint64) {
 	total = atomic.LoadUint64(&c.localEthCallTotal)
 	served = atomic.LoadUint64(&c.localEthCallServed)
 	bridgeFallback = atomic.LoadUint64(&c.localEthCallBridgeFallback)
 	return
+}
+
+// LocalEthCallStats is the public single-struct view of the counters,
+// safe to expose through the daemon facade and through later RPC
+// surfaces that want it. Lower-case method names on ChainAPI are
+// skipped by the JSON-RPC registrar, but to keep the JSON-RPC handler
+// surface clean we expose the struct via a Daemon-level accessor
+// (see pkg/daemon.Daemon.LocalEthCallStats); the snapshot fn is the
+// shared implementation.
+type LocalEthCallStatsView struct {
+	Total          uint64
+	Served         uint64
+	BridgeFallback uint64
+}
+
+// LocalEthCallStatsView is the in-process getter used by
+// pkg/daemon.Daemon.LocalEthCallStats.
+func (c *ChainAPI) LocalEthCallStatsView() LocalEthCallStatsView {
+	t, s, b := c.localEthCallStatsSnapshot()
+	return LocalEthCallStatsView{Total: t, Served: s, BridgeFallback: b}
 }
 
 // ----------------- Node admin (N) -----------------

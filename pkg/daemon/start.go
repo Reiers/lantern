@@ -58,6 +58,7 @@ import (
 	"github.com/Reiers/lantern/rpc/handlers"
 	rpcserver "github.com/Reiers/lantern/rpc/server"
 	"github.com/Reiers/lantern/state/hamt"
+	"github.com/Reiers/lantern/state/prefetch"
 	"github.com/Reiers/lantern/vm/bridge"
 )
 
@@ -193,7 +194,45 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 				log.Warnw("gossipsub head-tracking unavailable; falling back to polling Sync", "err", err)
 			}
 		}
+
+		// lantern#44: FEVM contract-state prefetcher. On every head advance,
+		// walk the configured EVM contract addresses' bytecode + storage
+		// subtree into the local blockstore cache so later eth_calls hit
+		// the cache instead of falling back to the bridge. Strictly
+		// best-effort: walks run on goroutines, and a failed walk is logged
+		// at debug and dropped.
+		if len(d.cfg.FEVMPrefetchAddrs) > 0 {
+			pf := prefetch.New(prefetch.Config{
+				Addrs:            d.cfg.FEVMPrefetchAddrs,
+				MaxBlocksPerAddr: d.cfg.FEVMPrefetchMaxBlocksPerAddr,
+				PerAddrTimeout:   d.cfg.FEVMPrefetchPerAddrTimeout,
+				MinInterval:      d.cfg.FEVMPrefetchMinInterval,
+			}, fetcher)
+			store.OnHeadChange(func(ts *types.TipSet) {
+				pf.Trigger(ctx, ts)
+			})
+			d.mu.Lock()
+			d.fevmPrefetch = pf
+			d.mu.Unlock()
+			log.Infow("FEVM state prefetcher wired",
+				"addrs", len(d.cfg.FEVMPrefetchAddrs),
+				"max_blocks_per_addr", d.cfg.FEVMPrefetchMaxBlocksPerAddr,
+				"per_addr_timeout", d.cfg.FEVMPrefetchPerAddrTimeout,
+				"min_interval", d.cfg.FEVMPrefetchMinInterval,
+			)
+		}
 	}
+
+	// lantern#44: pipe FEVM fetch retry config from daemon.Config to
+	// the eth_call backend. Zero values let evmexec.go apply its own
+	// sensible defaults; negative retries disables.
+	chainAPI.LocalFEVMFetchRetries = d.cfg.FEVMFetchRetries
+	chainAPI.LocalFEVMFetchTimeout = d.cfg.FEVMFetchTimeout
+
+	// Stash for accessor-style reads (LocalEthCallStats, etc.).
+	d.mu.Lock()
+	d.chainAPI = chainAPI
+	d.mu.Unlock()
 
 	// Optional VM bridge: when configured, FEVM read methods (eth_call,
 	// eth_estimateGas) and SendRawTransaction get forwarded to an

@@ -45,7 +45,9 @@ import (
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/net/blockingest"
 	llibp2p "github.com/Reiers/lantern/net/libp2p"
+	"github.com/Reiers/lantern/rpc/handlers"
 	rpcserver "github.com/Reiers/lantern/rpc/server"
+	"github.com/Reiers/lantern/state/prefetch"
 	"github.com/Reiers/lantern/wallet"
 )
 
@@ -138,6 +140,36 @@ type Config struct {
 	// suppress some CLI-shaped stdout/stderr noise. Functionally no-op
 	// otherwise.
 	EmbeddedMode bool
+
+	// FEVMPrefetchAddrs is the optional list of EVM contract addresses
+	// (20-byte hex, 0x-prefixed or bare) whose state subtrees should be
+	// warmed into the local blockstore cache on every head advance, so
+	// later eth_calls hit the cache instead of falling back to the VM
+	// bridge or returning "block not found" (lantern#44).
+	//
+	// Embedded callers should set this to the proxy + impl addresses of
+	// the contracts they read (PDPVerifier, FWSS, ServiceProviderRegistry,
+	// USDFC, ...). The standalone daemon leaves this empty by default;
+	// curio-core will wire defaults from its pdp/contract/addresses.go.
+	FEVMPrefetchAddrs []string
+
+	// FEVMPrefetchMaxBlocksPerAddr caps the BFS node-count per address
+	// per head advance. Default 256.
+	FEVMPrefetchMaxBlocksPerAddr int
+
+	// FEVMPrefetchPerAddrTimeout bounds one address's walk. Default 20s.
+	FEVMPrefetchPerAddrTimeout time.Duration
+
+	// FEVMPrefetchMinInterval coalesces rapid head advances: each
+	// address is walked at most once per MinInterval. Default 60s.
+	FEVMPrefetchMinInterval time.Duration
+
+	// FEVMFetchRetries / FEVMFetchTimeout control the retry-on-miss
+	// wrapper used by the eth_call backend for bytecode + KAMT storage
+	// reads (lantern#44). Zero values pick sensible defaults
+	// (2 retries / 8s total). Set FEVMFetchRetries < 0 to disable.
+	FEVMFetchRetries int
+	FEVMFetchTimeout time.Duration
 }
 
 // applyDefaults populates zero-value fields with the same defaults
@@ -223,6 +255,17 @@ type Daemon struct {
 	headerStore *hstore.Store
 	headerSync  *hstore.Sync
 	headNotify  *headnotify.Distributor
+
+	// fevmPrefetch is the on-head-advance state-block warmer
+	// (lantern#44). Populated when Config.FEVMPrefetchAddrs is set.
+	// Nil-able; Stats() on a nil-receiver returns zero values.
+	fevmPrefetch *prefetch.Prefetcher
+
+	// chainAPI is the live JSON-RPC handler. Populated by startInternal
+	// after the header store + bridge are wired. Exposed via accessors
+	// like LocalEthCallStats (lantern#44) so embedded callers can read
+	// counters without touching the RPC server.
+	chainAPI *handlers.ChainAPI
 
 	// libp2p host + gossipsub block ingestor. Populated when libp2p is
 	// enabled (P2PListen != "" && !NoLibp2p) and a header store is wired.
@@ -315,6 +358,34 @@ func (d *Daemon) Host() *llibp2p.Host {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.p2pHost
+}
+
+// FEVMPrefetchStats returns a snapshot of the FEVM state-block
+// prefetcher's counters and true when the prefetcher is wired.
+// Returns (zero, false) when FEVMPrefetchAddrs was empty (lantern#44).
+func (d *Daemon) FEVMPrefetchStats() (prefetch.Stats, bool) {
+	d.mu.Lock()
+	pf := d.fevmPrefetch
+	d.mu.Unlock()
+	if pf == nil {
+		return prefetch.Stats{}, false
+	}
+	return pf.Stats(), true
+}
+
+// LocalEthCallStats returns a snapshot of the local-eth_call counters
+// (lantern#44). A healthy embedded daemon with state-block availability
+// should approach Served/Total = 1.0. Returns (zero, false) when the
+// daemon hasn't reached the point where ChainAPI is wired (i.e. before
+// Start completes), so callers can poll safely.
+func (d *Daemon) LocalEthCallStats() (handlers.LocalEthCallStatsView, bool) {
+	d.mu.Lock()
+	ch := d.chainAPI
+	d.mu.Unlock()
+	if ch == nil {
+		return handlers.LocalEthCallStatsView{}, false
+	}
+	return ch.LocalEthCallStatsView(), true
 }
 
 // GossipStats returns a snapshot of gossipsub block-ingestor counters
