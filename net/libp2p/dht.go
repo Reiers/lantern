@@ -39,6 +39,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/multiformats/go-multiaddr"
 
 	"github.com/Reiers/lantern/build"
@@ -117,6 +118,19 @@ func (opts *DHTOptions) applyDefaults() {
 //
 // The DHT itself is exposed via Host.kdht; most callers don't need it.
 // The peer count is observable via Host.PeerCount().
+// ContentRouter returns the Kademlia DHT as a routing.ContentDiscovery for
+// Bitswap provider lookups, or nil when no DHT is enabled (Bitswap then
+// broadcasts WANT-HAVE to connected peers only, which is sufficient for the
+// gossip-connected peer set). lantern#50.
+func (h *Host) ContentRouter() routing.ContentDiscovery {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.kdht == nil {
+		return nil
+	}
+	return h.kdht
+}
+
 func (h *Host) EnableDHT(ctx context.Context, opts DHTOptions) error {
 	h.mu.Lock()
 	if h.kdht != nil {

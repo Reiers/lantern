@@ -43,6 +43,7 @@ import (
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	"github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
+	"github.com/Reiers/lantern/net/bitswap"
 	"github.com/Reiers/lantern/net/blockingest"
 	llibp2p "github.com/Reiers/lantern/net/libp2p"
 	"github.com/Reiers/lantern/net/mpool"
@@ -275,7 +276,8 @@ type Daemon struct {
 	// fallback. See lantern#40.
 	p2pHost  *llibp2p.Host
 	ingestor *blockingest.Ingestor
-	mpool    *mpool.Pool // gossipsub mempool publisher (#45 Stage 4)
+	mpool    *mpool.Pool     // gossipsub mempool publisher (#45 Stage 4)
+	bitswap  *bitswap.Client // libp2p block source on the embedded fetcher (#50)
 
 	// Internal cancellation: derived from caller's ctx in Start.
 	cancel context.CancelFunc

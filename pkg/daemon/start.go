@@ -50,6 +50,7 @@ import (
 	"github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/chain/types"
+	"github.com/Reiers/lantern/net/bitswap"
 	"github.com/Reiers/lantern/net/blockingest"
 	"github.com/Reiers/lantern/net/combined"
 	"github.com/Reiers/lantern/net/glif"
@@ -191,7 +192,7 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		// (the polling Sync still tracks head). src doubles as the
 		// ingestor's bounded inline-backfill source for head+N>1 arrivals.
 		if libp2pEnabled {
-			if err := d.startGossipHead(ctx, store, src, network, chainAPI); err != nil {
+			if err := d.startGossipHead(ctx, store, src, network, chainAPI, fetcher); err != nil {
 				log.Warnw("gossipsub head-tracking unavailable; falling back to polling Sync", "err", err)
 			}
 		}
@@ -304,6 +305,7 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 	sync := d.headerSync
 	store := d.headerStore
 	host := d.p2pHost
+	bsClient := d.bitswap
 	d.rpcServer = nil
 	d.auth = nil
 	d.headerSync = nil
@@ -311,8 +313,14 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 	d.headNotify = nil
 	d.p2pHost = nil
 	d.ingestor = nil
+	d.bitswap = nil
 	d.started = false
 	d.mu.Unlock()
+
+	// Close bitswap before the host (it rides on the host's network).
+	if bsClient != nil {
+		_ = bsClient.Close()
+	}
 
 	if srv != nil {
 		if err := srv.Stop(ctx); err != nil {
@@ -347,7 +355,7 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 // polling Sync writes; SetHead serializes them. src is the bounded
 // inline-backfill source for head+N>1 arrivals. On any setup error the
 // caller logs and continues on the polling Sync (best-effort).
-func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src blockingest.BackfillSource, network build.Network, chainAPI *handlers.ChainAPI) error {
+func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src blockingest.BackfillSource, network build.Network, chainAPI *handlers.ChainAPI, fetcher *combined.Fetcher) error {
 	listeners := splitCSV(d.cfg.P2PListen)
 	host, err := llibp2p.New(ctx, llibp2p.HostConfig{
 		ListenAddrs:    listeners,
@@ -402,6 +410,36 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 			d.mpool = mp
 			d.mu.Unlock()
 			log.Infow("gossipsub mempool publisher wired", "topic", network.GossipTopicMessages())
+		}
+	}
+
+	// lantern#50: mount the libp2p Bitswap client as a high-priority block
+	// source on the embedded fetcher. On calibration both existing sources
+	// (gateway + glif) point at Glif, so a bridge-off daemon otherwise has
+	// no non-Glif way to fetch message/receipt blocks for StateSearchMsg.
+	// Bitswap pulls those blocks from the gossip peers we're already
+	// connected to. Best-effort: a bitswap failure leaves the HTTP sources
+	// in place (bridge-off availability degrades, but head-tracking and
+	// reads continue). Every Bitswap block is CID-verified in the Fetcher,
+	// so peers can't lie.
+	if fetcher != nil {
+		bsClient, bserr := bitswap.New(ctx, bitswap.Config{
+			Host:           host.H,
+			ProviderFinder: host.ContentRouter(),
+		})
+		if bserr != nil {
+			log.Warnw("bitswap unavailable; block fetches stay on HTTP sources", "err", bserr)
+		} else {
+			fetcher.AddSource(combined.Source{
+				Name:    "bitswap",
+				Getter:  bsClient,
+				Timeout: 5 * time.Second,
+				Race:    true, // race against the gateway, first wins
+			}, true)
+			d.mu.Lock()
+			d.bitswap = bsClient
+			d.mu.Unlock()
+			log.Infow("bitswap block source mounted on embedded fetcher")
 		}
 	}
 

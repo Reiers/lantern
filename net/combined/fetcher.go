@@ -50,7 +50,44 @@ type Fetcher struct {
 	sourceHits  map[string]*atomic.Uint64
 	totalMisses atomic.Uint64
 
-	mu sync.Mutex // protects sourceHits map writes
+	mu sync.Mutex // protects sourceHits map writes + sources slice mutation
+}
+
+// AddSource appends a block source at runtime (thread-safe). Used by the
+// embedded daemon to mount the libp2p Bitswap source once the host is up
+// (lantern#50): on calibration the gateway+glif sources both point at
+// Glif, so without a p2p source a bridge-off daemon has no non-Glif way to
+// fetch message/receipt blocks. prepend=true puts it ahead of existing
+// sources (so p2p is tried before the HTTP fallbacks). Idempotent on Name.
+func (f *Fetcher) AddSource(s Source, prepend bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, ex := range f.sources {
+		if ex.Name == s.Name {
+			return // already present
+		}
+	}
+	next := make([]Source, 0, len(f.sources)+1)
+	if prepend {
+		next = append(next, s)
+		next = append(next, f.sources...)
+	} else {
+		next = append(next, f.sources...)
+		next = append(next, s)
+	}
+	f.sources = next
+	if _, ok := f.sourceHits[s.Name]; !ok {
+		var c atomic.Uint64
+		f.sourceHits[s.Name] = &c
+	}
+}
+
+// snapshotSources returns a stable copy of the sources slice for a single
+// Get, so a concurrent AddSource can't race the iteration.
+func (f *Fetcher) snapshotSources() []Source {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.sources
 }
 
 // New constructs a Fetcher.
@@ -86,9 +123,10 @@ func (f *Fetcher) Get(ctx context.Context, c cid.Cid) ([]byte, error) {
 
 	// 2. Race tier: fire every Race=true source concurrently. First
 	//    successful CID-verified response wins, others are cancelled.
-	race := make([]Source, 0, len(f.sources))
-	fallback := make([]Source, 0, len(f.sources))
-	for _, s := range f.sources {
+	srcs := f.snapshotSources()
+	race := make([]Source, 0, len(srcs))
+	fallback := make([]Source, 0, len(srcs))
+	for _, s := range srcs {
 		if s.Race {
 			race = append(race, s)
 		} else {
