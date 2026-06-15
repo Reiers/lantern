@@ -866,8 +866,15 @@ func (c *ChainAPI) StateSearchMsg(ctx context.Context, from types.TipSetKey, msg
 	// whole search and force a bridge fallback. Bridge-off, that fallback
 	// is a hard failure. Wrap the getter so a momentarily-uncached block
 	// resolves on a short retry window instead, mirroring the eth_call
-	// fetch-on-miss policy (#44). retries=4 within a 6s budget.
-	bg := newRetryingBlockGetter(c.BlockGetter, 4, 6*time.Second)
+	// fetch-on-miss policy (#44).
+	//
+	// Budget sizing: the underlying bitswap source needs up to its full
+	// deadline (~5s) to broadcast a WANT and receive a cold block from a
+	// peer. A too-tight per-attempt slice cancels bitswap mid-broadcast
+	// (observed as "net/bitswap: context canceled"). So give a generous
+	// total budget (3 attempts x ~6s = 18s) that comfortably contains a
+	// full bitswap round per attempt.
+	bg := newRetryingBlockGetter(c.BlockGetter, 2, 18*time.Second)
 	s := msgsearch.New(c.HeaderStore, bg)
 	res, err := s.Find(ctx, fromEpoch, msgCID, lookbackLimit)
 	if err != nil {
