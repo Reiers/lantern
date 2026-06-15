@@ -590,49 +590,8 @@ func (c *ChainAPI) EthCall(ctx context.Context, callObj any, blockParam any) (st
 // EthEstimateGas forwards an eth_estimateGas to the upstream VM bridge.
 // viem `writeContract` calls this during transaction preparation to
 // size the gas limit.
-func (c *ChainAPI) EthEstimateGas(ctx context.Context, callObj any) (string, error) {
-	if c.Bridge == nil {
-		return "", errBridgeUnconfigured
-	}
-	params, err := json.Marshal([]any{callObj})
-	if err != nil {
-		return "", xerrors.Errorf("marshal eth_estimateGas params: %w", err)
-	}
-	raw, err := c.Bridge.RawJSONRPC(ctx, "eth_estimateGas", params)
-	if err != nil {
-		return "", xerrors.Errorf("bridge eth_estimateGas: %w", err)
-	}
-	var out string
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", xerrors.Errorf("decode eth_estimateGas result: %w", err)
-	}
-	return out, nil
-}
-
-// EthGetTransactionCount returns the transaction count (nonce) for an
-// Ethereum address. Forwarded to the upstream VM bridge because Lantern's
-// own state tree doesn't currently include f4 account nonces — it would
-// require either a full FEVM state import or a custom EthAccountActor
-// reader. Cheap to forward; cheap to migrate to a local implementation
-// later when state-tree backfill catches up (lantern#3).
-func (c *ChainAPI) EthGetTransactionCount(ctx context.Context, addr string, blockParam any) (string, error) {
-	if c.Bridge == nil {
-		return "", errBridgeUnconfigured
-	}
-	params, err := json.Marshal([]any{addr, blockParam})
-	if err != nil {
-		return "", xerrors.Errorf("marshal eth_getTransactionCount params: %w", err)
-	}
-	raw, err := c.Bridge.RawJSONRPC(ctx, "eth_getTransactionCount", params)
-	if err != nil {
-		return "", xerrors.Errorf("bridge eth_getTransactionCount: %w", err)
-	}
-	var out string
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", xerrors.Errorf("decode eth_getTransactionCount result: %w", err)
-	}
-	return out, nil
-}
+// EthEstimateGas + EthGetTransactionCount moved to extra_writepath.go
+// (lantern#45 Stages 1-2: local-first with bridge fallback).
 
 // EthGetTransactionReceipt returns the receipt for a previously-broadcast
 // transaction. Forwarded to the upstream VM bridge: receipts require
