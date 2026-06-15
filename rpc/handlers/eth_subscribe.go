@@ -57,6 +57,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	logging "github.com/ipfs/go-log/v2"
 	"golang.org/x/xerrors"
@@ -101,6 +102,11 @@ type EthSubscriptionResponse struct {
 type subscription struct {
 	id     EthSubscriptionID
 	cancel context.CancelFunc
+	// done is closed by the subscription goroutine when it has fully
+	// stopped (no more pushes can happen after this closes). EthUnsubscribe
+	// waits on it so unsubscribe is deterministic: once EthUnsubscribe
+	// returns true, the push loop is guaranteed to have torn down.
+	done chan struct{}
 }
 
 // ensureEthSubState initialises the per-ChainAPI subscription map.
@@ -194,9 +200,10 @@ func (c *ChainAPI) subscribeNewHeads(parentCtx context.Context, revClient EthSub
 	// outlive that. We create a fresh background-derived ctx that we
 	// can cancel from eth_unsubscribe or from the goroutine itself.
 	subCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
 
 	c.ethSubMu.Lock()
-	c.ethSubs[id] = &subscription{id: id, cancel: cancel}
+	c.ethSubs[id] = &subscription{id: id, cancel: cancel, done: done}
 	c.ethSubMu.Unlock()
 
 	// Channel from the headnotify Distributor. The Subscribe call
@@ -208,10 +215,13 @@ func (c *ChainAPI) subscribeNewHeads(parentCtx context.Context, revClient EthSub
 
 	go func() {
 		defer func() {
-			// Cleanup on goroutine exit: remove from map.
+			// Cleanup on goroutine exit: remove from map, then signal
+			// done so EthUnsubscribe (and tests) can observe that no
+			// further pushes are possible.
 			c.ethSubMu.Lock()
 			delete(c.ethSubs, id)
 			c.ethSubMu.Unlock()
+			close(done)
 		}()
 
 		for {
@@ -323,8 +333,9 @@ func (c *ChainAPI) subscribeLogs(parentCtx context.Context, revClient EthSubscri
 	}
 
 	subCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
 	c.ethSubMu.Lock()
-	c.ethSubs[id] = &subscription{id: id, cancel: cancel}
+	c.ethSubs[id] = &subscription{id: id, cancel: cancel, done: done}
 	c.ethSubMu.Unlock()
 
 	headCh := c.HeadNotify.Subscribe(subCtx)
@@ -334,6 +345,7 @@ func (c *ChainAPI) subscribeLogs(parentCtx context.Context, revClient EthSubscri
 			c.ethSubMu.Lock()
 			delete(c.ethSubs, id)
 			c.ethSubMu.Unlock()
+			close(done)
 		}()
 
 		for {
@@ -433,6 +445,18 @@ func (c *ChainAPI) EthUnsubscribe(ctx context.Context, id EthSubscriptionID) (bo
 	c.ethSubMu.Unlock()
 
 	sub.cancel()
+	// Wait for the push goroutine to actually stop, so that once this
+	// returns true no further notifications can be delivered for `id`.
+	// Bounded so a wedged goroutine can never hang the RPC: the cancel
+	// above is the real teardown signal; this is just the join.
+	if sub.done != nil {
+		select {
+		case <-sub.done:
+		case <-time.After(2 * time.Second):
+			log.Warnw("eth_unsubscribe: push loop did not stop within 2s", "subscription_id", id)
+		case <-ctx.Done():
+		}
+	}
 	log.Infow("eth_unsubscribe: cancelled", "subscription_id", id)
 	return true, nil
 }

@@ -182,9 +182,12 @@ func TestEthUnsubscribe_StopsPushesAndCleansUp(t *testing.T) {
 	c.ethSubMu.Unlock()
 	require.False(t, present, "subscription should be removed after unsubscribe")
 
+	// EthUnsubscribe has returned, which now deterministically means the
+	// push goroutine has fully stopped (it waits on sub.done). So a head
+	// change published after this point can never reach the subscriber,
+	// with no timing assumption needed.
 	before := cs.count()
 	dist.PublishCustom(hcBatch(t, "apply", mkTestTipset(t, 101)))
-	time.Sleep(50 * time.Millisecond)
 	require.Equal(t, before, cs.count(), "no pushes after unsubscribe")
 
 	ok, err = c.EthUnsubscribe(context.Background(), "0xdeadbeef")
