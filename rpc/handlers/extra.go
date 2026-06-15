@@ -284,10 +284,13 @@ func (c *ChainAPI) EthMaxPriorityFeePerGas(_ context.Context) (string, error) {
 // reporting MinimumBaseFee gives viem clients a workable estimate
 // when they call gasPrice during transaction preparation.
 //
-// TODO(#26): when we wire chain-head base-fee tracking, return the
-// actual head base-fee instead of the protocol minimum. For now,
-// MinimumBaseFee is the safe floor.
-func (c *ChainAPI) EthGasPrice(_ context.Context) (string, error) {
+// Now wired to the live head base fee (via EthBaseFee) so a tx builder
+// that prices off gasPrice during a base-fee spike doesn't underprice and
+// stall. Falls back to MinimumBaseFee only when no live head is available.
+func (c *ChainAPI) EthGasPrice(ctx context.Context) (string, error) {
+	if bf, err := c.EthBaseFee(ctx); err == nil && bf != "" && bf != "0x0" {
+		return bf, nil
+	}
 	return fmt.Sprintf("0x%x", build.MinimumBaseFee), nil
 }
 
