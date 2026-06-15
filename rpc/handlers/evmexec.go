@@ -17,6 +17,8 @@ import (
 	"github.com/filecoin-project/go-state-types/builtin"
 	"github.com/holiman/uint256"
 
+	"github.com/Reiers/lantern/chain/trustedroot"
+	"github.com/Reiers/lantern/state/accessor"
 	"github.com/Reiers/lantern/state/actors"
 	"github.com/Reiers/lantern/state/hamt"
 	"github.com/Reiers/lantern/state/kamt"
@@ -28,6 +30,7 @@ import (
 type evmBackend struct {
 	ctx     context.Context
 	c       *ChainAPI
+	acc     *accessor.Accessor // anchored at the call's target epoch
 	reg     *actors.Registry
 	chainID uint64
 	blockNo uint64
@@ -64,7 +67,7 @@ func (b *evmBackend) GetBalance(a evm.Address) (uint256.Int, error) {
 	if err != nil {
 		return uint256.Int{}, nil
 	}
-	actor, _, err := b.c.Accessor.GetActor(b.ctx, filAddr)
+	actor, _, err := b.acc.GetActor(b.ctx, filAddr)
 	if err != nil {
 		return uint256.Int{}, nil // unknown -> 0
 	}
@@ -84,7 +87,7 @@ func (b *evmBackend) loadEVMActor(a evm.Address) (actors.EVMState, bool, error) 
 	if err != nil {
 		return nil, false, nil
 	}
-	actor, _, err := b.c.Accessor.GetActor(b.ctx, filAddr)
+	actor, _, err := b.acc.GetActor(b.ctx, filAddr)
 	if err != nil {
 		return nil, false, nil
 	}
@@ -156,14 +159,36 @@ func (c *ChainAPI) localEthCall(ctx context.Context, call ethCallObject) (string
 		}
 	}
 
+	// Anchor the read at the LIVE head state root when a header store is
+	// present (long-running daemon / embedded curio-core), so eth_call sees
+	// current contract state rather than the boot anchor. Fall back to the
+	// boot TrustedRoot when no header store is wired (probe / one-shot).
+	acc := c.Accessor
+	blockNo := uint64(0)
+	if c.Trusted != nil {
+		blockNo = uint64(c.Trusted.Epoch)
+	}
+	if c.HeaderStore != nil {
+		if head := c.HeaderStore.Head(); head != nil {
+			liveRoot := head.ParentState()
+			if liveRoot.Defined() {
+				liveTR := &trustedroot.TrustedRoot{
+					Epoch:     head.Height(),
+					StateRoot: liveRoot,
+				}
+				acc = accessor.New(liveTR, c.BlockGetter)
+				blockNo = uint64(head.Height())
+			}
+		}
+	}
+
 	be := &evmBackend{
 		ctx:     ctx,
 		c:       c,
+		acc:     acc,
 		reg:     actors.DefaultRegistry(),
 		chainID: chainIDForNetwork(c.NetworkName),
-	}
-	if c.Trusted != nil {
-		be.blockNo = uint64(c.Trusted.Epoch)
+		blockNo: blockNo,
 	}
 
 	res, err := evm.Call(be, from, evm.BytesToAddress(toRaw), input)
