@@ -51,6 +51,14 @@ jobs:
       - name: go test (race detector)
         env:
           CGO_ENABLED: '1' # race detector needs cgo
+          # CI must be hermetic: TestAccessor_MainnetActors (and the
+          # other integration tests) reach live Glif/mainnet, which is
+          # flaky and occasionally blocked from GitHub runners
+          # (glif: RPCConnectionError). LANTERN_OFFLINE=1 skips the
+          # network-dependent integration tests; the offline fixture
+          # tests (accessor/offline_test.go) still exercise the same
+          # decode/verify paths against recorded blocks.
+          LANTERN_OFFLINE: '1'
         run: go test -race -timeout 5m ./...
 
       - name: gofmt
