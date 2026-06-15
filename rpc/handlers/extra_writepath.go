@@ -23,12 +23,45 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-state-types/builtin"
 
+	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/chain/types"
 	"github.com/Reiers/lantern/state/accessor"
 )
+
+// liveActorNonce reads addr's actor nonce anchored at the LIVE chain head
+// rather than the boot TrustedRoot. Nonce is collision-sensitive: a stale
+// read (boot anchor can be thousands of epochs behind on a long-running
+// daemon) would hand a writing SP a reused nonce and the tx would be
+// rejected. We therefore only serve locally when a header store is wired
+// AND has a defined live head; otherwise we report served=false so the
+// caller falls back to the bridge. Returns (nonce, served, errFatal).
+func (c *ChainAPI) liveActorNonce(ctx context.Context, a address.Address) (uint64, bool, error) {
+	if c.Accessor == nil || c.BlockGetter == nil || c.HeaderStore == nil {
+		return 0, false, nil
+	}
+	head := c.HeaderStore.Head()
+	if head == nil {
+		return 0, false, nil
+	}
+	liveRoot := head.ParentState()
+	if !liveRoot.Defined() {
+		return 0, false, nil
+	}
+	liveTR := &trustedroot.TrustedRoot{Epoch: head.Height(), StateRoot: liveRoot}
+	acc := accessor.New(liveTR, c.BlockGetter)
+	act, _, err := acc.GetActor(ctx, a)
+	if err != nil {
+		if isAddressNotFound(err) {
+			return 0, true, nil // not-yet-deployed account -> nonce 0
+		}
+		return 0, false, nil // unexpected -> degrade to bridge
+	}
+	return act.Nonce, true, nil
+}
 
 // isAddressNotFound reports whether err is the accessor's
 // "address not in Init actor" sentinel (a not-yet-deployed account,
@@ -111,27 +144,23 @@ func (c *ChainAPI) localEthGetTransactionCount(ctx context.Context, addr string,
 		return "", false, nil
 	}
 
-	var nonce uint64
+	// On-chain nonce anchored at the LIVE head (not the boot root).
+	onChain, served, err := c.liveActorNonce(ctx, filAddr)
+	if !served {
+		return "", false, err // degrade to bridge
+	}
+	nonce := onChain
 	if blockParamWantsPending(blockParam) {
-		// Pending: on-chain nonce + locally-queued messages. MpoolGetNonce
-		// already encapsulates that adjust loop (chain_api.go).
-		n, err := c.MpoolGetNonce(ctx, filAddr)
-		if err != nil {
-			return "", false, nil // soft: degrade to bridge
-		}
-		nonce = n
-	} else {
-		// Latest/specific: the actor's on-chain nonce. A not-yet-deployed
-		// account has nonce 0, which is the correct eth answer.
-		act, err := c.StateGetActor(ctx, filAddr, types.TipSetKey{})
-		if err != nil {
-			if isAddressNotFound(err) {
-				nonce = 0
-			} else {
-				return "", false, nil // degrade to bridge on unexpected error
+		// Pending: add this sender's locally-queued (unsubmitted) messages
+		// on top of the live on-chain nonce.
+		if pl, ok := c.Mpool.(MpoolPendingLister); ok && pl != nil {
+			next := onChain
+			for _, sm := range pl.Pending() {
+				if sm.Message.From == filAddr && sm.Message.Nonce >= next {
+					next = sm.Message.Nonce + 1
+				}
 			}
-		} else {
-			nonce = act.Nonce
+			nonce = next
 		}
 	}
 	return "0x" + bigFromUint64(nonce).Text(16), true, nil
