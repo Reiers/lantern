@@ -146,6 +146,14 @@ func (p *Prefetcher) AddAddr(raw string) {
 	log.Debugw("prefetch: learned address from eth_call miss", "addr", "0x"+key, "dyn_total", len(p.dynAddrs))
 }
 
+// isDynamic reports whether key was learned at runtime via AddAddr.
+func (p *Prefetcher) isDynamic(key string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, ok := p.dynAddrs[key]
+	return ok
+}
+
 // addrSnapshot returns the merged static + dynamic address list to walk.
 func (p *Prefetcher) addrSnapshot() []string {
 	p.mu.Lock()
@@ -219,7 +227,13 @@ func (p *Prefetcher) walkOne(ctx context.Context, acc *accessor.Accessor, key st
 		p.mu.Unlock()
 	}()
 
-	wctx, cancel := context.WithTimeout(ctx, p.cfg.PerAddrTimeout)
+	// Dynamic (learned) contracts walk 4x more nodes with retries; give
+	// them proportionally more wall-clock so the deeper walk completes.
+	perAddr := p.cfg.PerAddrTimeout
+	if p.isDynamic(key) {
+		perAddr *= 3
+	}
+	wctx, cancel := context.WithTimeout(ctx, perAddr)
 	defer cancel()
 
 	filAddr, err := ethToFilecoin(ethAddr)
@@ -252,8 +266,17 @@ func (p *Prefetcher) walkOne(ctx context.Context, acc *accessor.Accessor, key st
 		p.walks.Add(1)
 		return
 	}
+	// Learned (dynamic) contracts are the deep ones the static seed
+	// list missed (e.g. FilecoinPay); give them a higher node budget so
+	// their full storage trie lands. Retries close transient-miss holes
+	// that would otherwise leave a permanent gap a later SLOAD trips on.
+	maxNodes := p.cfg.MaxBlocksPerAddr
+	if p.isDynamic(key) && maxNodes > 0 {
+		maxNodes *= 4
+	}
 	stats, err := kamt.WalkSubtree(wctx, storageRoot, p.bg, kamt.WalkOptions{
-		MaxNodes: p.cfg.MaxBlocksPerAddr,
+		MaxNodes:     maxNodes,
+		FetchRetries: 2,
 	})
 	if err != nil {
 		log.Debugw("prefetch: walk failed", "addr", "0x"+key, "err", err)

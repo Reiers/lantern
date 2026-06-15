@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/ipfs/go-cid"
 
@@ -37,6 +38,22 @@ type WalkOptions struct {
 	// MaxNodes caps the total number of nodes visited. Zero or negative
 	// means "no cap" — caller is responsible for bounding work via ctx.
 	MaxNodes int
+
+	// FetchRetries is the number of additional attempts made for a node
+	// whose first fetch fails, before the walker gives up on it (and the
+	// subtree below it). A transient Bitswap/gateway miss during a walk
+	// otherwise leaves a permanent hole in cache coverage: the failed
+	// node's children are never queued, so a later eth_call SLOAD into
+	// that subtree misses and falls back to the bridge. Retrying closes
+	// that gap for contracts with large/deep storage tries (e.g.
+	// FilecoinPay) where the read path is fine but the bulk walk races
+	// the network. Zero means no retry (legacy best-effort behaviour).
+	FetchRetries int
+
+	// RetryBackoff is the base delay between fetch retries (linear:
+	// attempt n waits n*RetryBackoff). Zero defaults to 150ms when
+	// FetchRetries > 0.
+	RetryBackoff time.Duration
 }
 
 // WalkSubtree walks the KAMT rooted at `root` breadth-first through bg,
@@ -82,7 +99,7 @@ func WalkSubtree(ctx context.Context, root cid.Cid, bg hamt.BlockGetter, opts Wa
 		}
 		visited[key] = struct{}{}
 
-		raw, err := bg.Get(ctx, cur)
+		raw, err := getWithRetry(ctx, bg, cur, opts)
 		if err != nil {
 			stats.Errors++
 			continue
@@ -115,10 +132,41 @@ func WalkSubtree(ctx context.Context, root cid.Cid, bg hamt.BlockGetter, opts Wa
 	return stats, nil
 }
 
+// getWithRetry fetches a single node, retrying transient failures up to
+// opts.FetchRetries times with linear backoff. The combined fetcher
+// already races cache+Bitswap+gateway per attempt, so a retry mostly
+// buys time for a cold block to land. Honours ctx cancellation between
+// attempts.
+func getWithRetry(ctx context.Context, bg hamt.BlockGetter, c cid.Cid, opts WalkOptions) ([]byte, error) {
+	backoff := opts.RetryBackoff
+	if backoff <= 0 {
+		backoff = 150 * time.Millisecond
+	}
+	attempts := opts.FetchRetries + 1
+	if attempts < 1 {
+		attempts = 1
+	}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(i) * backoff):
+			}
+		}
+		raw, err := bg.Get(ctx, c)
+		if err == nil {
+			return raw, nil
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
 // debugFormatStats is here so callers (and tests) can print a one-line
 // summary without a custom Stringer.
 func (s WalkStats) String() string {
 	return fmt.Sprintf("nodes=%d bytes=%d errors=%d capped=%v",
 		s.NodesFetched, s.BytesFetched, s.Errors, s.Capped)
 }
-
