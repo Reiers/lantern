@@ -426,6 +426,10 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 		bsClient, bserr := bitswap.New(ctx, bitswap.Config{
 			Host:           host.H,
 			ProviderFinder: host.ContentRouter(),
+			// Filecoin serves bitswap under "/chain/ipfs/bitswap/...";
+			// without this prefix the client speaks IPFS-default protocol
+			// IDs the Filecoin swarm doesn't support and finds no blocks.
+			ProtocolPrefix: network.BitswapProtocolPrefix(),
 		})
 		if bserr != nil {
 			log.Warnw("bitswap unavailable; block fetches stay on HTTP sources", "err", bserr)

@@ -101,6 +101,17 @@ func (n Network) GossipTopicBlocks() string {
 	}
 }
 
+// BitswapProtocolPrefix returns the libp2p protocol-ID prefix Filecoin
+// nodes serve bitswap under. Lotus and Forest both namespace bitswap as
+// "/chain/ipfs/bitswap/...", NOT the boxo/IPFS default "/ipfs/bitswap/...".
+// This is the bitswap analogue of the "/fil/kad/<net>" DHT prefix: a
+// client using the IPFS default connects but can never exchange blocks
+// with the Filecoin swarm. The prefix is the same across networks
+// (mainnet + calibration). lantern#50.
+func (n Network) BitswapProtocolPrefix() string {
+	return "/chain"
+}
+
 // F3Manifest returns the embedded F3 network-manifest JSON for the
 // selected network. The manifest carries the F3 NetworkName,
 // BootstrapEpoch, InitialPowerTable, and gpbft parameters that the F3

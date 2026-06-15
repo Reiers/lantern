@@ -36,6 +36,7 @@ import (
 	exchange "github.com/ipfs/boxo/exchange"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/core/routing"
 )
 
@@ -68,6 +69,13 @@ type Config struct {
 	// FullDeadline is the total deadline applied when no per-call
 	// timeout is set. Default 5s.
 	FullDeadline time.Duration
+	// ProtocolPrefix namespaces the bitswap libp2p protocol IDs. Filecoin
+	// nodes (Lotus/Forest) serve bitswap under "/chain" (i.e.
+	// /chain/ipfs/bitswap/1.2.0), NOT the boxo default "/ipfs/bitswap/...".
+	// Set this to build.BitswapProtocolPrefix() ("/chain") to exchange
+	// blocks with the Filecoin swarm. Empty => boxo default (IPFS), which
+	// will NOT find blocks on the Filecoin network. lantern#50.
+	ProtocolPrefix string
 }
 
 // Client is Lantern's Bitswap client. It satisfies state/hamt.BlockGetter
@@ -114,7 +122,11 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	mds := dssync.MutexWrap(ds.NewMapDatastore())
 	bs0 := bstore.NewBlockstore(mds)
 
-	network := bsnet.NewFromIpfsHost(cfg.Host)
+	var netOpts []bsnet.NetOpt
+	if cfg.ProtocolPrefix != "" {
+		netOpts = append(netOpts, bsnet.Prefix(protocol.ID(cfg.ProtocolPrefix)))
+	}
+	network := bsnet.NewFromIpfsHost(cfg.Host, netOpts...)
 	bs := boxobs.New(ctx, network, cfg.ProviderFinder, bs0)
 
 	c := &Client{
