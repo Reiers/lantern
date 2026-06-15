@@ -131,4 +131,3 @@ func (r *retryingBlockGetter) stats() fetchStats {
 		Fails:    r.fails.Load(),
 	}
 }
-

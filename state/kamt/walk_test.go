@@ -188,4 +188,3 @@ func TestWalkSubtree_RootMissPropagates(t *testing.T) {
 
 // silence unused-import warnings if cbg helpers shift around.
 var _ = fmt.Sprintf
-

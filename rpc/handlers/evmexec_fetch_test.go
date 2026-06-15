@@ -152,4 +152,3 @@ func (s *slowFailGetter) Get(ctx context.Context, _ cid.Cid) ([]byte, error) {
 		return nil, errors.New("slow fail")
 	}
 }
-

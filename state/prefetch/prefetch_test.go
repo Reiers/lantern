@@ -31,7 +31,7 @@ func (stubBG) Get(_ context.Context, _ cid.Cid) ([]byte, error) {
 }
 
 func TestPrefetcher_DefaultsApplied(t *testing.T) {
-	p := New(Config{Addrs: []string{"0x" + "ab"+"00"+"cd"+"00"+"ef"+"00"+"11"+"00"+"22"+"00"+"33"+"00"+"44"+"00"+"55"+"00"+"66"+"00"+"77"+"00"}}, stubBG{})
+	p := New(Config{Addrs: []string{"0x" + "ab" + "00" + "cd" + "00" + "ef" + "00" + "11" + "00" + "22" + "00" + "33" + "00" + "44" + "00" + "55" + "00" + "66" + "00" + "77" + "00"}}, stubBG{})
 	s := p.Stats()
 	if s.MaxBlocksPerAddr != 256 {
 		t.Fatalf("expected default MaxBlocksPerAddr=256, got %d", s.MaxBlocksPerAddr)
@@ -147,4 +147,3 @@ func newTestTipSet(t *testing.T, height int64) *ltypes.TipSet {
 	}
 	return ts
 }
-
