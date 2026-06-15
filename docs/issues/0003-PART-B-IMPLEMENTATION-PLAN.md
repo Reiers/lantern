@@ -100,3 +100,30 @@ until Stage 3 matches Glif on the corpus.
 - eth_sendRawTransaction (stays on bridge; it's a write).
 - Full precompile coverage (add as real calls demand).
 - State *writes* of any kind.
+
+## Status 2026-06-15 — Stages 1-5 landed, local eth_call live on cc-smoke
+
+All five stages implemented and released as Lantern **v1.6.0 → v1.6.4**:
+
+- **Stage 1** (`state/actors/evm.go`): EVM actor loader. ✅ Glif parity.
+- **Stage 2** (`state/kamt/`): pure-Go KAMT reader. ✅ Glif parity (registry + deep-tree contract).
+- **Stage 3** (`vm/evm/`): pure-Go read-only EVM interpreter. ✅ Glif parity (3 registry view fns).
+- **Stage 4** (`rpc/handlers/evmexec.go`): `ChainAPI.EthCall` local-first + VMBridge fallback,
+  live-head anchoring, revert→code-3. ✅ integration parity with `Bridge=nil`.
+- **Stage 5**: curio-core pinned to v1.6.4, deployed to cc-smoke. PDPVerifier contract
+  reads now **served locally** (pure-Go EVM, no Glif); proof loop intact; daemon stable.
+
+Two KAMT correctness bugs were found and fixed *because of* the live cutover (they only
+showed on deep contract trees, not the shallow registry):
+- extension matching (ref-fvm `match_extension`: partial match ⇒ absent), v1.6.3.
+- final hash-bits window clamp (`min(bit_width, remaining)`; 256-bit key leaves a 1-bit
+  bottom window), v1.6.4.
+
+### Remaining before a true `--vm-bridge-rpc-disable`
+
+The only fallbacks left in the live run are `fetch kamt node <cid>: block not found` —
+the embedded Bitswap blockstore hasn't fetched every storage-trie node at the live head
+yet (lazy fetch). This is a **block-availability** concern (same class as the head-store
+work in #33/#62), *not* an eth_call engine limitation. The bridge safely covers these
+today. Full bridge-disable needs embedded state-block prefetch/availability; tracked as
+follow-up. Opcode coverage is expanded as new contract calls demand it.
