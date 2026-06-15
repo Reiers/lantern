@@ -536,6 +536,26 @@ var errBridgeUnconfigured = xerrors.New("FEVM method requires --vm-bridge-rpc po
 // trust-anchored chain head (we don't speak the FEVM ourselves, but
 // we know which block to ask about).
 func (c *ChainAPI) EthCall(ctx context.Context, callObj any, blockParam any) (string, error) {
+	// Local FEVM execution first (lantern#43 Part B): run the call against
+	// our own verified state tree with the pure-Go EVM. A clean local
+	// result (including a definitive revert) is returned directly; a local
+	// miss (unconfigured, unsupported opcode, malformed input) falls
+	// through to the VMBridge so we degrade to the upstream rather than
+	// fail. Disable with LocalFEVMDisabled to force bridge-only.
+	if !c.LocalFEVMDisabled {
+		var call ethCallObject
+		if b, err := json.Marshal(callObj); err == nil {
+			_ = json.Unmarshal(b, &call)
+		}
+		if res, served, err := c.localEthCall(ctx, call); served {
+			// served==true is a definitive answer (success or revert).
+			if err != nil {
+				return "", err // revertError -> RPC maps to code 3
+			}
+			return res, nil
+		}
+	}
+
 	if c.Bridge == nil {
 		return "", errBridgeUnconfigured
 	}

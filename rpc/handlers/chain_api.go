@@ -63,6 +63,11 @@ type ChainAPI struct {
 	// available; otherwise they return ErrNotImpl.
 	HeaderStore *hstore.Store
 
+	// LocalFEVMDisabled forces eth_call to skip local FEVM execution and
+	// forward to the VMBridge unconditionally (lantern#43 Part B). Default
+	// false: local-exec-first with bridge fallback.
+	LocalFEVMDisabled bool
+
 	// BeaconParams is the drand-round mapping for the active network.
 	// Defaults to mainnet quicknet if zero-value.
 	BeaconParams lbeacon.QuicknetParams
