@@ -10,6 +10,7 @@ require (
 	github.com/filecoin-project/go-address v1.2.0
 	github.com/filecoin-project/go-amt-ipld/v4 v4.4.0
 	github.com/filecoin-project/go-bitfield v0.2.4
+	github.com/filecoin-project/go-cbor-util v0.0.2
 	github.com/filecoin-project/go-crypto v0.1.0
 	github.com/filecoin-project/go-f3 v0.8.13
 	github.com/filecoin-project/go-hamt-ipld/v3 v3.4.1
@@ -18,6 +19,7 @@ require (
 	github.com/filecoin-project/go-state-types v0.18.0
 	github.com/gbrlsnchs/jwt/v3 v3.0.1
 	github.com/google/uuid v1.6.0
+	github.com/holiman/uint256 v1.3.2
 	github.com/invopop/jsonschema v0.14.0
 	github.com/ipfs/boxo v0.39.0
 	github.com/ipfs/go-block-format v0.2.3
@@ -56,7 +58,6 @@ require (
 	github.com/drand/kyber-bls12381 v0.3.4 // indirect
 	github.com/dunglas/httpsfv v1.1.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/filecoin-project/go-cbor-util v0.0.2 // indirect
 	github.com/filecoin-project/go-clock v0.1.0 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
 	github.com/gammazero/chanqueue v1.1.2 // indirect
