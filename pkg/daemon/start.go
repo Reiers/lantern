@@ -97,7 +97,14 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 	// cmd/lantern wiring (without bitswap, since libp2p isn't mounted
 	// here yet — the gateway+glif pair covers cold state-tree reads).
 	cache := hamt.NewMemBlockStore()
-	glifURL := ""
+	// glifURL is the RPC fallback for the polling Sync head source AND the
+	// gossipsub ingestor's head+N backfill source. Gossipsub is the PRIMARY
+	// (Glif-free) head source when libp2p is enabled; this URL is the
+	// fallback that keeps head advancing when the gossip mesh is cold or
+	// stalls. Previously empty on mainnet, which left the mainnet daemon
+	// with no working catch-up source: when gossip stalled, head froze.
+	// Callers can override via Config.Gateway / a future Config.FallbackRPC.
+	glifURL := "https://api.node.glif.io/rpc/v1"
 	if network == build.Calibration {
 		glifURL = "https://api.calibration.node.glif.io/rpc/v1"
 	}
@@ -514,10 +521,10 @@ func fetchTrustedHead(ctx context.Context, gw string, network build.Network) (*t
 
 	// Fallback to Glif when the gateway is unreachable or returned an
 	// unparseable head. Network-aware: calibration falls back to the
-	// calibration Glif endpoint; mainnet uses the default (empty URL
-	// = api.node.glif.io). Without this, a calibration daemon would
-	// silently pull mainnet chain data from mainnet Glif.
-	glifURL := ""
+	// calibration Glif endpoint; mainnet uses the mainnet endpoint.
+	// Without this, a calibration daemon would silently pull mainnet
+	// chain data from mainnet Glif.
+	glifURL := "https://api.node.glif.io/rpc/v1"
 	if network == build.Calibration {
 		glifURL = "https://api.calibration.node.glif.io/rpc/v1"
 	}
