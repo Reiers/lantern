@@ -87,7 +87,12 @@ func cmdInit(args []string) error {
 	if err := migrateLegacyDataDir(filNet); err != nil {
 		return fmt.Errorf("migrate legacy data dir: %w", err)
 	}
+	// Stage 2 (#51): use the secrets/ layout for fresh installs too.
+	if err := migrateSecretsLayout(filNet); err != nil {
+		return fmt.Errorf("migrate secrets layout: %w", err)
+	}
 	dir := networkDataDir(filNet)
+	sdir := secretsDir(filNet)
 	printBanner(dir)
 	fmt.Printf("▸ Filecoin network: %s  (F3 NetworkName: %s)\n", filNet, *network)
 	fmt.Printf("  data dir:        %s\n", dir)
@@ -95,7 +100,7 @@ func cmdInit(args []string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "keystore"), 0o700); err != nil {
+	if err := os.MkdirAll(keystorePath(filNet), 0o700); err != nil {
 		return err
 	}
 
@@ -137,12 +142,12 @@ func cmdInit(args []string) error {
 	fmt.Println("▸ Wallet + JWT setup")
 	tr := &trustedroot.TrustedRoot{Epoch: 0}
 	dummy := handlers.New(tr, nil, nil, nil, "mainnet")
-	srv, err := server.New(server.Config{ListenAddress: "127.0.0.1:0", DataDir: dir}, dummy)
+	srv, err := server.New(server.Config{ListenAddress: "127.0.0.1:0", DataDir: sdir}, dummy)
 	if err != nil {
 		return fmt.Errorf("init rpc server: %w", err)
 	}
 	_ = srv
-	fmt.Println("    ✓ JWT secret + auth tokens minted under", dir)
+	fmt.Println("    ✓ JWT secret + auth tokens minted under", sdir)
 	fmt.Println("      (admin: ./token, sign: ./token-sign, write: ./token-write, read: ./token-read)")
 
 	if *noWallet {

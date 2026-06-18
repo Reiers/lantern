@@ -19,6 +19,7 @@ import (
 
 	"github.com/filecoin-project/go-jsonrpc/auth"
 
+	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/rpc/server"
 )
 
@@ -55,11 +56,12 @@ Environment:
 func cmdAuthRotate(args []string) error {
 	fs := flag.NewFlagSet("auth rotate", flag.ContinueOnError)
 	yes := fs.Bool("yes", false, "Skip the destructive-action confirmation prompt.")
+	network := fs.String("network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	dir, err := resolveDataDir()
+	dir, err := authSecretsDir(*network)
 	if err != nil {
 		return err
 	}
@@ -93,8 +95,13 @@ func cmdAuthRotate(args []string) error {
 }
 
 // cmdAuthList: dump every on-disk token + its claims.
-func cmdAuthList(_ []string) error {
-	dir, err := resolveDataDir()
+func cmdAuthList(args []string) error {
+	fs := flag.NewFlagSet("auth list", flag.ContinueOnError)
+	network := fs.String("network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	dir, err := authSecretsDir(*network)
 	if err != nil {
 		return err
 	}
@@ -187,4 +194,23 @@ func resolveDataDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".lantern"), nil
+}
+
+// authSecretsDir resolves the Stage-2 secrets directory for a network,
+// running the legacy + secrets migrations first so `auth` operates on the
+// same jwt-secret + tokens the daemon uses. This fixes a pre-Stage-2 bug
+// where `auth rotate` wrote to the top-level ~/.lantern while the daemon
+// read from ~/.lantern/<net>/.
+func authSecretsDir(networkStr string) (string, error) {
+	n := build.Network(networkStr)
+	if !n.Valid() {
+		return "", fmt.Errorf("invalid --network %q: want one of mainnet, calibration", networkStr)
+	}
+	if err := migrateLegacyDataDir(n); err != nil {
+		return "", fmt.Errorf("migrate legacy data dir: %w", err)
+	}
+	if err := migrateSecretsLayout(n); err != nil {
+		return "", fmt.Errorf("migrate secrets layout: %w", err)
+	}
+	return secretsDir(n), nil
 }

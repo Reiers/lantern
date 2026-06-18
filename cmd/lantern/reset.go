@@ -39,7 +39,13 @@ var chainStateNames = []string{
 // secretsNames are never-touch entries. Used as a belt-and-suspenders
 // assertion: if a future edit ever adds one of these to the removal
 // set, the command aborts instead of deleting a key.
+//
+// Includes both the Stage-2 secrets/ directory (the canonical location)
+// and the pre-Stage-2 loose names, so reset is safe on installs that
+// haven't migrated yet.
 var secretsNames = map[string]bool{
+	"secrets":     true, // Stage 2 (#51): the whole secrets dir
+	"backups":     true, // Stage 2 (#51): rolling secrets backups
 	"keystore":    true,
 	"jwt-secret":  true,
 	"token":       true,
@@ -107,7 +113,7 @@ func cmdReset(args []string) error {
 		fmt.Printf("  - %s\n", t.path)
 	}
 	fmt.Println("\nWill PRESERVE (your secrets):")
-	for _, n := range []string{"keystore", "jwt-secret", "token", "token-read", "token-sign", "token-write"} {
+	for _, n := range []string{"secrets", "backups", "keystore", "jwt-secret", "token", "token-read", "token-sign", "token-write"} {
 		p := filepath.Join(dir, n)
 		if _, err := os.Stat(p); err == nil {
 			fmt.Printf("  ✓ %s\n", p)

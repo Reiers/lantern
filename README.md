@@ -239,7 +239,8 @@ Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on m
 
 | Release | What landed |
 |---|---|
-| v1.7.18 (current) | **Stale-restart auto-heal + key-safe recovery** ([#51](https://github.com/Reiers/lantern/issues/51)). A node stopped for more than a day no longer freezes on its old head: the header-store sync detects an un-backfillable lag and re-anchors near the live head automatically. New `lantern reset --chain-state` is the supported recovery path and **never touches keys**; docs + dashboard stop pointing anyone at `rm -rf ~/.lantern`. |
+| v1.7.19 (current) | **Secrets isolation + auto-backup** ([#51](https://github.com/Reiers/lantern/issues/51) Stage 2). Keystore, JWT secret, and API tokens move into a dedicated `secrets/` directory, physically separated from rebuildable chain state (auto-migrated from older installs). The daemon writes a rolling backup of `secrets/` on every start (last 7 kept). Recovery operations now *structurally* cannot delete keys. |
+| v1.7.18 | **Stale-restart auto-heal + key-safe recovery** ([#51](https://github.com/Reiers/lantern/issues/51)). A node stopped for more than a day no longer freezes on its old head: the header-store sync detects an un-backfillable lag and re-anchors near the live head automatically. New `lantern reset --chain-state` is the supported recovery path and **never touches keys**; docs + dashboard stop pointing anyone at `rm -rf ~/.lantern`. |
 | v1.7.17 | Mainnet fallback gateway URL for head catch-up ([#50](https://github.com/Reiers/lantern/issues/50)). |
 | v1.7.13 – v1.7.16 | **Bitswap as the block source — Glif eliminated from the block path** ([#50](https://github.com/Reiers/lantern/issues/50)). libp2p Bitswap mounted as a high-priority fetcher source using the Filecoin **`/chain/ipfs/bitswap`** protocol prefix (the bitswap analogue of the `/fil/kad/<net>` DHT prefix). `eth_getTransactionByHash` served locally. Live bridge-off: balance + nonce + send all local, **zero Glif block fetches**. |
 | v1.7.4 – v1.7.12 | **Local FEVM write path** — local `eth_getTransactionCount` (live-head-anchored nonce), `eth_estimateGas`, a pure-Go EIP-1559 tx codec (`chain/ethtx`), `eth_sendRawTransaction` via gossipsub mempool, and `eth_getTransactionReceipt` via `StateSearchMsg`, **byte-identical to Glif bridge-off** ([#45](https://github.com/Reiers/lantern/issues/45)). Keystone fix: block-message + receipt AMTs are go-amt-ipld **v2**, not v4 ([#49](https://github.com/Reiers/lantern/issues/49)). |
@@ -361,6 +362,31 @@ lantern daemon               # re-syncs from live head
 keystore, signing keys, JWT secret, or API tokens. **Do not** delete
 files under `~/.lantern/` by hand — your wallet keys live there, and a
 stray `rm -rf` will destroy them. Always use `lantern reset` instead.
+
+### Where your keys live
+
+As of v1.7.19, all secrets are kept in a dedicated directory, physically
+separated from rebuildable chain state:
+
+```
+~/.lantern/<network>/
+  secrets/                     ← your keys live here
+    keystore/                  signing keys (irreplaceable)
+    jwt-secret                 RPC auth secret
+    token, token-*             pre-minted scope tokens
+  headerstore/                 chain state (rebuildable)
+  bootstrap-anchor.json        chain state (rebuildable)
+  backups/                     rolling tar backups of secrets/ (last 7)
+```
+
+Older installs are migrated automatically on first run of v1.7.19+ (the
+loose `keystore/`, `jwt-secret`, and `token*` files move into
+`secrets/`). The daemon writes a fresh backup of `secrets/` to
+`backups/` on every start, so even an accidental data-dir wipe has a
+same-machine recovery path until those backups are also removed.
+
+To back up your node, copy `~/.lantern/<network>/secrets/` somewhere
+safe. That single directory is everything irreplaceable.
 
 ---
 

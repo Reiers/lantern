@@ -365,7 +365,18 @@ func resolvePassphrase(dir string) (string, error) {
 // For CLI subcommands that don't yet thread network through, use
 // openWalletDefault() which defaults to mainnet for backward compat.
 func openWallet(network build.Network) (*wallet.Wallet, error) {
-	dir := filepath.Join(networkDataDir(network), "keystore")
+	// Stage 2 (#51): ensure secrets are in <net>/secrets/ before opening.
+	// migrateLegacyDataDir is a prerequisite (lifts pre-V1.3 top-level
+	// state into <net>/); callers that reach openWallet via the daemon
+	// have already run it, but CLI wallet subcommands may not, so run
+	// both here idempotently.
+	if err := migrateLegacyDataDir(network); err != nil {
+		return nil, fmt.Errorf("migrate legacy data dir: %w", err)
+	}
+	if err := migrateSecretsLayout(network); err != nil {
+		return nil, fmt.Errorf("migrate secrets layout: %w", err)
+	}
+	dir := keystorePath(network)
 	p, err := resolvePassphrase(dir)
 	if err != nil {
 		return nil, err
@@ -545,9 +556,23 @@ func cmdDaemon(args []string) error {
 	if err := migrateLegacyDataDir(network); err != nil {
 		return fmt.Errorf("migrate legacy data dir: %w", err)
 	}
+	// Stage 2 (#51): relocate loose secrets into <net>/secrets/ before
+	// anything reads them, so keystore + jwt + tokens are physically
+	// separated from rebuildable chain state.
+	if err := migrateSecretsLayout(network); err != nil {
+		return fmt.Errorf("migrate secrets layout: %w", err)
+	}
 	netDir := networkDataDir(network)
 	if err := os.MkdirAll(netDir, 0o700); err != nil {
 		return fmt.Errorf("create network data dir: %w", err)
+	}
+	// Stage 2 (#51): rolling backup of secrets/ on every start. Best-effort
+	// — a backup failure must never stop the daemon. Gives a same-machine
+	// recovery path even against a hand `rm -rf` of the data dir.
+	if bpath, berr := backupSecrets(network); berr != nil {
+		fmt.Fprintf(os.Stderr, "  warn: secrets backup: %v\n", berr)
+	} else if bpath != "" {
+		fmt.Printf("  secrets backup: %s\n", bpath)
 	}
 
 	// Persist the RPC listen address so `lantern info` reports the port
@@ -861,7 +886,8 @@ func cmdDaemon(args []string) error {
 
 	srv, err := server.New(server.Config{
 		ListenAddress: *listen,
-		DataDir:       netDir,
+		// Stage 2 (#51): jwt-secret + scope tokens live under secrets/.
+		DataDir: secretsDir(network),
 	}, chainAPI)
 	if err != nil {
 		return err
@@ -1189,12 +1215,16 @@ func cmdInfo(args []string) error {
 	if !network.Valid() {
 		return fmt.Errorf("invalid --network %q: want one of mainnet, calibration", *networkFlag)
 	}
+	// Stage 2 (#51): make sure secrets are relocated so we read the token
+	// from the right place. Idempotent + best-effort (info must not fail
+	// just because migration couldn't run).
+	_ = migrateLegacyDataDir(network)
+	_ = migrateSecretsLayout(network)
 	netDir := networkDataDir(network)
 
-	// Resolve the admin token from the per-network data dir (where init
-	// and the daemon mint it since V1.3). Fall back to the pre-V1.3
-	// top-level location so an un-migrated install still reports a token.
-	token, tokenErr := readAdminToken(netDir)
+	// Resolve the admin token. Stage 2 location (secrets/) first, then the
+	// V1.3 per-network dir, then the pre-V1.3 top-level location.
+	token, tokenErr := readAdminToken(network)
 
 	// --token-only: emit just the raw token (or fail) for scripting.
 	if *tokenOnly {
@@ -1249,16 +1279,21 @@ func cmdInfo(args []string) error {
 // readAdminToken reads the admin token from the per-network data dir,
 // falling back to the pre-V1.3 top-level location for un-migrated
 // installs. Returns the trimmed token or an error if neither exists.
-func readAdminToken(netDir string) (string, error) {
-	if b, err := os.ReadFile(filepath.Join(netDir, "token")); err == nil {
+func readAdminToken(network build.Network) (string, error) {
+	// Stage 2 layout: <net>/secrets/token.
+	if b, err := os.ReadFile(secretPath(network, "token")); err == nil {
 		return strings.TrimSpace(string(b)), nil
 	}
-	// Legacy fallback: pre-V1.3 single-network installs kept the token at
-	// the top-level data dir.
+	// V1.3 per-network location: <net>/token.
+	if b, err := os.ReadFile(filepath.Join(networkDataDir(network), "token")); err == nil {
+		return strings.TrimSpace(string(b)), nil
+	}
+	// Pre-V1.3 single-network installs kept the token at the top-level
+	// data dir.
 	if b, err := os.ReadFile(filepath.Join(dataDir(), "token")); err == nil {
 		return strings.TrimSpace(string(b)), nil
 	}
-	return "", fmt.Errorf("no token file in %s", netDir)
+	return "", fmt.Errorf("no token file under %s", secretsDir(network))
 }
 
 // rpcListenFile is where the daemon records the RPC address it bound, so

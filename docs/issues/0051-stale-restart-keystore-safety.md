@@ -99,6 +99,43 @@ Stage 1 only (1, 2, 3, 4). Stage 2 (5, 6, 7) gets its own issue once we
 agree on the secrets/ layout — that one is breaking and needs a migration
 test plan.
 
+## Stage 2 — SHIPPED v1.7.19 (2026-06-18)
+
+Layout settled on a per-network `secrets/` subdir (keys ARE per-chain, so
+it stays network-scoped, not top-level):
+
+```
+~/.lantern/<net>/
+  secrets/{keystore/,jwt-secret,token,token-read,token-sign,token-write}
+  headerstore/                 (chain state, unchanged)
+  bootstrap-anchor.json        (chain state, unchanged)
+  backups/secrets-<ts>.tar     (rolling, last 7)
+  SECRETS-MOVED.txt            (breadcrumb after migration)
+```
+
+Implemented (`cmd/lantern/secrets.go`):
+- `migrateSecretsLayout(net)` — idempotent, runs after `migrateLegacyDataDir`;
+  relocates loose secrets into `secrets/`, leaves chain state, drops breadcrumb.
+- `backupSecrets(net)` — tar of `secrets/` to `backups/`, `keepBackups=7`
+  prune, best-effort (never blocks daemon start). Called on every daemon boot.
+- `keystorePath(net)` / `secretPath(net,name)` / `secretsDir(net)` — single
+  source of truth for secret locations; `openWallet`, `init`, `info`, `auth`,
+  and the RPC server `DataDir` all route through them.
+- Fixed a pre-existing latent bug: `lantern auth rotate/list` used the
+  top-level `~/.lantern` while the daemon used `~/.lantern/<net>/` — they now
+  share the secrets dir (with a `--network` flag).
+- `reset --chain-state` updated to treat `secrets/` + `backups/` as protected.
+
+Tests: `cmd/lantern/secrets_test.go` (migrate move + idempotency + chain-state
+untouched + breadcrumb; backup tar content + keep-N prune; empty/absent
+no-op; keystorePath). Live-verified on the dev Mac daemon: 6 secrets
+relocated, backup written, daemon up + head advancing, `info` reads token
+from the new location.
+
+Not done (intentionally, low value / out of scope): item 7's separate
+`install.sh` pre-flight tar is now redundant — the daemon's on-start
+`backupSecrets` covers the upgrade case, and migration is automatic.
+
 ## Tester-announcement gate
 **Do not post the Curio-channel tester announcement (draft at
 `projects/lantern/ANNOUNCEMENT-DRAFT-2026-06-17.md`) until Stage 1 ships
