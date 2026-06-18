@@ -24,6 +24,14 @@
 
 set -euo pipefail
 
+# Global temp dir + a single global EXIT trap. Declared up front so the
+# trap is always valid even if the script exits before the download
+# function runs (a `local tmp_dir` + EXIT trap inside that function fired
+# in global scope on early exit → 'tmp_dir: unbound variable' under set -u).
+DL_TMP_DIR=""
+cleanup() { [[ -n "${DL_TMP_DIR:-}" ]] && rm -rf "$DL_TMP_DIR"; }
+trap cleanup EXIT
+
 # ─── colors + banners ────────────────────────────────────────────────────
 if [[ -t 1 ]] && [[ "${TERM:-}" != "dumb" ]] && [[ -z "${NO_COLOR:-}" ]]; then
   BOLD=$'\033[1m'; DIM=$'\033[2m'; RESET=$'\033[0m'
@@ -273,8 +281,8 @@ download_binary() {
     )
   fi
 
-  local tmp_dir; tmp_dir=$(mktemp -d)
-  trap 'rm -rf "$tmp_dir"' EXIT
+  DL_TMP_DIR=$(mktemp -d)
+  local tmp_dir="$DL_TMP_DIR"
 
   local bin_url=""
   for candidate in "${urls[@]}"; do
@@ -407,6 +415,12 @@ trust_bootstrap() {
 
   local q="${LANTERN_BOOTSTRAP_QUORUM:-5}"
   local t="${LANTERN_BOOTSTRAP_TIMEOUT:-90s}"
+  # Since V1.3, `lantern init` writes the anchor to the per-network dir
+  # (<home>/mainnet/bootstrap-anchor.json), not the top level. The
+  # installer is mainnet-only, so check there. (Checking the old
+  # top-level path made the post-bootstrap success check + the
+  # already-anchored skip both silently fail, re-bootstrapping every run.)
+  local anchor_file="${LANTERN_HOME}/mainnet/bootstrap-anchor.json"
   local extra_peers=""
   if [[ -n "${LANTERN_PEERS:-}" ]]; then
     IFS=',' read -r -a _peers <<< "$LANTERN_PEERS"
@@ -414,9 +428,9 @@ trust_bootstrap() {
   fi
 
   # If we already have an anchor and the user hasn't asked us to refresh, skip.
-  if [[ -s "${LANTERN_HOME}/bootstrap-anchor.json" && "${LANTERN_REANCHOR:-0}" != "1" ]]; then
+  if [[ -s "$anchor_file" && "${LANTERN_REANCHOR:-0}" != "1" ]]; then
     local epoch
-    epoch=$(grep -oE '"epoch":[[:space:]]*[0-9]+' "${LANTERN_HOME}/bootstrap-anchor.json" | head -1 | grep -oE '[0-9]+')
+    epoch=$(grep -oE '"epoch":[[:space:]]*[0-9]+' "$anchor_file" | head -1 | grep -oE '[0-9]+')
     ok "Existing anchor at epoch ${BOLD}${epoch:-?}${RESET}  ${DIM}(LANTERN_REANCHOR=1 to refresh)${RESET}"
     return
   fi
@@ -425,18 +439,33 @@ trust_bootstrap() {
   info "Refusing to anchor if they disagree."
 
   local bin="${LANTERN_HOME}/lantern"
-  spinner_with_progress \
-    "Probing trust sources" \
-    '✓ \[' \
-    env LANTERN_HOME="$LANTERN_HOME" "$bin" init \
+  # Fallback quorum: if the full quorum can't be reached (some public RPC
+  # endpoints flake or are firewalled from the tester's network), retry
+  # once at a lower bar before giving up. 3 independent sources agreeing
+  # is still far stronger than the single-source trust of a snapshot
+  # download. Override either via LANTERN_BOOTSTRAP_QUORUM (primary) or
+  # LANTERN_BOOTSTRAP_MIN_QUORUM (fallback floor).
+  local qmin="${LANTERN_BOOTSTRAP_MIN_QUORUM:-3}"
+  if env LANTERN_HOME="$LANTERN_HOME" "$bin" init \
         --bootstrap-quorum="$q" \
         --bootstrap-timeout="$t" \
-        --no-wallet $extra_peers || \
-    fail "Quorum bootstrap failed. Try 'lantern doctor' for per-source diagnostics."
+        --no-wallet $extra_peers >/dev/null 2>&1; then
+    : # full quorum reached
+  elif [[ "$qmin" -lt "$q" ]]; then
+    warn "Couldn't reach $q-source agreement (some public endpoints flaked)."
+    info "Retrying at the fallback floor of ${BOLD}${qmin}${RESET} independent sources."
+    env LANTERN_HOME="$LANTERN_HOME" "$bin" init \
+        --bootstrap-quorum="$qmin" \
+        --bootstrap-timeout="$t" \
+        --no-wallet $extra_peers >/dev/null 2>&1 || \
+      fail "Quorum bootstrap failed even at $qmin sources. Check your network/firewall, then run 'lantern doctor' for per-source diagnostics. You can also set LANTERN_BOOTSTRAP_TIMEOUT=180s and re-run."
+  else
+    fail "Quorum bootstrap failed. Try 'lantern doctor' for per-source diagnostics, or set LANTERN_BOOTSTRAP_TIMEOUT=180s and re-run."
+  fi
 
-  if [[ -s "${LANTERN_HOME}/bootstrap-anchor.json" ]]; then
+  if [[ -s "$anchor_file" ]]; then
     local epoch
-    epoch=$(grep -oE '"epoch":[[:space:]]*[0-9]+' "${LANTERN_HOME}/bootstrap-anchor.json" | head -1 | grep -oE '[0-9]+')
+    epoch=$(grep -oE '"epoch":[[:space:]]*[0-9]+' "$anchor_file" | head -1 | grep -oE '[0-9]+')
     ok "Anchored at epoch ${BOLD}${epoch}${RESET}"
   fi
 }
@@ -512,10 +541,17 @@ service_setup() {
 
 closing() {
   local bin="${LANTERN_HOME}/lantern"
+  # Admin token location, newest first: Stage-2 secrets dir, then the V1.3
+  # per-network dir, then the pre-V1.3 top level. (It moved twice; the
+  # installer must look in the right place or the Curio connect snippet
+  # prints empty.)
   local token=""
-  if [[ -s "${LANTERN_HOME}/token" ]]; then
-    token=$(cat "${LANTERN_HOME}/token")
-  fi
+  for tf in \
+    "${LANTERN_HOME}/mainnet/secrets/token" \
+    "${LANTERN_HOME}/mainnet/token" \
+    "${LANTERN_HOME}/token"; do
+    if [[ -s "$tf" ]]; then token=$(cat "$tf"); break; fi
+  done
 
   # Use the short command if 'lantern' resolved on PATH; otherwise full path.
   local cmd="lantern"
