@@ -14,6 +14,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,31 +73,25 @@ func TestResolvePassphrase_EnvSetNonEmpty(t *testing.T) {
 }
 
 func TestResolvePassphrase_EnvExplicitEmpty(t *testing.T) {
-	// Capture stderr to make sure we emit the warning.
+	// Capture the warning via the package-level writer override instead of
+	// swapping the global os.Stderr (which races with any concurrent
+	// logging, e.g. leaked libp2p goroutines, under -race).
 	t.Setenv("LANTERN_PASS", "")
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe: %v", err)
-	}
-	oldStderr := os.Stderr
-	os.Stderr = w
-	defer func() { os.Stderr = oldStderr }()
+	var buf bytes.Buffer
+	oldW := passphraseErrW
+	passphraseErrW = &buf
+	defer func() { passphraseErrW = oldW }()
 
 	dir := t.TempDir()
 	got, err2 := resolvePassphrase(dir)
-
-	_ = w.Close()
-	buf := make([]byte, 1024)
-	n, _ := r.Read(buf)
-	stderr := string(buf[:n])
-
 	if err2 != nil {
 		t.Fatalf("unexpected error: %v", err2)
 	}
 	if got != "" {
 		t.Errorf("got %q, want empty string", got)
 	}
+	stderr := buf.String()
 	if !strings.Contains(stderr, "warning") || !strings.Contains(stderr, "unencrypted") {
 		t.Errorf("expected warning about unencrypted keystore, got: %q", stderr)
 	}

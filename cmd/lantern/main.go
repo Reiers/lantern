@@ -306,6 +306,12 @@ func migrateLegacyDataDir(n build.Network) error {
 // Issue #2: previously fell back silently to the empty string. That left
 // keystores AES-GCM-encrypted with a known empty passphrase, effectively
 // unencrypted to anyone with file read access on the box.
+// passphraseErrW is where resolvePassphrase writes its prompts/warnings.
+// Defaults to os.Stderr; tests override it locally so they don't have to
+// swap the global os.Stderr (which races with any concurrent logging,
+// e.g. leaked libp2p goroutines under -race).
+var passphraseErrW io.Writer = os.Stderr
+
 func resolvePassphrase(dir string) (string, error) {
 	env, envSet := os.LookupEnv("LANTERN_PASS")
 	if envSet && env != "" {
@@ -313,7 +319,7 @@ func resolvePassphrase(dir string) (string, error) {
 	}
 	if envSet && env == "" {
 		// Operator explicitly opted out of encryption.
-		fmt.Fprintln(os.Stderr, "\033[33m  warning: LANTERN_PASS is set but empty - keystore will be unencrypted\033[0m")
+		fmt.Fprintln(passphraseErrW, "\033[33m  warning: LANTERN_PASS is set but empty - keystore will be unencrypted\033[0m")
 		return "", nil
 	}
 
@@ -327,7 +333,7 @@ func resolvePassphrase(dir string) (string, error) {
 
 	hasKeys := keystoreHasKeys(dir)
 	if hasKeys {
-		fmt.Fprint(os.Stderr, "Lantern keystore passphrase: ")
+		fmt.Fprint(passphraseErrW, "Lantern keystore passphrase: ")
 		p, err := readPassword()
 		if err != nil {
 			return "", fmt.Errorf("read passphrase: %w", err)
@@ -336,18 +342,18 @@ func resolvePassphrase(dir string) (string, error) {
 	}
 
 	// Fresh keystore. Prompt twice and require a match.
-	fmt.Fprintln(os.Stderr, "No existing Lantern keystore at", dir)
-	fmt.Fprintln(os.Stderr, "Set a passphrase to encrypt local keys. Press enter without a value to opt out (NOT recommended).")
-	fmt.Fprint(os.Stderr, "New passphrase: ")
+	fmt.Fprintln(passphraseErrW, "No existing Lantern keystore at", dir)
+	fmt.Fprintln(passphraseErrW, "Set a passphrase to encrypt local keys. Press enter without a value to opt out (NOT recommended).")
+	fmt.Fprint(passphraseErrW, "New passphrase: ")
 	p1, err := readPassword()
 	if err != nil {
 		return "", fmt.Errorf("read passphrase: %w", err)
 	}
 	if p1 == "" {
-		fmt.Fprintln(os.Stderr, "\033[33m  warning: keystore will be unencrypted\033[0m")
+		fmt.Fprintln(passphraseErrW, "\033[33m  warning: keystore will be unencrypted\033[0m")
 		return "", nil
 	}
-	fmt.Fprint(os.Stderr, "Confirm passphrase: ")
+	fmt.Fprint(passphraseErrW, "Confirm passphrase: ")
 	p2, err := readPassword()
 	if err != nil {
 		return "", fmt.Errorf("read passphrase: %w", err)

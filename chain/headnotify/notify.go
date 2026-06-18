@@ -56,8 +56,13 @@ type Distributor struct {
 }
 
 type subscriber struct {
-	id      uint64
-	ch      chan []api.HeadChange
+	id uint64
+	ch chan []api.HeadChange
+	// sendMu serializes deliver() sends against unsubscribe()'s close, so
+	// we can never send on a closed channel (a TOCTOU between the atomic
+	// closed-check and the send otherwise races close vs chansend; the
+	// race detector flagged it and it could panic in production).
+	sendMu  sync.Mutex
 	closed  atomic.Bool
 	dropped atomic.Uint64
 }
@@ -124,7 +129,11 @@ func (d *Distributor) Subscribe(ctx context.Context) <-chan []api.HeadChange {
 	// lib/chainsched/chain_sched.go:162) reject an empty batch with a
 	// 'first notification must be current' error and tear down the
 	// subscription.
-	sub.ch <- []api.HeadChange{{Type: "current", Val: current}}
+	sub.sendMu.Lock()
+	if !sub.closed.Load() {
+		sub.ch <- []api.HeadChange{{Type: "current", Val: current}}
+	}
+	sub.sendMu.Unlock()
 
 	// Detach on ctx cancellation.
 	go func() {
@@ -145,9 +154,15 @@ func (d *Distributor) unsubscribe(id uint64) {
 	}
 	delete(d.subs, id)
 	d.mu.Unlock()
-	if sub.closed.CompareAndSwap(false, true) {
+	// Take the per-subscriber send lock so we don't close the channel
+	// while deliver() is mid-send. deliver() re-checks closed under the
+	// same lock, so once we set closed=true here no further send happens.
+	sub.sendMu.Lock()
+	closedNow := sub.closed.CompareAndSwap(false, true)
+	if closedNow {
 		close(sub.ch)
 	}
+	sub.sendMu.Unlock()
 	if dropped := sub.dropped.Load(); dropped > 0 {
 		log.Warnw("subscriber removed with drops", "id", id, "dropped", dropped)
 	}
@@ -209,6 +224,11 @@ func (d *Distributor) PublishCustom(events []api.HeadChange) {
 // Lotus' slow-subscriber semantics (drop the slow consumer's history
 // rather than back-pressure the chain syncer).
 func (d *Distributor) deliver(sub *subscriber, events []api.HeadChange) {
+	// Hold the per-subscriber send lock for the whole send so unsubscribe()
+	// can't close the channel underneath us. Re-check closed under the lock
+	// (it may have been closed before we acquired it).
+	sub.sendMu.Lock()
+	defer sub.sendMu.Unlock()
 	if sub.closed.Load() {
 		return
 	}
