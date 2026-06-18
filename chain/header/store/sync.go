@@ -67,6 +67,29 @@ type SyncOptions struct {
 	// behind) is a single chunk, bounded enough that a deep backlog
 	// against rate-limited RPC is paced over several polls.
 	CatchUpChunk abi.ChainEpoch
+	// StaleResetThreshold is the lag (live head − store head, in epochs)
+	// beyond which a warm store is considered hopelessly stale and is
+	// re-bootstrapped near the live head instead of attempting a
+	// contiguous backfill.
+	//
+	// This is the #51 "down for a week" fix. The contiguous catch-up
+	// (issue #33) walks from currentHead+1 and relies on backfillParents
+	// connecting each new tipset to the store's existing chain within
+	// MaxBacktrack epochs. After a multi-day outage the gap is tens of
+	// thousands of epochs — far beyond MaxBacktrack — so backfill never
+	// connects, SetHead never fires, and the head pointer freezes at the
+	// stale epoch (exactly the symptom reported 2026-06-18). Past this
+	// threshold we stop trying to bridge the gap and re-anchor near live
+	// head, the same way a cold start does. No keys, wallets, or other
+	// secrets are touched — only rebuildable chain state.
+	//
+	// 0 disables the behaviour (pure contiguous catch-up, legacy).
+	// Default 2880 (~1 day at 30s epochs): a node behind by more than a
+	// day re-anchors instead of grinding.
+	StaleResetThreshold abi.ChainEpoch
+	// OnStaleReset, when set, is fired once when a stale warm store is
+	// re-anchored, with (storeHead, liveHead). Used for logging/metrics.
+	OnStaleReset func(storeHead, liveHead abi.ChainEpoch)
 	// OnReorg is fired (after Store.SetHead) when the new head's parent
 	// chain replaced canonical pointers at one or more epochs. The
 	// argument is the divergence epoch (the deepest epoch whose
@@ -91,6 +114,7 @@ type SyncStats struct {
 	Polls         uint64
 	HeadAdvances  uint64
 	Reorgs        uint64
+	StaleResets   uint64
 	HeadersAdded  uint64
 	LastError     string
 	LastHeadEpoch abi.ChainEpoch
@@ -109,6 +133,9 @@ func NewSync(s *Store, src RPCSource, opts SyncOptions) *Sync {
 	}
 	if opts.CatchUpChunk == 0 {
 		opts.CatchUpChunk = 200
+	}
+	if opts.StaleResetThreshold == 0 {
+		opts.StaleResetThreshold = 2880 // ~1 day at 30s epochs
 	}
 	return &Sync{store: s, src: src, opts: opts}
 }
@@ -201,8 +228,32 @@ func (s *Sync) pollAndApply(ctx context.Context) error {
 	// Cold start (currentHead < 0): begin near head using BootstrapDepth
 	// so the first poll completes quickly against rate-limited public RPC;
 	// later polls catch up incrementally.
+	//
+	// Stale warm store (#51): if the store is so far behind that a
+	// contiguous backfill can't connect (lag > StaleResetThreshold), the
+	// per-poll backfillParents walk would hit its MaxBacktrack cap on
+	// every new tipset, never link to the store's chain, and the head
+	// would freeze (the "down for a week" symptom). Treat it as a cold
+	// start: re-anchor near live head with lenient writes. This discards
+	// the forward chain-state pointers below the new anchor, which are
+	// rebuildable; it never touches keys/wallets/tokens (separate files).
+	staleReset := false
+	if currentHead >= 0 && s.opts.StaleResetThreshold > 0 &&
+		head-currentHead > s.opts.StaleResetThreshold {
+		staleReset = true
+		if s.opts.OnStaleReset != nil {
+			s.opts.OnStaleReset(currentHead, head)
+		}
+		log.Warnw("sync: warm store too stale to backfill contiguously, re-anchoring near live head",
+			"storeHead", currentHead, "liveHead", head, "lag", head-currentHead,
+			"threshold", s.opts.StaleResetThreshold)
+		s.mu.Lock()
+		s.stats.StaleResets++
+		s.mu.Unlock()
+	}
+
 	var start, target abi.ChainEpoch
-	if currentHead < 0 {
+	if currentHead < 0 || staleReset {
 		start = head - s.opts.BootstrapDepth
 		target = head
 	} else {
@@ -217,11 +268,16 @@ func (s *Sync) pollAndApply(ctx context.Context) error {
 	}
 
 	// Snapshot canonical pointers in (0, currentHead] BEFORE applying so
-	// we can detect a reorg after the fact.
+	// we can detect a reorg after the fact. Skipped on a stale reset:
+	// there's no meaningful reorg to detect when we're discarding the old
+	// chain wholesale, and iterating millions of epochs here would stall
+	// the re-anchor poll.
 	priorCanon := make(map[abi.ChainEpoch]ltypes.TipSetKey)
-	for ep := abi.ChainEpoch(0); ep <= currentHead; ep++ {
-		if canon, err := s.store.canonicalAt(ep); err == nil && canon != nil {
-			priorCanon[ep] = canon.Key()
+	if !staleReset {
+		for ep := abi.ChainEpoch(0); ep <= currentHead; ep++ {
+			if canon, err := s.store.canonicalAt(ep); err == nil && canon != nil {
+				priorCanon[ep] = canon.Key()
+			}
 		}
 	}
 
@@ -269,7 +325,7 @@ func (s *Sync) pollAndApply(ctx context.Context) error {
 	// the whole cycle (which under sustained rate-limiting meant the head
 	// never moved at all).
 	added := 0
-	skipBackfill := currentHead < 0
+	skipBackfill := currentHead < 0 || staleReset
 	for ep := start; ep <= target; ep++ {
 		if fetchFailed[ep] {
 			// Hole: stop here. Next poll resumes from this epoch.

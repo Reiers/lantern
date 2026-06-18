@@ -239,7 +239,9 @@ Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on m
 
 | Release | What landed |
 |---|---|
-| v1.7.13 – v1.7.16 (current) | **Bitswap as the block source — Glif eliminated from the block path** ([#50](https://github.com/Reiers/lantern/issues/50)). libp2p Bitswap mounted as a high-priority fetcher source using the Filecoin **`/chain/ipfs/bitswap`** protocol prefix (the bitswap analogue of the `/fil/kad/<net>` DHT prefix). `eth_getTransactionByHash` served locally. Live bridge-off: balance + nonce + send all local, **zero Glif block fetches**. |
+| v1.7.18 (current) | **Stale-restart auto-heal + key-safe recovery** ([#51](https://github.com/Reiers/lantern/issues/51)). A node stopped for more than a day no longer freezes on its old head: the header-store sync detects an un-backfillable lag and re-anchors near the live head automatically. New `lantern reset --chain-state` is the supported recovery path and **never touches keys**; docs + dashboard stop pointing anyone at `rm -rf ~/.lantern`. |
+| v1.7.17 | Mainnet fallback gateway URL for head catch-up ([#50](https://github.com/Reiers/lantern/issues/50)). |
+| v1.7.13 – v1.7.16 | **Bitswap as the block source — Glif eliminated from the block path** ([#50](https://github.com/Reiers/lantern/issues/50)). libp2p Bitswap mounted as a high-priority fetcher source using the Filecoin **`/chain/ipfs/bitswap`** protocol prefix (the bitswap analogue of the `/fil/kad/<net>` DHT prefix). `eth_getTransactionByHash` served locally. Live bridge-off: balance + nonce + send all local, **zero Glif block fetches**. |
 | v1.7.4 – v1.7.12 | **Local FEVM write path** — local `eth_getTransactionCount` (live-head-anchored nonce), `eth_estimateGas`, a pure-Go EIP-1559 tx codec (`chain/ethtx`), `eth_sendRawTransaction` via gossipsub mempool, and `eth_getTransactionReceipt` via `StateSearchMsg`, **byte-identical to Glif bridge-off** ([#45](https://github.com/Reiers/lantern/issues/45)). Keystone fix: block-message + receipt AMTs are go-amt-ipld **v2**, not v4 ([#49](https://github.com/Reiers/lantern/issues/49)). |
 | v1.6.x – v1.7.2 | **Local FEVM `eth_call` — the zero-Glif read keystone** ([#43](https://github.com/Reiers/lantern/issues/43)). Pure-Go EVM interpreter over verified KAMT storage; embedded state-block prefetcher with adaptive warming + deep-trie walk retry ([#44](https://github.com/Reiers/lantern/issues/44)). Read path proven 100% local on calibration. |
 | v1.5.8 | Embedded `pkg/daemon` gossipsub head-tracking (0-1 epoch, #40). `eth_subscribe("logs")` over WS (#32). Hardened header-store catch-up so embedded mode can't stall (#33). `lantern info` per-network token + real RPC port + `--token-only`/`--network` (#34, #35). `StateNetworkName` returns the well-known name (#36). |
@@ -331,6 +333,34 @@ CURIO-RPC-SURFACE.md  the 71-method Curio compatibility target with call-site ma
 TRUSTED-ROOT.md       trusted-root data structure spec
 PHASE*-BLOCKERS.md    per-phase deferred decisions and known limitations
 ```
+
+---
+
+## Troubleshooting
+
+### "Node is behind" after the daemon was stopped for a while
+
+If Lantern was stopped for more than a day and the dashboard shows
+`Status: Reconnecting` with a chain head that's hours or days old,
+the daemon now **heals itself**: on restart it detects that the
+persisted header store is too far behind to catch up contiguously and
+re-anchors near the live head automatically. Just restart the daemon
+and watch the head jump to current within a minute.
+
+If you ever want to force a clean chain-state reset (e.g. a corrupted
+header store), use:
+
+```sh
+lantern stop                 # if it's running as a service
+lantern reset --chain-state  # clears header store + trust anchor ONLY
+lantern daemon               # re-syncs from live head
+```
+
+`lantern reset --chain-state` removes **only** rebuildable chain state
+(the header store and the bootstrap anchor). It **never** touches your
+keystore, signing keys, JWT secret, or API tokens. **Do not** delete
+files under `~/.lantern/` by hand — your wallet keys live there, and a
+stray `rm -rf` will destroy them. Always use `lantern reset` instead.
 
 ---
 

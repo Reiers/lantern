@@ -97,6 +97,8 @@ func main() {
 		err = cmdDoctor(rest)
 	case "repair":
 		err = cmdRepair(rest)
+	case "reset":
+		err = cmdReset(rest)
 	case "service":
 		err = cmdService(rest)
 	case "stop":
@@ -141,6 +143,8 @@ COMMANDS
   beacon [--cache-dir <p>]                      Run a Lantern beacon (Bitswap-only, no RPC)
   doctor [--bootstrap-quorum N]                 Re-run the quorum probe (read-only)
   repair [--bootstrap-quorum N]                 Re-anchor from a fresh quorum (overwrites bootstrap-anchor.json)
+  reset --chain-state                           Clear rebuildable chain state (headerstore + anchor) so a
+                                                long-stopped node re-syncs from live head. NEVER touches keys.
   service {install|uninstall|start|stop|restart|status}
                                                 Manage the OS service (launchd / systemd user)
   stop / restart                                Aliases for 'service stop' / 'service restart'
@@ -491,6 +495,7 @@ func cmdDaemon(args []string) error {
 	noHS := fs.Bool("no-header-store", false, "Disable the persistent header store (legacy synthetic-head mode)")
 	hsPath := fs.String("header-store", "", "Header store BadgerDB path (default: <data-dir>/<network>/headerstore)")
 	syncInterval := fs.Duration("sync-interval", 6*time.Second, "Header-store sync poll interval")
+	staleResetThreshold := fs.Int64("stale-reset-threshold", 2880, "Epochs behind live head past which a persisted header store re-anchors near live head instead of backfilling (#51). 0 disables. Chain state only; keys are never touched.")
 	notifyBufSize := fs.Int("notify-buf", headnotify.DefaultBufferSize, "ChainNotify per-subscriber buffer size")
 	p2pListen := fs.String("p2p-listen", "/ip4/0.0.0.0/tcp/0,/ip4/0.0.0.0/udp/0/quic-v1", "libp2p listen multiaddrs (comma-separated). Empty disables the libp2p host.")
 	noLibp2p := fs.Bool("no-libp2p", false, "Skip starting the libp2p host (RPC stays up; Net* stats return zero).")
@@ -650,6 +655,15 @@ func cmdDaemon(args []string) error {
 			Interval:       *syncInterval,
 			MaxBacktrack:   60,
 			BootstrapDepth: 3, // small cold start; ongoing polls catch up
+			// #51 "down for a week" auto-heal: if the persisted store is
+			// more than ~a day behind live head, re-anchor near live head
+			// instead of trying (and failing) to backfill the gap. Rebuildable
+			// chain state only — keys/wallets/tokens are untouched.
+			StaleResetThreshold: abi.ChainEpoch(*staleResetThreshold),
+			OnStaleReset: func(storeHead, liveHead abi.ChainEpoch) {
+				fmt.Printf("  header store: persisted head %d is %d epochs (~%.1f days) behind live head %d — re-anchoring near live head (chain state only; keys untouched)\n",
+					storeHead, liveHead-storeHead, float64(liveHead-storeHead)/2880.0, liveHead)
+			},
 		})
 		if err := sync.Start(ctx); err != nil {
 			return fmt.Errorf("start header sync: %w", err)

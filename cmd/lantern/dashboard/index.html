@@ -600,6 +600,7 @@ function computeHealth(overview, syncSnap) {
   let why = "";
   if (!headSet) { tone = "bad"; why = "the node hasn't anchored a chain head yet"; }
   else if (peers < 5) { tone = "bad"; why = "very few peers connected"; }
+  else if (lag >= 2880) { tone = "bad"; why = "the node was stopped for a while and is re-anchoring near the live head automatically (this clears only chain state, never your keys)"; }
   else if (lag >= 8) { tone = "bad"; why = "the node is several minutes behind the network"; }
   else if (peers < Math.max(20, Math.floor(minPeers / 2))) { tone = "warn"; why = "peer count is recovering"; }
   else if (lag >= 4) { tone = "warn"; why = "the node is syncing fresh blocks from the network"; }

@@ -439,3 +439,119 @@ func TestSyncColdStartFarHead(t *testing.T) {
 	require.Equal(t, abi.ChainEpoch(100), s.HeadEpoch(),
 		"cold store must converge to chain head")
 }
+
+// TestSyncStaleResetReanchors reproduces issue #51: a node stopped for a
+// long time boots with a persisted warm store many thousands of epochs
+// behind the live head. The intermediate epochs (between the stale store
+// head and live head) have parents the store can't reach within
+// MaxBacktrack, so the contiguous catch-up (issue #33) could never link a
+// new tipset to the store's chain — the head pointer froze at the stale
+// epoch (the observed "Reconnecting / 8d ago" symptom).
+//
+// With StaleResetThreshold set, a lag past the threshold re-anchors the
+// store near the live head (cold-start semantics, lenient writes) instead
+// of grinding forever. The fix is chain-state-only; this test asserts
+// convergence + that the OnStaleReset hook fires with the right epochs.
+func TestSyncStaleResetReanchors(t *testing.T) {
+	s, _ := newStore(t, false)
+	src := newFakeSource()
+
+	// Phase 1: small contiguous chain 0..20, store syncs near head.
+	g := mkBlock(t, 0, nil, 1000, "g")
+	src.put(g)
+	parents := []cid.Cid{g.Cid()}
+	for h := abi.ChainEpoch(1); h <= 20; h++ {
+		b := mkBlock(t, h, parents, 1000, "")
+		src.put(b)
+		parents = []cid.Cid{b.Cid()}
+	}
+
+	var resetFired int
+	var gotStoreHead, gotLiveHead abi.ChainEpoch = -1, -1
+	sync := hstore.NewSync(s, src, hstore.SyncOptions{
+		MaxBacktrack:        10,
+		BootstrapDepth:      3,
+		StaleResetThreshold: 100, // re-anchor when >100 epochs behind
+		OnStaleReset: func(storeHead, liveHead abi.ChainEpoch) {
+			resetFired++
+			gotStoreHead, gotLiveHead = storeHead, liveHead
+		},
+	})
+
+	require.NoError(t, sync.PollOnce(context.Background()))
+	staleHead := s.HeadEpoch()
+	require.GreaterOrEqual(t, int64(staleHead), int64(0))
+	require.LessOrEqual(t, int64(staleHead), int64(20))
+	require.Equal(t, 0, resetFired, "no reset on the initial near-head sync")
+
+	// Phase 2: simulate a long outage. The chain jumps far ahead to
+	// epoch 5000 — but ONLY the recent tip region is fetchable as a
+	// connectable chain; the giant gap below it is not backfillable
+	// within MaxBacktrack. Build a fresh contiguous segment near 5000 so
+	// the cold re-anchor has blocks to land on.
+	const live = abi.ChainEpoch(5000)
+	// Seed a connectable window [live-BootstrapDepth-5, live] so the
+	// re-anchor (which fetches head-BootstrapDepth..head) succeeds.
+	var p []cid.Cid
+	for h := live - 10; h <= live; h++ {
+		b := mkBlock(t, h, p, 1000, "late")
+		src.replaceCanonAt(b)
+		p = []cid.Cid{b.Cid()}
+	}
+	src.head = live
+
+	// One poll: lag (5000 - staleHead) >> threshold(100) → stale reset.
+	require.NoError(t, sync.PollOnce(context.Background()))
+
+	require.Equal(t, 1, resetFired, "stale reset must fire exactly once")
+	require.Equal(t, staleHead, gotStoreHead, "OnStaleReset storeHead arg")
+	require.Equal(t, live, gotLiveHead, "OnStaleReset liveHead arg")
+
+	// The head must have jumped near live, NOT frozen at the stale epoch.
+	got := s.HeadEpoch()
+	require.Greater(t, int64(got), int64(staleHead),
+		"head must advance past the stale epoch after reset")
+	require.GreaterOrEqual(t, int64(got), int64(live-10),
+		"head must re-anchor near live head, got %d (live %d)", got, live)
+
+	// And the StaleResets stat must reflect it.
+	require.Equal(t, uint64(1), sync.Stats().StaleResets)
+}
+
+// TestSyncStaleResetDisabled confirms threshold=0 keeps legacy behaviour:
+// no stale reset, the agent attempts contiguous catch-up.
+func TestSyncStaleResetDisabled(t *testing.T) {
+	s, _ := newStore(t, false)
+	src := newFakeSource()
+
+	g := mkBlock(t, 0, nil, 1000, "g")
+	src.put(g)
+	parents := []cid.Cid{g.Cid()}
+	for h := abi.ChainEpoch(1); h <= 30; h++ {
+		b := mkBlock(t, h, parents, 1000, "")
+		src.put(b)
+		parents = []cid.Cid{b.Cid()}
+	}
+
+	var resetFired int
+	sync := hstore.NewSync(s, src, hstore.SyncOptions{
+		MaxBacktrack:        10,
+		BootstrapDepth:      3,
+		StaleResetThreshold: 0, // disabled
+		OnStaleReset:        func(_, _ abi.ChainEpoch) { resetFired++ },
+	})
+
+	// Converge normally to 30.
+	prev := abi.ChainEpoch(-1)
+	for i := 0; i < 50; i++ {
+		require.NoError(t, sync.PollOnce(context.Background()))
+		cur := s.HeadEpoch()
+		require.GreaterOrEqual(t, int64(cur), int64(prev))
+		prev = cur
+		if cur >= 30 {
+			break
+		}
+	}
+	require.Equal(t, abi.ChainEpoch(30), s.HeadEpoch())
+	require.Equal(t, 0, resetFired, "threshold=0 must never fire a stale reset")
+}
