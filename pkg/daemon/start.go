@@ -248,6 +248,14 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		chainAPI.OnLocalMiss = pf.AddAddr
 	}
 
+	// lantern#50 prefetch-on-send: when eth_sendRawTransaction publishes a
+	// tx locally, warm its message/receipt blocks into the Bitswap cache in
+	// the background so the follow-up receipt poll resolves locally instead
+	// of racing a cold cross-peer fetch. Bound to the daemon root context
+	// (cancelled on Stop). Best-effort and read-only; nil hook = unchanged.
+	d.sendWarmer = newSendWarmer(ctx, chainAPI)
+	chainAPI.OnSentTx = d.sendWarmer.Warm
+
 	// Stash for accessor-style reads (LocalEthCallStats, etc.).
 	d.mu.Lock()
 	d.chainAPI = chainAPI

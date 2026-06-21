@@ -153,6 +153,13 @@ func (c *ChainAPI) EthSendRawTransaction(ctx context.Context, signedTxHex string
 		c.sentTx().put(strings.ToLower(hashHex), sentTxRecord{msgCID: msgCID, tx: tx, from: sender})
 		log.Infow("eth_sendRawTransaction: published locally",
 			"ethHash", hashHex, "msgCID", msgCID, "from", smsg.Message.From)
+		// lantern#50: kick off background warming of this message's blocks so
+		// the receipt poll hits a warm Bitswap cache instead of racing a cold
+		// cross-peer fetch. Non-blocking and best-effort: a nil hook (or a
+		// slow warmer) never affects the send result.
+		if c.OnSentTx != nil {
+			c.OnSentTx(msgCID)
+		}
 		return hashHex, nil
 	}
 

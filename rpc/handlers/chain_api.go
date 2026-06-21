@@ -102,6 +102,19 @@ type ChainAPI struct {
 	// cheap + non-blocking; the handler calls it on the hot path.
 	OnLocalMiss func(addr string)
 
+	// OnSentTx, when set, is invoked (non-blocking, on the send hot path)
+	// with the Filecoin message CID every time eth_sendRawTransaction
+	// publishes a tx locally (lantern#50 prefetch-on-send). curio-core /
+	// the daemon wires this to a background warmer that polls
+	// StateSearchMsg for the message until it lands, which drives the
+	// embedded Bitswap source to pull the freshly-produced message + AMT +
+	// receipt blocks into cache. By the time the client's own receipt poll
+	// runs, those blocks are warm, so the receipt resolves locally instead
+	// of racing (and losing to) a cold cross-peer Bitswap fetch inside the
+	// poll window — the residual that kept #50 open. Must be cheap +
+	// non-blocking; the handler fires it in a goroutine-friendly way.
+	OnSentTx func(msgCID cid.Cid)
+
 	// BeaconParams is the drand-round mapping for the active network.
 	// Defaults to mainnet quicknet if zero-value.
 	BeaconParams lbeacon.QuicknetParams

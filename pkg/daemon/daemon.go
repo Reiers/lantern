@@ -279,6 +279,12 @@ type Daemon struct {
 	mpool    *mpool.Pool     // gossipsub mempool publisher (#45 Stage 4)
 	bitswap  *bitswap.Client // libp2p block source on the embedded fetcher (#50)
 
+	// sendWarmer pre-warms a sent tx's message/receipt blocks into the
+	// Bitswap cache in the background so the receipt poll resolves locally
+	// (lantern#50 prefetch-on-send). Wired to chainAPI.OnSentTx in
+	// startInternal; best-effort, read-only.
+	sendWarmer *sendWarmer
+
 	// Internal cancellation: derived from caller's ctx in Start.
 	cancel context.CancelFunc
 }
