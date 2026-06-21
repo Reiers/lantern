@@ -18,7 +18,7 @@ wrangler pages deploy . --project-name=lantern-get --branch=main
 ```
 
 ## DNS / project layout
-- Cloudflare Pages project: `lantern-get` (account: `nicklas.reiersen@gmail.com`)
+- Cloudflare Pages project: `lantern-get`
 - Custom domain: `get.lantern.reiers.io` (CNAME → `lantern-get.pages.dev`, proxied)
 - TLS cert: issued by Google CA via Cloudflare Pages
 
