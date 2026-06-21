@@ -36,6 +36,7 @@ import (
 
 	addr "github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/big"
+	"github.com/filecoin-project/go-state-types/builtin"
 
 	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/types"
@@ -92,9 +93,20 @@ func (e *GasEstimator) EstimateGasLimit(ctx context.Context, msg *types.Message)
 
 	// Pick a per-method ceiling.
 	var methodCeil int64
-	switch msg.Method {
-	case 0:
+	switch {
+	case msg.Method == 0:
 		methodCeil = 1_000_000 // 1M gas for pure value transfer
+	case msg.Method == builtin.MethodsEVM.InvokeContract ||
+		msg.Method == builtin.MethodsEVM.InvokeContractDelegate:
+		// FEVM contract invocation. Execution cost is unbounded and highly
+		// variable (a DEX swap with router reentrancy + multiple ERC-20
+		// transferFroms consumes ~100-300M gas; Glif estimates ~282M for
+		// exactly such a swap). The old 75M ceiling UNDER-estimated these
+		// and caused out-of-gas reverts on-chain -- the dangerous direction
+		// this estimator exists to avoid. Use a Glif-class ceiling: 1B gas
+		// (10% of the block gas limit), comfortably above any real swap or
+		// payment-rail call while still bounded.
+		methodCeil = 1_000_000_000
 	default:
 		methodCeil = 75_000_000 // 75M for arbitrary builtin actor call
 	}
