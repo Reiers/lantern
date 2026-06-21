@@ -9,7 +9,7 @@
 
   [![CI](https://github.com/Reiers/lantern/actions/workflows/ci.yml/badge.svg)](https://github.com/Reiers/lantern/actions/workflows/ci.yml)
   [![License: Apache 2.0 OR MIT](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](#license)
-  [![Release: v1.7.16](https://img.shields.io/badge/release-v1.7.16-0090ff.svg)](https://github.com/Reiers/lantern/releases)
+  [![Release: v1.7.21](https://img.shields.io/badge/release-v1.7.21-0090ff.svg)](https://github.com/Reiers/lantern/releases)
   [![Go: 1.25+](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](go.mod)
 
   **One line to install:**
@@ -28,7 +28,7 @@
 
 Lantern is a pure-Go Filecoin light node. **~40 MB binary, ~1 GB working state, zero CGo, no `filecoin-ffi`, no Rust toolchain.** It serves a Lotus-compatible JSON-RPC (71 / 71 of the Curio `FULLNODE_API` surface, plus the `eth_*` surface needed by FoC clients) and verifies every byte locally against BLS, F3, DRAND, and IPLD content addressing. No trusted RPC provider. No 76 GB snapshot.
 
-**Current release:** [v1.7.16](https://github.com/Reiers/lantern/releases/tag/v1.7.16) on mainnet + calibration. **In production today** as the chain backend embedded in [Curio Core](https://curiocore.io) and as a secondary node on the mainnet SP `f03678816` (sp.reiers.io).
+**Current release:** [v1.7.21](https://github.com/Reiers/lantern/releases/tag/v1.7.21) on mainnet + calibration. **In production today** as the chain backend embedded in [Curio Core](https://curiocore.io) (which ran a full PDP hot-storage flow on Filecoin **mainnet** end-to-end on Lantern v1.7.21) and as a secondary node on the mainnet SP `f03678816` (sp.reiers.io).
 
 ## What is Lantern?
 
@@ -214,7 +214,7 @@ Or use Lantern's own CLI:
 
 ## Status
 
-**Current release: [v1.7.16](https://github.com/Reiers/lantern/releases/tag/v1.7.16)** — production on mainnet + calibration.
+**Current release: [v1.7.21](https://github.com/Reiers/lantern/releases/tag/v1.7.21)** — production on mainnet + calibration.
 
 What works today:
 
@@ -231,7 +231,7 @@ Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on m
 
 ### Used in production
 
-- **[Curio Core](https://github.com/Reiers/curio-core)** — pre-alpha Filecoin Onchain Cloud hot-storage provider. Lantern is the embedded chain backend. The full PDP proof loop (deal accept → piece park → proof submit → USDFC settle) runs end-to-end on calibration; 8 successful prove cycles overnight 2026-05-25, 5 on-chain USDFC settles confirmed. Lantern's `pkg/daemon` is what makes this single-binary deployment possible.
+- **[Curio Core](https://github.com/Reiers/curio-core)** — beta Filecoin Onchain Cloud hot-storage provider. Lantern is the embedded chain backend. The full PDP hot-storage flow (SP registration → self-funded USDFC → payments → dataset → addPieces → live proving cycle) ran **end-to-end on Filecoin mainnet** from a single machine on Lantern v1.7.21 (mainnet dataset #1311, provider 31); earlier calibration soak: 8 prove cycles + 5 on-chain USDFC settles. Lantern's `pkg/daemon` is what makes this single-binary deployment possible.
 - **`f03678816` / sp.reiers.io** — mainnet Storage Provider running Lantern as a secondary chain node next to Lotus. Curio polls Lantern every ~5s as failover.
 - **`https://gateway.lantern.reiers.io`** — public Lantern-backed HTTP IPLD-block gateway. Live since 2026-05-22.
 
@@ -239,7 +239,9 @@ Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on m
 
 | Release | What landed |
 |---|---|
-| v1.7.19 (current) | **Secrets isolation + auto-backup** ([#51](https://github.com/Reiers/lantern/issues/51) Stage 2). Keystore, JWT secret, and API tokens move into a dedicated `secrets/` directory, physically separated from rebuildable chain state (auto-migrated from older installs). The daemon writes a rolling backup of `secrets/` on every start (last 7 kept). Recovery operations now *structurally* cannot delete keys. |
+| v1.7.21 (current) | **FEVM write-path fixes proven on mainnet.** `eth_call` now executes write-path opcodes (SSTORE/LOG) via an ephemeral overlay so DEX-swap / `transferFrom` simulations match on-chain, and the FEVM contract-invoke gas estimate gets a Glif-class ceiling so real swaps don't build out-of-gas txs. Both verified by the Curio Core mainnet PDP e2e (WFIL→USDFC swap + addPieces). |
+| v1.7.20 | Tester-flow install fixes found in a clean smoke test (install one-liner / first-run hardening). |
+| v1.7.19 | **Secrets isolation + auto-backup** ([#51](https://github.com/Reiers/lantern/issues/51) Stage 2). Keystore, JWT secret, and API tokens move into a dedicated `secrets/` directory, physically separated from rebuildable chain state (auto-migrated from older installs). The daemon writes a rolling backup of `secrets/` on every start (last 7 kept). Recovery operations now *structurally* cannot delete keys. |
 | v1.7.18 | **Stale-restart auto-heal + key-safe recovery** ([#51](https://github.com/Reiers/lantern/issues/51)). A node stopped for more than a day no longer freezes on its old head: the header-store sync detects an un-backfillable lag and re-anchors near the live head automatically. New `lantern reset --chain-state` is the supported recovery path and **never touches keys**; docs + dashboard stop pointing anyone at `rm -rf ~/.lantern`. |
 | v1.7.17 | Mainnet fallback gateway URL for head catch-up ([#50](https://github.com/Reiers/lantern/issues/50)). |
 | v1.7.13 – v1.7.16 | **Bitswap as the block source — Glif eliminated from the block path** ([#50](https://github.com/Reiers/lantern/issues/50)). libp2p Bitswap mounted as a high-priority fetcher source using the Filecoin **`/chain/ipfs/bitswap`** protocol prefix (the bitswap analogue of the `/fil/kad/<net>` DHT prefix). `eth_getTransactionByHash` served locally. Live bridge-off: balance + nonce + send all local, **zero Glif block fetches**. |
