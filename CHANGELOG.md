@@ -2,6 +2,125 @@
 
 All notable changes to Lantern.
 
+## v1.7.22 (2026-06-22)
+
+Background-service install hardening — the bug a background-mode tester hit.
+
+### Fixed
+
+- **`lantern service install` now wires the keystore passphrase into the
+  generated unit/plist.** Previously the generated systemd unit / launchd
+  plist omitted `LANTERN_PASS`, so a daemon started by the service manager
+  hard-errored on a non-TTY stdin (no way to prompt for the passphrase).
+  Now: `--passphrase-file <path>` for an encrypted keystore (read at install
+  time, kept out of the unit via `EnvironmentFile=` on systemd / XML-escaped
+  inline on launchd), and an explicit `LANTERN_PASS=""` default for the
+  common unencrypted read-only backup node so it starts cleanly in the
+  background. Env/secret files written `0600`. New `resolveServicePassphrase`
+  + `plistEscape`, with unit tests.
+
+### Changed
+
+- README bumped to v1.7.22; repo housekeeping.
+
+## v1.7.21 (2026-06-21)
+
+Zero-Glif write-path correctness — makes local `eth_call` / `estimateGas`
+correct for write-shaped calls (DEX swaps, ERC-20 `transferFrom`, payment
+rails), the keystone for running an SP fully bridge-off.
+
+### Fixed
+
+- **`vm/evm`: execute `SSTORE`/`LOG` during `eth_call` via an ephemeral
+  overlay** (go-ethereum / Lotus semantics) instead of false-reverting.
+  Threaded through nested calls; chain state is untouched.
+- **`vm`: Glif-class 1B-gas ceiling for FEVM `InvokeContract(Delegate)`** so
+  `estimateGas` no longer under-counts heavy calls (was 75M; real swaps use
+  100–300M) and `SenderETH` stops building out-of-gas transactions.
+
+## v1.7.19 (2026-06-18)
+
+Secrets isolation + self-healing restarts (#51).
+
+### Added
+
+- **On-disk secrets isolation.** Keystore, admin JWT, and auth tokens move
+  to `~/.lantern/<net>/secrets/` (auto-migrated on first start). The daemon
+  auto-backs-up `secrets/` to `backups/` on every start (keeps the last 7),
+  so recovery operations structurally cannot delete keys. Also fixed
+  `auth rotate`/`auth list` writing to the wrong directory.
+
+### Fixed
+
+- **Stale-restart auto-heal (v1.7.18).** After a long downtime the embedded
+  sync re-anchors near the live head instead of trying to contiguously
+  replay days of lag. Key-safe `lantern reset --chain-state` added.
+- Two pre-existing data races (headnotify deliver/close TOCTOU; a passphrase
+  test that swapped `os.Stderr`).
+
+## v1.7.0 – v1.7.16 (2026-06-15)
+
+**The zero-Glif sprint.** Read path, then write path, served entirely from
+locally verified state and libp2p — no third-party RPC. Built and live-verified
+bridge-off on calibration the same day. Engine stays pure-Go, CGO-free; the
+only new external dependency across the whole arc is `holiman/uint256`.
+
+### Read path (v1.7.0–v1.7.2, builds on the v1.6.x eth_call engine)
+
+- **Local FEVM `eth_call` made reliable (#43, #44).** Pure-Go EVM execution
+  against verified state, an on-head-advance contract-state prefetcher
+  (warms PDPVerifier, FWSS, ServiceProviderRegistry, USDFC), and a
+  retry-on-miss wrapper that removes the last "block not found" bridge
+  fallback for embedded curio-core / filcensus. Adaptive warming: an
+  `eth_call` miss feeds the missed address back into the prefetcher, so the
+  read path self-heals. Live sample: 100% local, zero bridge fallback.
+
+### Write path (v1.7.4–v1.7.7, #45)
+
+- **Local nonce + gas (v1.7.4).** `eth_getTransactionCount` and
+  `eth_estimateGas` served locally and live-head-anchored (caught + fixed a
+  boot-anchor staleness bug that risked a nonce collision). estimateGas uses
+  a conservative ceiling — never under-counts vs the gateway.
+- **ETH-tx codec (v1.7.5).** New CGO-free `chain/ethtx`: minimal RLP codec,
+  `ParseSignedEIP1559`, sender recovery via ecrecover, and
+  `ToSignedFilecoinMessage()` — no go-ethereum dependency.
+- **`eth_sendRawTransaction` → MpoolPush and `eth_getTransactionReceipt`
+  → StateSearchMsg, both local (v1.7.7).** Caught + fixed a wiring gap:
+  `ChainAPI.Mpool` was never attached in the embedded daemon, so sends
+  silently fell back to the bridge. Now mounted on the same gossipsub host
+  used for head-tracking (`/fil/msgs/<network>` topic).
+
+### Bitswap + correctness fixes that made bridge-off real
+
+- **v2 AMT decode (v1.7.12, #49) — the keystone.** Block message AMTs and
+  the `ParentMessageReceipts` AMT are `go-amt-ipld` **v2** (3-field root,
+  implicit width 8); Lantern's `state/amt` used v4. Added `LookupV2` /
+  `ForEachV2CIDs` so `StateSearchMsg` resolves receipts locally. FEVM
+  contract state stays v4. (Durable: message/receipt AMTs are v2, top byte
+  `0x83`; contract state is v4, `0x84`.)
+- **`eth_getTransactionByHash` served locally (v1.7.13).**
+- **Bitswap as an embedded block source (v1.7.14–v1.7.16, #50).** Mounted
+  the libp2p Bitswap client as a high-priority source so message/receipt
+  blocks come from the gossip-connected peer set instead of Glif. The
+  keystone fix: Filecoin's bitswap protocol prefix is `/chain/ipfs/bitswap`,
+  not boxo's IPFS default — any boxo bitswap client talking to Filecoin
+  peers must set it. Widened the msgsearch retry budget so each attempt
+  contains a full bitswap round. Live bridge-off proof: balance, nonce, and
+  send all local, zero Glif block-fetch.
+
+### Result
+
+- Both read and write paths verified **byte-identical to the gateway** with
+  the VM bridge disabled, end to end (send → land → receipt). This is the
+  release line that makes running an SP fully bridge-off possible.
+
+## v1.6.0 (2026-06-15)
+
+Local FEVM `eth_call` engine (#43, Part B). Execute read-only contract calls
+against locally verified state with no Glif: a pure-Go EVM actor loader, a
+KAMT state reader, a pure-Go interpreter, and `eth_call` integration with a
+VMBridge fallback for safety. Foundation for the v1.7.x zero-Glif line.
+
 ## v1.5.8 (2026-06-03)
 
 The "embedded mode grows up" release. Five fixes/features, driven largely
