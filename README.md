@@ -184,10 +184,23 @@ lantern repair             # re-anchor from a fresh successful quorum
 **Run as a background service** (launchd on macOS / systemd user on Linux):
 
 ```sh
-lantern service install
+lantern service install          # unencrypted keystore (fine for a read-only backup node)
 lantern service status
 lantern service stop
 ```
+
+The daemon needs a keystore-passphrase decision to start unattended. `service install`
+defaults to an **unencrypted** keystore (`LANTERN_PASS=""`), which is the right choice for
+a backup chain node that holds no funds. To run the service against an **encrypted**
+keystore, point it at a passphrase file (kept out of the unit, `chmod 600`):
+
+```sh
+printf %s 'your-passphrase' > ~/.lantern/pass.txt && chmod 600 ~/.lantern/pass.txt
+lantern service install --passphrase-file ~/.lantern/pass.txt
+```
+
+To run in the foreground without a passphrase prompt, set an explicit empty pass:
+`LANTERN_PASS='' lantern daemon`.
 
 Talk to it like Lotus:
 
