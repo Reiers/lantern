@@ -249,11 +249,49 @@ func (ip *interpreter) opSload() error {
 	if err != nil {
 		return err
 	}
+	// Overlay (in-call SSTORE writes) shadows verified backend state.
+	if v, ok := ip.ov.get(ip.self, key); ok {
+		return ip.stack.push(v)
+	}
 	v, err := ip.b.GetStorage(ip.self, key)
 	if err != nil {
 		return fmt.Errorf("evm: SLOAD: %w", err)
 	}
 	return ip.stack.push(v)
+}
+
+// opSstore records a storage write in the ephemeral overlay. Discarded
+// when the top-level eth_call returns; chain state is never mutated.
+func (ip *interpreter) opSstore() error {
+	key, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	val, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	ip.ov.set(ip.self, key, val)
+	return nil
+}
+
+// opLog consumes a LOGn instruction's operands (mem offset, size, and n
+// topics) and discards them. Emitted events don't affect a call's return
+// value, so for eth_call purposes this is a well-formed no-op that keeps
+// the stack balanced.
+func (ip *interpreter) opLog(n int) error {
+	if _, err := ip.stack.pop(); err != nil { // mem offset
+		return err
+	}
+	if _, err := ip.stack.pop(); err != nil { // size
+		return err
+	}
+	for i := 0; i < n; i++ {
+		if _, err := ip.stack.pop(); err != nil { // topic
+			return err
+		}
+	}
+	return nil
 }
 
 func (ip *interpreter) opBalance() error {
@@ -414,9 +452,9 @@ func (ip *interpreter) opCall(op OpCode) error {
 	var sub *Result
 	var subErr error
 	if op == DELEGATECALL {
-		sub, subErr = callWithContext(ip.b, ip.caller, ip.self, ip.self, callInput, to)
+		sub, subErr = callWithContext(ip.b, ip.ov, ip.caller, ip.self, ip.self, callInput, to)
 	} else {
-		sub, subErr = Call(ip.b, ip.self, to, callInput)
+		sub, subErr = callWithState(ip.b, ip.ov, ip.self, to, callInput)
 	}
 	if subErr != nil {
 		return subErr
@@ -441,7 +479,7 @@ func (ip *interpreter) opCall(op OpCode) error {
 
 // callWithContext is the DELEGATECALL execution variant: run `to`'s code
 // but with storage/self context preserved as `storageCtx`.
-func callWithContext(b Backend, caller, self, storageCtx Address, input []byte, codeAddr Address) (*Result, error) {
+func callWithContext(b Backend, ov *overlay, caller, self, storageCtx Address, input []byte, codeAddr Address) (*Result, error) {
 	code, err := b.GetCode(codeAddr)
 	if err != nil {
 		return nil, err
@@ -450,7 +488,7 @@ func callWithContext(b Backend, caller, self, storageCtx Address, input []byte, 
 		return &Result{}, nil
 	}
 	ip := &interpreter{
-		b: b, caller: caller, self: storageCtx, code: code, input: input,
+		b: b, ov: ov, caller: caller, self: storageCtx, code: code, input: input,
 		stack: newStack(), mem: &memory{}, jumpdest: analyzeJumpdests(code),
 	}
 	return ip.run()

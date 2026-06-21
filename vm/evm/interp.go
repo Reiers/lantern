@@ -30,9 +30,20 @@ var ErrExecutionReverted = errors.New("execution reverted")
 // forever. View functions are short; this is generous.
 const callMaxSteps = 10_000_000
 
-// Call executes `input` against the code at `to` in read-only mode and
-// returns the result. `caller` is the msg.sender observed by the code.
+// Call executes `input` against the code at `to` and returns the result.
+//
+// eth_call semantics: state mutations (SSTORE / value moves) and LOGs that
+// happen during the call are applied to an ephemeral overlay that is
+// discarded when the call returns -- chain state is never touched. This is
+// what lets write-shaped calls (ERC-20 transferFrom inside a DEX swap,
+// router reentrancy) execute correctly instead of falsely reverting.
 func Call(b Backend, caller, to Address, input []byte) (*Result, error) {
+	return callWithState(b, newOverlay(), caller, to, input)
+}
+
+// callWithState is the entry that threads a shared overlay through a call
+// frame, so nested sub-calls observe the same ephemeral writes.
+func callWithState(b Backend, ov *overlay, caller, to Address, input []byte) (*Result, error) {
 	code, err := b.GetCode(to)
 	if err != nil {
 		return nil, fmt.Errorf("evm: get code %x: %w", to, err)
@@ -43,6 +54,7 @@ func Call(b Backend, caller, to Address, input []byte) (*Result, error) {
 	}
 	ip := &interpreter{
 		b:        b,
+		ov:       ov,
 		caller:   caller,
 		self:     to,
 		code:     code,
@@ -56,6 +68,7 @@ func Call(b Backend, caller, to Address, input []byte) (*Result, error) {
 
 type interpreter struct {
 	b        Backend
+	ov       *overlay
 	caller   Address
 	self     Address
 	code     []byte
@@ -190,9 +203,15 @@ func (ip *interpreter) exec(op OpCode) (bool, *Result, error) {
 	case MSIZE:
 		ip.stack.push(*uint256.NewInt(uint64(ip.mem.len())))
 
-	// ---- storage (read-only) ----
+	// ---- storage ----
 	case SLOAD:
 		return false, nil, ip.opSload()
+	case SSTORE:
+		return false, nil, ip.opSstore()
+
+	// ---- logs: observable side effects, no effect on return data ----
+	case LOG0, LOG1, LOG2, LOG3, LOG4:
+		return false, nil, ip.opLog(int(op - LOG0))
 
 	// ---- control flow ----
 	case POP:
@@ -235,9 +254,8 @@ func (ip *interpreter) exec(op OpCode) (bool, *Result, error) {
 		}
 		return true, &Result{Return: data, Reverted: true, GasUsed: ip.gas}, nil
 
-	// ---- state mutation: unreachable on a read call ----
-	case SSTORE, CREATE, CREATE2, SELFDESTRUCT,
-		LOG0, LOG1, LOG2, LOG3, LOG4:
+	// ---- contract creation / destruction: out of scope ----
+	case CREATE, CREATE2, SELFDESTRUCT:
 		return true, &Result{Reverted: true, GasUsed: ip.gas}, nil
 
 	case INVALID:
