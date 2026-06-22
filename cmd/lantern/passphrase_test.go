@@ -97,23 +97,57 @@ func TestResolvePassphrase_EnvExplicitEmpty(t *testing.T) {
 	}
 }
 
-func TestResolvePassphrase_NoEnvNoTTY(t *testing.T) {
-	// Make sure LANTERN_PASS is unset for this test.
+// Issue #1 (Rabinovitch 2026-06-22): an EMPTY keystore + no TTY + no env var
+// is the fresh-install-as-a-service case. A read-serve node has nothing to
+// encrypt, so this must NOT hard-error (that broke the systemd/launchd path
+// on first boot). It should default to unencrypted and persist the sentinel.
+func TestResolvePassphrase_EmptyKeystoreNoTTYDefaultsUnencrypted(t *testing.T) {
 	t.Setenv("LANTERN_PASS", "")
 	os.Unsetenv("LANTERN_PASS")
 
-	// In a `go test` run, stdin is not a terminal, so we hit the no-TTY
-	// path directly. resolvePassphrase MUST return an error here.
+	var buf bytes.Buffer
+	oldW := passphraseErrW
+	passphraseErrW = &buf
+	defer func() { passphraseErrW = oldW }()
+
+	dir := t.TempDir() // empty keystore, no keys
+	got, err := resolvePassphrase(dir)
+	if err != nil {
+		t.Fatalf("empty keystore + no TTY should not error, got: %v", err)
+	}
+	if got != "" {
+		t.Errorf("got %q, want empty (unencrypted default)", got)
+	}
+	if !hasUnencryptedSentinel(dir) {
+		t.Error("empty keystore + no TTY did not persist the unencrypted sentinel")
+	}
+}
+
+// SECURITY INVARIANT: when real keys EXIST but there's no TTY and no
+// LANTERN_PASS, resolvePassphrase MUST fail loudly. It must never silently
+// run with an empty passphrase against real signing keys.
+func TestResolvePassphrase_KeysPresentNoTTYErrors(t *testing.T) {
+	t.Setenv("LANTERN_PASS", "")
+	os.Unsetenv("LANTERN_PASS")
+
 	dir := t.TempDir()
+	// Drop a wallet-* key so keystoreHasKeys() == true.
+	if err := os.WriteFile(filepath.Join(dir, "wallet-f3aaa.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write wallet file: %v", err)
+	}
 	_, err := resolvePassphrase(dir)
 	if err == nil {
-		t.Fatal("expected error when LANTERN_PASS unset and no TTY, got nil")
+		t.Fatal("expected error when keys present, LANTERN_PASS unset, no TTY, got nil")
 	}
 	msg := err.Error()
 	for _, want := range []string{"LANTERN_PASS", "TTY", "EnvironmentFile"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error message missing %q: %v", want, err)
 		}
+	}
+	// And it must NOT have written a sentinel (real keys stay protected).
+	if hasUnencryptedSentinel(dir) {
+		t.Error("BUG: wrote unencrypted sentinel for a keystore that HOLDS keys")
 	}
 }
 
@@ -154,14 +188,18 @@ func TestResolvePassphrase_EnvEmptyWritesSentinel(t *testing.T) {
 	}
 }
 
-// Regression: the empty-string fallback that #2 fixes must NOT come back.
-// If anyone ever changes resolvePassphrase to silently return "" when env
-// is unset and there's no TTY, this test will catch it.
-func TestResolvePassphrase_NeverSilentlyEmpty(t *testing.T) {
+// Regression (issue #2): the empty-string fallback must NEVER come back for a
+// keystore that HOLDS keys. (An empty keystore legitimately returns "" now —
+// it has nothing to protect — so this guard is scoped to the keys-present
+// case, which is the one that was a security hole.)
+func TestResolvePassphrase_NeverSilentlyEmptyWithKeys(t *testing.T) {
 	os.Unsetenv("LANTERN_PASS")
 	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "wallet-f3aaa.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write wallet file: %v", err)
+	}
 	got, err := resolvePassphrase(dir)
 	if err == nil && got == "" {
-		t.Fatal("BUG: resolvePassphrase silently returned empty string -- issue #2 regression")
+		t.Fatal("BUG: resolvePassphrase silently returned empty string with keys present -- issue #2 regression")
 	}
 }

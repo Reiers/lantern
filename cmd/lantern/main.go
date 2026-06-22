@@ -368,12 +368,27 @@ func resolvePassphrase(dir string) (string, error) {
 		return "", nil
 	}
 
-	// No env var. Need either a TTY or a clear error.
+	// No env var and no TTY.
 	if !isInteractive() {
-		return "", fmt.Errorf("LANTERN_PASS is not set and stdin is not a TTY. " +
-			"Set LANTERN_PASS for non-interactive runs. For systemd: use " +
-			"EnvironmentFile=/etc/lantern/passphrase (chmod 600). " +
-			"To deliberately use an unencrypted keystore set LANTERN_PASS='' (explicit empty)")
+		// Empty keystore (no keys to protect) + no TTY: this is the common
+		// fresh-install-as-a-service case (Issue #1, Rabinovitch 2026-06-22).
+		// A read-serve chain node has nothing to encrypt, so refusing to
+		// start would just break the systemd/launchd path on first boot and
+		// no sentinel would ever get written. Default to an unencrypted
+		// keystore, record the choice, and continue. Operators who WANT
+		// encryption set LANTERN_PASS (handled above) before first boot.
+		if !hasKeys {
+			fmt.Fprintln(passphraseErrW, "  keystore: unencrypted (empty keystore, no TTY, no LANTERN_PASS — read-serve default; set LANTERN_PASS before first boot to encrypt)")
+			markUnencrypted(dir)
+			return "", nil
+		}
+		// Keys EXIST but we have no way to unlock them: this is a real
+		// misconfig and must fail loudly (never silently run with the wrong
+		// or empty passphrase against real keys).
+		return "", fmt.Errorf("keystore at %s holds keys but LANTERN_PASS is not set and stdin is not a TTY. "+
+			"Set LANTERN_PASS for non-interactive runs. For systemd: use "+
+			"EnvironmentFile=/etc/lantern/passphrase (chmod 600). "+
+			"To deliberately use an unencrypted keystore set LANTERN_PASS='' (explicit empty)", dir)
 	}
 
 	if hasKeys {
