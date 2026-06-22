@@ -120,32 +120,50 @@ jobs:
           find artifacts -type f \( -name 'lantern-*' \) -exec cp {} release/ \;
           ls -la release/
 
+      # Build the release body. If a hand-written RELEASE-NOTES-<tag>.md
+      # exists in the repo at this tag, use it verbatim as the body (this is
+      # the human "what changed / why update" changelog). Otherwise fall back
+      # to the generic boilerplate. Either way we append the standard
+      # install / binaries / reproducible-build footer so it's never lost.
+      - name: Assemble release body
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          NOTES="RELEASE-NOTES-${TAG}.md"
+          {
+            if [ -f "$NOTES" ]; then
+              cat "$NOTES"
+            else
+              echo "# Lantern ${TAG}"
+              echo
+              echo "Pure-Go Filecoin light node. No CGo, no snapshot, no third-party trust."
+              echo
+              echo "_(No hand-written changelog for this tag; see the commit list below.)_"
+            fi
+            echo
+            echo "---"
+            echo
+            echo "## Install (macOS / Linux)"
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://get.lantern.reiers.io | bash"
+            echo '```'
+            echo
+            echo "## Binaries"
+            echo
+            echo "All binaries are built \`CGO_ENABLED=0\` with \`-trimpath\`. SHA-256 manifests are published alongside each binary; see \`docs/REPRODUCIBLE-BUILDS.md\` to reproduce these bytes from source."
+            echo
+            echo "## Source tarball"
+            echo
+            echo "\`lantern-${TAG}-source.tar.gz\` is the byte-deterministic source archive produced by \`git archive\` at this tag, for reproducible-build verification."
+          } > release-body.md
+          echo "--- assembled release body ---"
+          cat release-body.md
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             release/*
           generate_release_notes: true
-          body: |
-            # Lantern ${{ github.ref_name }}
-
-            Pure-Go Filecoin light node. No CGo, no snapshot, no third-party trust.
-
-            ## Install (macOS / Linux)
-
-            ```sh
-            curl -fsSL https://get.lantern.reiers.io | bash
-            ```
-
-            ## Binaries
-
-            All binaries are built `CGO_ENABLED=0` with `-trimpath`. SHA-256
-            manifests are published alongside each binary; see also
-            `docs/REPRODUCIBLE-BUILDS.md` for how to reproduce these bytes
-            from source.
-
-            ## Source tarball
-
-            `lantern-${{ github.ref_name }}-source.tar.gz` is the
-            byte-deterministic source archive produced by `git archive` at
-            this tag, suitable for reproducible-build verification.
+          body_path: release-body.md
