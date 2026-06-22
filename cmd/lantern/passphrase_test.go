@@ -117,6 +117,43 @@ func TestResolvePassphrase_NoEnvNoTTY(t *testing.T) {
 	}
 }
 
+// Issue #3: a previously-recorded unencrypted choice (sentinel present) must
+// make resolvePassphrase silently return "" even with no TTY and no env var,
+// so a read-serve chain node does not re-prompt or hard-error on every boot.
+func TestResolvePassphrase_SentinelSilentNoTTY(t *testing.T) {
+	os.Unsetenv("LANTERN_PASS")
+	dir := t.TempDir()
+	markUnencrypted(dir)
+	if !hasUnencryptedSentinel(dir) {
+		t.Fatal("markUnencrypted did not create the sentinel")
+	}
+	got, err := resolvePassphrase(dir)
+	if err != nil {
+		t.Fatalf("sentinel present but got error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("got %q, want empty string for sentinel path", got)
+	}
+}
+
+// Issue #3: the explicit-empty LANTERN_PASS path should persist the choice
+// (write the sentinel) so later boots without the env var stay silent.
+func TestResolvePassphrase_EnvEmptyWritesSentinel(t *testing.T) {
+	t.Setenv("LANTERN_PASS", "")
+	var buf bytes.Buffer
+	oldW := passphraseErrW
+	passphraseErrW = &buf
+	defer func() { passphraseErrW = oldW }()
+
+	dir := t.TempDir()
+	if _, err := resolvePassphrase(dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasUnencryptedSentinel(dir) {
+		t.Error("explicit-empty LANTERN_PASS did not persist the unencrypted sentinel")
+	}
+}
+
 // Regression: the empty-string fallback that #2 fixes must NOT come back.
 // If anyone ever changes resolvePassphrase to silently return "" when env
 // is unset and there's no TTY, this test will catch it.

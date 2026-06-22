@@ -312,6 +312,40 @@ func migrateLegacyDataDir(n build.Network) error {
 // e.g. leaked libp2p goroutines under -race).
 var passphraseErrW io.Writer = os.Stderr
 
+// unencryptedSentinel is written into the keystore directory when the
+// operator deliberately runs with an unencrypted keystore (no LANTERN_PASS,
+// interactive opt-out, or the read-serve default). Its presence makes that
+// choice persistent so the daemon never re-prompts on subsequent restarts.
+//
+// Issue #3 (2026-06-22): an empty keystore on a read-serve chain node
+// (no signing keys; signing lives in the Curio/curio-core wallet) made
+// keystoreHasKeys() return false on EVERY boot, so resolvePassphrase took
+// the "fresh keystore" branch and prompted for a new passphrase each time.
+// Worse, a fresh wallet with no NewAddress call writes no key file, so the
+// keystore stayed empty and the prompt loop never ended. The sentinel makes
+// the unencrypted default a one-time, remembered decision.
+const unencryptedSentinel = ".unencrypted"
+
+// hasUnencryptedSentinel reports whether the operator previously chose an
+// unencrypted keystore for this directory.
+func hasUnencryptedSentinel(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, unencryptedSentinel))
+	return err == nil
+}
+
+// markUnencrypted records the unencrypted-keystore choice so future boots
+// don't re-prompt. Best-effort: a write failure is non-fatal (the node
+// still runs), it just means the next boot may prompt again.
+func markUnencrypted(dir string) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(dir, unencryptedSentinel),
+		[]byte("This keystore is intentionally unencrypted (no LANTERN_PASS).\n"+
+			"Delete this file and set LANTERN_PASS to switch to an encrypted keystore.\n"),
+		0o600)
+}
+
 func resolvePassphrase(dir string) (string, error) {
 	env, envSet := os.LookupEnv("LANTERN_PASS")
 	if envSet && env != "" {
@@ -320,6 +354,17 @@ func resolvePassphrase(dir string) (string, error) {
 	if envSet && env == "" {
 		// Operator explicitly opted out of encryption.
 		fmt.Fprintln(passphraseErrW, "\033[33m  warning: LANTERN_PASS is set but empty - keystore will be unencrypted\033[0m")
+		markUnencrypted(dir)
+		return "", nil
+	}
+
+	hasKeys := keystoreHasKeys(dir)
+
+	// Previously-chosen unencrypted keystore: never prompt again, regardless
+	// of TTY. This is the steady state for a read-serve chain node that holds
+	// no signing keys (Issue #3). It also covers the no-TTY restart case for
+	// such nodes so they don't hard-error on a missing LANTERN_PASS.
+	if hasUnencryptedSentinel(dir) {
 		return "", nil
 	}
 
@@ -331,7 +376,6 @@ func resolvePassphrase(dir string) (string, error) {
 			"To deliberately use an unencrypted keystore set LANTERN_PASS='' (explicit empty)")
 	}
 
-	hasKeys := keystoreHasKeys(dir)
 	if hasKeys {
 		fmt.Fprint(passphraseErrW, "Lantern keystore passphrase: ")
 		p, err := readPassword()
@@ -341,16 +385,20 @@ func resolvePassphrase(dir string) (string, error) {
 		return p, nil
 	}
 
-	// Fresh keystore. Prompt twice and require a match.
+	// Fresh keystore, interactive. Prompt ONCE (twice on a non-empty value to
+	// confirm). Opting out (empty value) writes the sentinel so the daemon
+	// runs unencrypted from here on without re-prompting.
 	fmt.Fprintln(passphraseErrW, "No existing Lantern keystore at", dir)
-	fmt.Fprintln(passphraseErrW, "Set a passphrase to encrypt local keys. Press enter without a value to opt out (NOT recommended).")
-	fmt.Fprint(passphraseErrW, "New passphrase: ")
+	fmt.Fprintln(passphraseErrW, "Set a passphrase to encrypt local keys, or press enter to run unencrypted")
+	fmt.Fprintln(passphraseErrW, "(fine for a read-only/backup chain node that holds no signing keys; this choice is remembered).")
+	fmt.Fprint(passphraseErrW, "New passphrase (enter = unencrypted): ")
 	p1, err := readPassword()
 	if err != nil {
 		return "", fmt.Errorf("read passphrase: %w", err)
 	}
 	if p1 == "" {
-		fmt.Fprintln(passphraseErrW, "\033[33m  warning: keystore will be unencrypted\033[0m")
+		fmt.Fprintln(passphraseErrW, "\033[33m  keystore will be unencrypted (remembered; delete "+filepath.Join(dir, unencryptedSentinel)+" + set LANTERN_PASS to change)\033[0m")
+		markUnencrypted(dir)
 		return "", nil
 	}
 	fmt.Fprint(passphraseErrW, "Confirm passphrase: ")
