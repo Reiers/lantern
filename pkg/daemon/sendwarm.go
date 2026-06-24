@@ -71,8 +71,8 @@ type sendWarmer struct {
 	// pollInterval / maxDuration / maxConcurrent are fields (not the bare
 	// consts) so tests can drive the loop fast. Production uses the const
 	// defaults via newSendWarmer.
-	pollInterval time.Duration
-	maxDuration  time.Duration
+	pollInterval  time.Duration
+	maxDuration   time.Duration
 	maxConcurrent int
 
 	mu       sync.Mutex
