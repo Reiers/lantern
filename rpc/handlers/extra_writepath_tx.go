@@ -208,14 +208,14 @@ func (c *ChainAPI) localEthGetTransactionReceipt(ctx context.Context, txHash str
 	if c.HeaderStore == nil {
 		return nil, false, nil
 	}
-	msgCID, ok := c.sentTx().get(strings.ToLower(txHash))
+	rec, ok := c.sentTx().getRecord(strings.ToLower(txHash))
 	if !ok {
 		log.Debugw("eth_getTransactionReceipt: tx not in local sent index, bridging", "txHash", txHash)
 		return nil, false, nil // not ours -> bridge
 	}
-	lookup, err := c.StateSearchMsg(ctx, types.TipSetKey{}, msgCID, 0, false)
+	lookup, err := c.StateSearchMsg(ctx, types.TipSetKey{}, rec.msgCID, 0, false)
 	if err != nil {
-		log.Debugw("eth_getTransactionReceipt: StateSearchMsg error, bridging", "txHash", txHash, "msgCID", msgCID, "err", err)
+		log.Debugw("eth_getTransactionReceipt: StateSearchMsg error, bridging", "txHash", txHash, "msgCID", rec.msgCID, "err", err)
 		return nil, false, nil // degrade to bridge on lookup error
 	}
 	if lookup == nil {
@@ -224,7 +224,7 @@ func (c *ChainAPI) localEthGetTransactionReceipt(ctx context.Context, txHash str
 		// bridge for a tx only we can resolve.
 		return nil, true, nil
 	}
-	return ethReceiptFromLookup(txHash, lookup), true, nil
+	return ethReceiptFromLookup(txHash, lookup, rec), true, nil
 }
 
 // localEthGetTransactionByHash resolves a tx object locally for a tx we
@@ -301,7 +301,7 @@ func bigHex(v *big.Int) string {
 // curio-core #81 watcher) read: status, blockNumber, transactionHash,
 // gasUsed, blockHash, transactionIndex, cumulativeGasUsed, logs,
 // logsBloom. status = 1 when the message exit code is Ok, else 0.
-func ethReceiptFromLookup(txHash string, lookup *api.MsgLookup) map[string]any {
+func ethReceiptFromLookup(txHash string, lookup *api.MsgLookup, rec sentTxRecord) map[string]any {
 	status := "0x0"
 	if lookup.Receipt.ExitCode == exitcode.Ok {
 		status = "0x1"
@@ -313,11 +313,19 @@ func ethReceiptFromLookup(txHash string, lookup *api.MsgLookup) map[string]any {
 	// we provide a stable non-empty hash from the tipset key.
 	blockHash := tipsetEthHash(lookup.TipSet)
 
-	return map[string]any{
+	// Standard eth_getTransactionReceipt requires from/to/contractAddress and
+	// (post-1559) effectiveGasPrice. Omitting them breaks strict clients
+	// (cast/ethers deserialize "missing field `from`") and any cost display
+	// (effectiveGasPrice * gasUsed). from/to come from the locally-tracked
+	// sent-tx record; effectiveGasPrice is the tx's maxFeePerGas as a
+	// conservative stand-in (Lantern V1 has no per-tipset base-fee receipt
+	// reconstruction; clients that need exact effective price still bridge).
+	out := map[string]any{
 		"transactionHash":   strings.ToLower(txHash),
 		"transactionIndex":  "0x0",
 		"blockHash":         blockHash,
 		"blockNumber":       blockNum,
+		"from":              "0x" + hex.EncodeToString(rec.from[:]),
 		"cumulativeGasUsed": "0x" + uint64Hex(uint64(lookup.Receipt.GasUsed)),
 		"gasUsed":           "0x" + uint64Hex(uint64(lookup.Receipt.GasUsed)),
 		"status":            status,
@@ -325,6 +333,19 @@ func ethReceiptFromLookup(txHash string, lookup *api.MsgLookup) map[string]any {
 		"logsBloom":         "0x" + strings.Repeat("00", 256),
 		"type":              "0x2",
 	}
+	// to / contractAddress: contract creation has nil To (*[20]byte).
+	if rec.tx != nil && rec.tx.To != nil {
+		out["to"] = "0x" + hex.EncodeToString(rec.tx.To[:])
+		out["contractAddress"] = nil
+	} else {
+		out["to"] = nil
+		// contractAddress left nil; Lantern V1 doesn't reconstruct created addr.
+		out["contractAddress"] = nil
+	}
+	if rec.tx != nil {
+		out["effectiveGasPrice"] = "0x" + rec.tx.MaxFeePerGas.Text(16)
+	}
+	return out
 }
 
 // abiEpochHex / uint64Hex format quantities without a leading-zero-padded
