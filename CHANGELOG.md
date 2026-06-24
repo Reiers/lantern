@@ -2,6 +2,49 @@
 
 All notable changes to Lantern.
 
+## v1.7.24 (2026-06-24)
+
+Complete `eth_getTransactionReceipt` fields — strict-client compatibility and
+fee computation off locally-served receipts.
+
+### Fixed
+
+- **`eth_getTransactionReceipt` now returns `from`, `to`, `contractAddress`
+  and `effectiveGasPrice`.** The locally-served receipt (zero-Glif write path)
+  previously omitted them, so strict eth clients (`cast receipt`, ethers,
+  web3) failed to deserialize (`missing field 'from'`) and transaction fee
+  (`effectiveGasPrice × gasUsed`) could not be computed locally. `from`/`to`
+  come from the locally-tracked sent-tx record; `to` is `null` for contract
+  creation. `contractAddress` is present (currently `null`; V1 does not yet
+  reconstruct the created-contract address). `effectiveGasPrice` uses the tx
+  `maxFeePerGas` as a conservative upper-bound stand-in (V1 does not
+  reconstruct the per-tipset base fee at receipt time). Bridge-forwarded
+  receipts are unchanged.
+
+## v1.7.23 (2026-06-22)
+
+Keystore & service-start fix — stop re-prompting for a passphrase and start
+cleanly as a background service.
+
+### Fixed
+
+- **Passphrase no longer re-prompts on every start (#3).** Lantern holds no
+  signing keys of its own (signing lives in the Curio / curio-core wallet), so
+  its keystore is empty. The old build read an empty keystore as a brand-new
+  node on every boot and re-asked to set a passphrase; it now records the
+  choice once and stays quiet on subsequent starts.
+- **Background-service install starts cleanly on a fresh node (#1).** Same root
+  cause: a first boot with no terminal attached (systemd/launchd) hit the
+  "no passphrase, no TTY" path and the daemon exited before it could persist
+  anything, so the service died and only a hand-run in `screen`/`tmux` worked.
+  A keyless keystore + no terminal now defaults to an unencrypted keystore,
+  records it, and starts.
+
+### Changed
+
+- Release workflow assembles the GitHub release body from
+  `RELEASE-NOTES-<tag>.md`.
+
 ## v1.7.22 (2026-06-22)
 
 Background-service install hardening — the bug a background-mode tester hit.
