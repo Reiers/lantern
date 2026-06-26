@@ -2,6 +2,36 @@
 
 All notable changes to Lantern.
 
+## v1.8.0 (2026-06-26)
+
+Security hardening: trust model, bootstrap, and auth. Self-audit (#60) of the
+trust/bootstrap/auth surface. No protocol/wire changes; the content-addressed
+data-integrity model was already sound — these close the gaps around it. No new
+external dependencies.
+
+### Security
+
+- **#54 — verified boot anchor.** The boot trusted-root is no longer accepted
+  from a single source on faith. It now requires multi-source agreement
+  (gateway + Glif) on `(StateRoot, TipSetKey)`, cross-checks the latest F3
+  finality certificate (rejecting fork-below-finality), prefers heavier
+  `ParentWeight` only when F3-safe, and otherwise refuses to boot.
+  `--insecure-anchor` restores single-source boot for dev.
+- **#56 — RPC write-path auth.** `eth_sendRawTransaction`/`eth_sendTransaction`
+  now require the `sign` permission (they previously fell through to the
+  unauthenticated read default because `eth_*` names bypassed the perm switch).
+  The RPC refuses a non-loopback bind without `--allow-remote-rpc`.
+- **#58 — keystore fail-loud** (also closes #2). An empty passphrase on a
+  keystore that already holds keys is refused unless `LANTERN_ALLOW_EMPTY_PASS=1`
+  / `--allow-empty-passphrase`.
+- **#55 — HTTPS gateway.** Plain-`http://` gateway URLs are refused unless
+  `--insecure-gateway` (loopback exempt).
+- **#57 — dashboard auth.** The dashboard/metrics listener refuses a non-loopback
+  bind without `--allow-remote-dashboard` and requires a `LANTERN_DASHBOARD_TOKEN`
+  Bearer when so bound.
+- **#59 — beacon eclipse resistance.** A built-in trusted beacon floor seeds
+  cert-exchange before DHT discovery warms; the DHT-discovered pool is capped.
+
 ## v1.7.24 (2026-06-24)
 
 Complete `eth_getTransactionReceipt` fields — strict-client compatibility and
