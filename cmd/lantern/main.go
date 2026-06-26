@@ -42,6 +42,7 @@ import (
 	"github.com/ipfs/go-cid"
 
 	"github.com/Reiers/lantern/build"
+	"github.com/Reiers/lantern/chain/anchorverify"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	headnotify "github.com/Reiers/lantern/chain/headnotify"
@@ -487,19 +488,141 @@ func fetchTrustedHead(ctx context.Context, gw string, network build.Network) (*t
 	return tr, nil
 }
 
+// f3RPCURLForNetwork returns the public Glif F3 JSON-RPC endpoint for a
+// given network. Used for the best-effort latest-cert probe + the #54
+// finality cross-check.
+func f3RPCURLForNetwork(n build.Network) string {
+	if n == build.Calibration {
+		return "https://api.calibration.node.glif.io/rpc/v1"
+	}
+	return "https://api.node.glif.io/rpc/v1"
+}
+
 // attachF3Latest does a best-effort Filecoin.F3GetLatestCertificate probe
-// against Glif so the dashboard can render F3 instance. Failures are
-// silent; this is observability, not chain consensus.
+// so the dashboard can render F3 instance. Failures are silent; this is
+// observability, not chain consensus.
 func attachF3Latest(ctx context.Context, tr *trustedroot.TrustedRoot) {
+	attachF3LatestForNetwork(ctx, tr, build.Mainnet)
+}
+
+func attachF3LatestForNetwork(ctx context.Context, tr *trustedroot.TrustedRoot, network build.Network) {
 	probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
-	src := subscriber.NewJSONRPCSource("https://api.node.glif.io/rpc/v1")
+	src := subscriber.NewJSONRPCSource(f3RPCURLForNetwork(network))
 	cert, err := src.GetLatest(probeCtx)
 	if err != nil || cert == nil {
 		return
 	}
 	tr.F3Instance = cert.GPBFTInstance
 	tr.F3Cert = cert
+}
+
+// --- #54: verified boot anchor ---
+//
+// gatewayHeadFetcher / glifHeadFetcher adapt the existing block-source
+// clients to anchorverify.HeadFetcher so the boot path can gather >=2
+// independent views of the head and require agreement.
+
+type gatewayHeadFetcher struct{ gw string }
+
+func (g gatewayHeadFetcher) FetchCandidate(ctx context.Context) (anchorverify.Candidate, error) {
+	hc := hsync.NewClient([]string{g.gw}, 5*time.Second)
+	head, err := hc.GetStateHead(ctx)
+	if err != nil {
+		return anchorverify.Candidate{}, fmt.Errorf("gateway head: %w", err)
+	}
+	sr, err := cid.Parse(head.StateRoot)
+	if err != nil {
+		return anchorverify.Candidate{}, fmt.Errorf("gateway state root parse: %w", err)
+	}
+	tskCids := make([]cid.Cid, 0, len(head.TipsetKey))
+	for _, s := range head.TipsetKey {
+		if c, e := cid.Parse(s); e == nil {
+			tskCids = append(tskCids, c)
+		}
+	}
+	pw, _ := big.FromString(head.ParentWeight)
+	return anchorverify.Candidate{
+		Source:       "gateway",
+		Epoch:        abi.ChainEpoch(head.Epoch),
+		StateRoot:    sr,
+		TipSetKey:    types.NewTipSetKey(tskCids...),
+		ParentWeight: pw,
+	}, nil
+}
+
+type glifHeadFetcher struct{ url string }
+
+func (g glifHeadFetcher) FetchCandidate(ctx context.Context) (anchorverify.Candidate, error) {
+	gc := glif.New(g.url, 10*time.Second)
+	gh, err := gc.FetchHead(ctx)
+	if err != nil {
+		return anchorverify.Candidate{}, fmt.Errorf("glif head: %w", err)
+	}
+	return anchorverify.Candidate{
+		Source:       "glif",
+		Epoch:        gh.Epoch,
+		StateRoot:    gh.StateRoot,
+		TipSetKey:    gh.TipSetKey,
+		ParentWeight: gh.ParentWeight,
+	}, nil
+}
+
+// fetchVerifiedTrustedHead is the hardened boot anchor selection (#54).
+// It gathers the head from the gateway AND Glif (two independent operators),
+// requires them to agree on (StateRoot, TipSetKey), and cross-checks the
+// result against the latest F3 finality certificate when one is available.
+// On disagreement it prefers the heavier ParentWeight (Filecoin fork choice)
+// only when F3 proves no fork-below-finality, and otherwise refuses to boot.
+//
+// --insecure-anchor (insecure=true) restores the legacy single-source
+// behaviour for localhost/dev against a trusted endpoint.
+func fetchVerifiedTrustedHead(ctx context.Context, gw string, network build.Network, insecure bool) (*trustedroot.TrustedRoot, error) {
+	now := time.Now().UTC()
+	pol := anchorverify.Policy{
+		MinAgreeingSources:        2,
+		InsecureAllowSingleSource: insecure,
+		Warnf: func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, "  [anchor] "+format+"\n", args...)
+		},
+	}
+
+	cands := anchorverify.Gather(ctx, pol,
+		gatewayHeadFetcher{gw: gw},
+		glifHeadFetcher{url: glifURLForNetwork(network)},
+	)
+
+	// Best-effort F3 latest cert for the finality cross-check.
+	var f3 anchorverify.F3Finalized
+	{
+		probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		src := subscriber.NewJSONRPCSource(f3RPCURLForNetwork(network))
+		if cert, err := src.GetLatest(probeCtx); err == nil && cert != nil {
+			if fin, ferr := anchorverify.FinalizedFromCert(cert); ferr == nil {
+				f3 = fin
+			}
+		}
+		cancel()
+	}
+
+	res, err := anchorverify.Verify(cands, f3, pol)
+	if err != nil {
+		// Hard fail: do not silently fall back to trusting one source.
+		return nil, fmt.Errorf("boot anchor verification failed (#54): %w "+
+			"(set --insecure-anchor to override on a single trusted endpoint)", err)
+	}
+	fmt.Printf("  anchor:   verified via %s (epoch %d, agreeing sources=%d, f3-checked=%t)\n",
+		res.Method, res.Chosen.Epoch, res.AgreeingSources, res.F3Checked)
+
+	tr := &trustedroot.TrustedRoot{
+		Epoch:        res.Chosen.Epoch,
+		StateRoot:    res.Chosen.StateRoot,
+		TipSetKey:    res.Chosen.TipSetKey,
+		ParentWeight: res.Chosen.ParentWeight,
+		AcceptedAt:   now,
+	}
+	attachF3LatestForNetwork(ctx, tr, network)
+	return tr, nil
 }
 
 // --- daemon ---
@@ -516,6 +639,7 @@ func cmdDaemon(args []string) error {
 	notifyBufSize := fs.Int("notify-buf", headnotify.DefaultBufferSize, "ChainNotify per-subscriber buffer size")
 	p2pListen := fs.String("p2p-listen", "/ip4/0.0.0.0/tcp/0,/ip4/0.0.0.0/udp/0/quic-v1", "libp2p listen multiaddrs (comma-separated). Empty disables the libp2p host.")
 	noLibp2p := fs.Bool("no-libp2p", false, "Skip starting the libp2p host (RPC stays up; Net* stats return zero).")
+	insecureAnchor := fs.Bool("insecure-anchor", false, "SECURITY (#54): accept the boot trusted-root from a single source without multi-source agreement or F3 finality cross-check. Intended for localhost/dev against one trusted endpoint only.")
 	bitswapEnabled := fs.Bool("bitswap", true, "Use Bitswap as primary fetch source (HTTP gateway falls to last resort).")
 	bitswapFastDL := fs.Duration("bitswap-fast", 1500*time.Millisecond, "Bitswap fast-stage deadline for preferred peers.")
 	bitswapFullDL := fs.Duration("bitswap-full", 5*time.Second, "Bitswap full-stage deadline for swarm broadcast.")
@@ -609,7 +733,7 @@ func cmdDaemon(args []string) error {
 	fmt.Printf("Lantern daemon — Lotus-compatible RPC (network: %s)\n", network)
 	fmt.Printf("  data dir:    %s\n", netDir)
 	fmt.Println("Fetching trusted head from", *gw)
-	tr, err := fetchTrustedHead(ctx, *gw, network)
+	tr, err := fetchVerifiedTrustedHead(ctx, *gw, network, *insecureAnchor)
 	if err != nil {
 		return err
 	}
