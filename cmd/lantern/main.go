@@ -29,6 +29,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -673,6 +674,7 @@ func cmdDaemon(args []string) error {
 	insecureAnchor := fs.Bool("insecure-anchor", false, "SECURITY (#54): accept the boot trusted-root from a single source without multi-source agreement or F3 finality cross-check. Intended for localhost/dev against one trusted endpoint only.")
 	allowRemoteRPC := fs.Bool("allow-remote-rpc", false, "SECURITY (#56): permit binding JSON-RPC --listen to a non-loopback address. The RPC holds wallet keys + a signing write path; only loopback is safe without a fronting auth proxy. Off by default — set explicitly to expose the port and rely on Bearer-token perms.")
 	allowEmptyPass := fs.Bool("allow-empty-passphrase", false, "SECURITY (#58): deliberately run with an UNENCRYPTED keystore even when it holds keys. Equivalent to LANTERN_ALLOW_EMPTY_PASS=1. Off by default — the daemon refuses an empty passphrase on a keystore that already holds (possibly funded) signing keys.")
+	insecureGateway := fs.Bool("insecure-gateway", false, "SECURITY (#55): allow a plain-http:// gateway URL. The boot anchor + cold-block fetches traverse the gateway; without TLS a network attacker can MITM them. Off by default — required only for localhost/dev against an http endpoint.")
 	bitswapEnabled := fs.Bool("bitswap", true, "Use Bitswap as primary fetch source (HTTP gateway falls to last resort).")
 	bitswapFastDL := fs.Duration("bitswap-fast", 1500*time.Millisecond, "Bitswap fast-stage deadline for preferred peers.")
 	bitswapFullDL := fs.Duration("bitswap-full", 5*time.Second, "Bitswap full-stage deadline for swarm broadcast.")
@@ -707,6 +709,14 @@ func cmdDaemon(args []string) error {
 	// reads. Set it before any wallet open so the guard sees it.
 	if *allowEmptyPass {
 		_ = os.Setenv("LANTERN_ALLOW_EMPTY_PASS", "1")
+	}
+
+	// #55: reject a plain-http gateway unless explicitly allowed. The boot
+	// anchor + cold-block fetches traverse this URL; HTTP has no transport
+	// integrity, so a MITM could seed a bad anchor (the CID-verify backstop
+	// protects state under a root, not the choice of root — see #54).
+	if err := validateGatewayScheme(*gw, *insecureGateway); err != nil {
+		return err
 	}
 
 	network := build.Network(*networkFlag)
@@ -1382,6 +1392,35 @@ func cmdState(args []string) error {
 		return nil
 	}
 	return fmt.Errorf("state: unknown subcommand %q", args[0])
+}
+
+// validateGatewayScheme enforces the #55 transport-integrity rule: the
+// gateway URL must be https:// unless the operator explicitly opts into an
+// insecure plain-http endpoint (localhost/dev). http://localhost and
+// http://127.0.0.1 are allowed without the flag since loopback has no
+// meaningful MITM surface.
+func validateGatewayScheme(gw string, insecure bool) error {
+	u, err := url.Parse(gw)
+	if err != nil {
+		return fmt.Errorf("invalid --gateway %q: %w", gw, err)
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		host := u.Hostname()
+		if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+			return nil // loopback: no MITM surface
+		}
+		if insecure {
+			fmt.Fprintf(os.Stderr, "  [gateway] WARNING: using plain-http gateway %q (--insecure-gateway). Boot anchor + cold fetches are MITM-able.\n", gw)
+			return nil
+		}
+		return fmt.Errorf("refusing plain-http gateway %q (#55: no transport integrity; "+
+			"a MITM could seed a bad boot anchor). Use https://, or set --insecure-gateway for a trusted localhost/dev endpoint", gw)
+	default:
+		return fmt.Errorf("unsupported --gateway scheme %q in %q (want https:// or http://)", u.Scheme, gw)
+	}
 }
 
 // isLoopbackListen reports whether a "host:port" (or ":port") RPC listen
