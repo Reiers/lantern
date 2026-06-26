@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"net"
 	"net/http"
@@ -65,7 +66,7 @@ func rebindBlockGetter(c *handlers.ChainAPI, bg hamt.BlockGetter) {
 // When `dash` is non-nil (issue #5) the same listener also serves the
 // operator dashboard at /dashboard/ + JSON endpoints under
 // /api/dashboard/*. Pass nil to disable the dashboard.
-func serveMetrics(ctx context.Context, addr string, f *combined.Fetcher, bs *lbitswap.Client, host *llibp2p.Host, dash *dashboardDeps) {
+func serveMetrics(ctx context.Context, addr, token string, f *combined.Fetcher, bs *lbitswap.Client, host *llibp2p.Host, dash *dashboardDeps) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
@@ -125,10 +126,36 @@ func serveMetrics(ctx context.Context, addr string, f *combined.Fetcher, bs *lbi
 		fmt.Printf("  metrics listener failed: %v\n", err)
 		return
 	}
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	var handler http.Handler = mux
+	if token != "" {
+		handler = dashboardTokenAuth(token, mux)
+	}
+	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
 		_ = srv.Close()
 	}()
 	_ = srv.Serve(ln)
+}
+
+// dashboardTokenAuth wraps the dashboard/metrics mux with a Bearer-token
+// gate (#57). Used when the listener is bound to a non-loopback address.
+// /healthz stays open so external probes/load-balancers still work; every
+// other path requires `Authorization: Bearer <token>`. The comparison is
+// constant-time to avoid leaking the token via timing.
+func dashboardTokenAuth(token string, next http.Handler) http.Handler {
+	want := []byte("Bearer " + token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		got := []byte(r.Header.Get("Authorization"))
+		if len(got) != len(want) || subtle.ConstantTimeCompare(got, want) != 1 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized (#57: dashboard requires LANTERN_DASHBOARD_TOKEN bearer)", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

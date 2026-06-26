@@ -687,6 +687,7 @@ func cmdDaemon(args []string) error {
 	// /metrics.
 	metricsListen := fs.String("metrics", "127.0.0.1:9092", "Listen address for /metrics + /dashboard. Empty string disables both.")
 	noDashboard := fs.Bool("no-dashboard", false, "Skip serving /dashboard/; /metrics still served if --metrics is set.")
+	allowRemoteDash := fs.Bool("allow-remote-dashboard", false, "SECURITY (#57): permit binding --metrics/dashboard to a non-loopback address. The dashboard exposes node internals + action buttons; only loopback is safe without auth. When bound non-loopback, a LANTERN_DASHBOARD_TOKEN is REQUIRED and enforced as a Bearer token.")
 
 	// Issue #4: VM bridge for block production state-root computation.
 	//
@@ -1029,6 +1030,22 @@ func cmdDaemon(args []string) error {
 	// so a fresh `lantern daemon` always has a webui without extra flags.
 	var dashboardURL string
 	if *metricsListen != "" {
+		// SECURITY #57: the dashboard/metrics listener exposes node internals
+		// + action POST endpoints (guarded only by a same-origin header).
+		// Refuse a non-loopback bind unless explicitly allowed, and when
+		// allowed require a Bearer token so the surface isn't world-open.
+		dashToken := strings.TrimSpace(os.Getenv("LANTERN_DASHBOARD_TOKEN"))
+		if !isLoopbackListen(*metricsListen) {
+			if !*allowRemoteDash {
+				return fmt.Errorf("refusing to bind dashboard/metrics to non-loopback %q without --allow-remote-dashboard "+
+					"(#57: exposes node internals + action buttons)", *metricsListen)
+			}
+			if dashToken == "" {
+				return fmt.Errorf("dashboard bound to non-loopback %q requires LANTERN_DASHBOARD_TOKEN to be set "+
+					"(#57: a Bearer token gates the exposed surface)", *metricsListen)
+			}
+			fmt.Fprintf(os.Stderr, "  [dashboard] WARNING: bound to non-loopback %q; Bearer-token auth enforced.\n", *metricsListen)
+		}
 		var dash *dashboardDeps
 		if !*noDashboard {
 			bridgeTag := ""
@@ -1056,7 +1073,7 @@ func cmdDaemon(args []string) error {
 			}
 			dashboardURL = fmt.Sprintf("http://%s/dashboard/", *metricsListen)
 		}
-		go serveMetrics(ctx, *metricsListen, fetcher, bsClient, p2pHost, dash)
+		go serveMetrics(ctx, *metricsListen, dashToken, fetcher, bsClient, p2pHost, dash)
 		fmt.Printf("  metrics:  http://%s/metrics\n", *metricsListen)
 		if dashboardURL != "" {
 			fmt.Printf("  dashboard: %s\n", dashboardURL)
