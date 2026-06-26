@@ -313,13 +313,44 @@ func migrateLegacyDataDir(n build.Network) error {
 // e.g. leaked libp2p goroutines under -race).
 var passphraseErrW io.Writer = os.Stderr
 
+// emptyPassAllowed reports whether the operator has explicitly acknowledged
+// running an unencrypted keystore (#58). Set by LANTERN_ALLOW_EMPTY_PASS=1
+// (env, works for systemd/CLI) or the daemon --allow-empty-passphrase flag
+// (which sets the env before resolvePassphrase runs).
+func emptyPassAllowed() bool {
+	v := strings.TrimSpace(os.Getenv("LANTERN_ALLOW_EMPTY_PASS"))
+	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
+}
+
+// guardEmptyPassphraseWithKeys enforces the #58 fail-loud rule: an empty
+// passphrase is refused when the keystore already holds keys (which, on a
+// node running the live write path, are funded signing keys) unless the
+// operator explicitly opted in. Encrypting nothing is harmless; leaving
+// funded keys at rest unencrypted silently is not.
+func guardEmptyPassphraseWithKeys(dir string) error {
+	if !keystoreHasKeys(dir) {
+		return nil // fresh/empty keystore: nothing to protect yet
+	}
+	if emptyPassAllowed() {
+		fmt.Fprintln(passphraseErrW, "\033[33m  warning: keystore holds keys and is UNENCRYPTED (LANTERN_ALLOW_EMPTY_PASS set)\033[0m")
+		return nil
+	}
+	return fmt.Errorf("refusing empty passphrase: keystore at %s already holds keys "+
+		"(#58: these may be funded signing keys; an empty passphrase stores them unencrypted). "+
+		"Set a real LANTERN_PASS, or set LANTERN_ALLOW_EMPTY_PASS=1 (or --allow-empty-passphrase) to deliberately run unencrypted", dir)
+}
+
 func resolvePassphrase(dir string) (string, error) {
 	env, envSet := os.LookupEnv("LANTERN_PASS")
 	if envSet && env != "" {
 		return env, nil
 	}
 	if envSet && env == "" {
-		// Operator explicitly opted out of encryption.
+		// Operator set LANTERN_PASS="" to opt out of encryption. Still
+		// fail-loud when funded keys exist unless explicitly acknowledged.
+		if err := guardEmptyPassphraseWithKeys(dir); err != nil {
+			return "", err
+		}
 		fmt.Fprintln(passphraseErrW, "\033[33m  warning: LANTERN_PASS is set but empty - keystore will be unencrypted\033[0m")
 		return "", nil
 	}
@@ -641,6 +672,7 @@ func cmdDaemon(args []string) error {
 	noLibp2p := fs.Bool("no-libp2p", false, "Skip starting the libp2p host (RPC stays up; Net* stats return zero).")
 	insecureAnchor := fs.Bool("insecure-anchor", false, "SECURITY (#54): accept the boot trusted-root from a single source without multi-source agreement or F3 finality cross-check. Intended for localhost/dev against one trusted endpoint only.")
 	allowRemoteRPC := fs.Bool("allow-remote-rpc", false, "SECURITY (#56): permit binding JSON-RPC --listen to a non-loopback address. The RPC holds wallet keys + a signing write path; only loopback is safe without a fronting auth proxy. Off by default — set explicitly to expose the port and rely on Bearer-token perms.")
+	allowEmptyPass := fs.Bool("allow-empty-passphrase", false, "SECURITY (#58): deliberately run with an UNENCRYPTED keystore even when it holds keys. Equivalent to LANTERN_ALLOW_EMPTY_PASS=1. Off by default — the daemon refuses an empty passphrase on a keystore that already holds (possibly funded) signing keys.")
 	bitswapEnabled := fs.Bool("bitswap", true, "Use Bitswap as primary fetch source (HTTP gateway falls to last resort).")
 	bitswapFastDL := fs.Duration("bitswap-fast", 1500*time.Millisecond, "Bitswap fast-stage deadline for preferred peers.")
 	bitswapFullDL := fs.Duration("bitswap-full", 5*time.Second, "Bitswap full-stage deadline for swarm broadcast.")
@@ -670,6 +702,12 @@ func cmdDaemon(args []string) error {
 	vmBridgeTimeout := fs.Duration("vm-bridge-timeout", 30*time.Second, "Per-request timeout for VM bridge RPC calls.")
 	allowBlockSubmit := fs.Bool("allow-block-submit", false, "Allow SyncSubmitBlock to publish to gossipsub. Requires --vm-bridge-rpc.")
 	fs.Parse(args)
+
+	// #58: --allow-empty-passphrase is sugar for the env the keystore guard
+	// reads. Set it before any wallet open so the guard sees it.
+	if *allowEmptyPass {
+		_ = os.Setenv("LANTERN_ALLOW_EMPTY_PASS", "1")
+	}
 
 	network := build.Network(*networkFlag)
 	if !network.Valid() {
