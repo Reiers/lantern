@@ -640,6 +640,7 @@ func cmdDaemon(args []string) error {
 	p2pListen := fs.String("p2p-listen", "/ip4/0.0.0.0/tcp/0,/ip4/0.0.0.0/udp/0/quic-v1", "libp2p listen multiaddrs (comma-separated). Empty disables the libp2p host.")
 	noLibp2p := fs.Bool("no-libp2p", false, "Skip starting the libp2p host (RPC stays up; Net* stats return zero).")
 	insecureAnchor := fs.Bool("insecure-anchor", false, "SECURITY (#54): accept the boot trusted-root from a single source without multi-source agreement or F3 finality cross-check. Intended for localhost/dev against one trusted endpoint only.")
+	allowRemoteRPC := fs.Bool("allow-remote-rpc", false, "SECURITY (#56): permit binding JSON-RPC --listen to a non-loopback address. The RPC holds wallet keys + a signing write path; only loopback is safe without a fronting auth proxy. Off by default — set explicitly to expose the port and rely on Bearer-token perms.")
 	bitswapEnabled := fs.Bool("bitswap", true, "Use Bitswap as primary fetch source (HTTP gateway falls to last resort).")
 	bitswapFastDL := fs.Duration("bitswap-fast", 1500*time.Millisecond, "Bitswap fast-stage deadline for preferred peers.")
 	bitswapFullDL := fs.Duration("bitswap-full", 5*time.Second, "Bitswap full-stage deadline for swarm broadcast.")
@@ -1014,6 +1015,19 @@ func cmdDaemon(args []string) error {
 		}
 	}
 
+	// SECURITY #56: refuse to bind the key-holding, signing-capable RPC to a
+	// non-loopback address unless the operator explicitly opted in. The
+	// listener defends wallet keys + the eth_sendRawTransaction write path;
+	// loopback is the only safe default without a fronting auth proxy.
+	if !isLoopbackListen(*listen) && !*allowRemoteRPC {
+		return fmt.Errorf("refusing to bind RPC to non-loopback address %q without --allow-remote-rpc "+
+			"(#56: the RPC holds wallet keys + a signing write path; expose it only behind an auth proxy and set --allow-remote-rpc to acknowledge)", *listen)
+	}
+	if !isLoopbackListen(*listen) && *allowRemoteRPC {
+		fmt.Fprintf(os.Stderr, "  [rpc] WARNING: RPC bound to non-loopback %q (--allow-remote-rpc). "+
+			"Privileged methods require a Bearer token; ensure the port is firewalled / proxied.\n", *listen)
+	}
+
 	srv, err := server.New(server.Config{
 		ListenAddress: *listen,
 		// Stage 2 (#51): jwt-secret + scope tokens live under secrets/.
@@ -1330,6 +1344,30 @@ func cmdState(args []string) error {
 		return nil
 	}
 	return fmt.Errorf("state: unknown subcommand %q", args[0])
+}
+
+// isLoopbackListen reports whether a "host:port" (or ":port") RPC listen
+// address binds only to the loopback interface. An empty/":port"/"0.0.0.0"
+// host is treated as non-loopback (binds all interfaces). Used by the #56
+// non-loopback bind guard. Hostnames that aren't literal IPs are treated as
+// non-loopback (fail-safe) except the literal "localhost".
+func isLoopbackListen(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		// No port? Treat the whole string as host.
+		host = addr
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	// Non-literal hostname: fail safe.
+	return false
 }
 
 // --- info ---

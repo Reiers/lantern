@@ -526,8 +526,19 @@ func (a *Auth) handle(ctx context.Context, r *http.Request) (context.Context, []
 
 // methodPermission returns the required permission scope for a JSON-RPC
 // method name. Matches the `perm:` tags on FullNodeProxy.Internal.
+//
+// Security #56: the eth_* namespace is gated here too. Before this fix
+// methodPermission only matched Filecoin.* method names, so eth_* methods
+// (including the live signing write path eth_sendRawTransaction) fell
+// through to the PermRead default and were callable with no token. eth_*
+// method names use an underscore separator (e.g. "eth_sendRawTransaction"),
+// not a dot, so they bypassed the dot-strip + Filecoin switch entirely.
 func methodPermission(method string) auth.Permission {
-	// Strip namespace prefix.
+	// eth_*/net_*/web3_* namespaces use an underscore separator.
+	if i := strings.IndexByte(method, '_'); i >= 0 && !strings.ContainsRune(method, '.') {
+		return ethNamespacePermission(method)
+	}
+	// Strip Filecoin/<ns>. namespace prefix.
 	if i := strings.IndexByte(method, '.'); i >= 0 {
 		method = method[i+1:]
 	}
@@ -538,6 +549,21 @@ func methodPermission(method string) auth.Permission {
 		return api.PermSign
 	case "WalletNew", "WalletDelete", "WalletSetDefault", "MpoolPush", "SyncSubmitBlock":
 		return api.PermWrite
+	default:
+		return api.PermRead
+	}
+}
+
+// ethNamespacePermission gates the eth_*/net_*/web3_* JSON-RPC surface.
+// The only state-mutating method Lantern exposes here is
+// eth_sendRawTransaction (the zero-Glif write path: it signs/relays a real
+// signed tx into the mempool), which requires PermSign. Everything else on
+// the eth_/net_/web3_ surface is read-only and stays at PermRead so dapps
+// and the synapse-sdk read flow work without a token, exactly as before.
+func ethNamespacePermission(method string) auth.Permission {
+	switch method {
+	case "eth_sendRawTransaction", "eth_sendTransaction":
+		return api.PermSign
 	default:
 		return api.PermRead
 	}
