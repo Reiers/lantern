@@ -17,6 +17,7 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/discovery/routing"
 	"github.com/multiformats/go-multiaddr"
 
+	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
 )
 
@@ -53,8 +54,14 @@ func (p *dhtBeaconProvider) Peers() []peer.AddrInfo {
 }
 
 // setDynamic replaces the dynamically-discovered pool. Pinned peers are
-// untouched.
+// untouched. Security #59: the dynamic (DHT-discovered, untrusted-origin)
+// pool is capped at build.MaxDynamicBeaconPeers so a rendezvous flood can't
+// crowd the rotation unboundedly. The trusted floor + operator pins always
+// sit ahead of the dynamic pool in Peers() and are never evicted.
 func (p *dhtBeaconProvider) setDynamic(peers []peer.AddrInfo) {
+	if len(peers) > build.MaxDynamicBeaconPeers {
+		peers = peers[:build.MaxDynamicBeaconPeers]
+	}
 	p.mu.Lock()
 	p.dyn = peers
 	p.mu.Unlock()
@@ -71,6 +78,27 @@ func (p *dhtBeaconProvider) setDynamic(peers []peer.AddrInfo) {
 // degrades cleanly to its fallback).
 func buildBeaconPeerProvider(ctx context.Context, cfg certExchConfig) subscriber.PeerProvider {
 	prov := &dhtBeaconProvider{}
+
+	// Security #59: seed the built-in trusted beacon floor first so a fresh
+	// node has an honest cert-exchange source before DHT discovery warms and
+	// can't be fully eclipsed by a hostile rendezvous flood. Parsed the same
+	// way as operator pins; both sit ahead of dynamic peers and are never
+	// evicted. (Empty by default today; see build.DefaultBeaconPeers.)
+	for _, ma := range cfg.network.BeaconPeers() {
+		ma = strings.TrimSpace(ma)
+		if ma == "" {
+			continue
+		}
+		mAddr, err := multiaddr.NewMultiaddr(ma)
+		if err != nil {
+			continue
+		}
+		ai, err := peer.AddrInfoFromP2pAddr(mAddr)
+		if err != nil {
+			continue
+		}
+		prov.pinned = append(prov.pinned, *ai)
+	}
 
 	// Parse pinned peers from --certexch-peers, comma-separated.
 	if strings.TrimSpace(cfg.pinnedPeers) != "" {
