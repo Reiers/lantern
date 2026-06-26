@@ -848,14 +848,17 @@ func cmdDaemon(args []string) error {
 		dist.Start()
 		chainAPI.HeadNotify = dist
 
-		// Sync source: a Glif client. The combined fetcher in gatewayClient
-		// is hamt-shaped (only Get), but Sync needs RPC-shaped
-		// HeadEpoch/TipsetCIDsByHeight/FetchBlock — that's exactly what
-		// glif.Client exposes. Network-aware: calibration daemon pulls
-		// from calibration Glif, mainnet daemon pulls from mainnet Glif.
-		// Without this, the header store fills with the wrong chain's
-		// headers (silent corruption).
-		src := glif.New(glifURLForNetwork(network), 8*time.Second)
+		// Sync source: #53 — a bitswap-backed adapter. HeadEpoch /
+		// TipsetCIDsByHeight stay on Glif (RPC-shaped), but the
+		// content-addressed FetchBlock (parent backfill) is served from the
+		// combined gateway+bitswap fetcher first, with Glif fallback. This
+		// takes parent backfill off the Glif critical path, so a slow /
+		// rate-limited Glif no longer stalls contiguous head advancement.
+		// Network-aware: calibration daemon pulls from calibration Glif,
+		// mainnet daemon pulls from mainnet Glif. Without the network split
+		// the header store fills with the wrong chain's headers (silent
+		// corruption).
+		src := newBitswapBackedSource(glif.New(glifURLForNetwork(network), 8*time.Second), func() blockGetter { return fetcher })
 		sync = hstore.NewSync(store, src, hstore.SyncOptions{
 			Interval:       *syncInterval,
 			MaxBacktrack:   60,
@@ -973,12 +976,14 @@ func cmdDaemon(args []string) error {
 		// blocks that gossipsub missed (connectivity blips, late join,
 		// etc.) and for the first install on a cold start.
 		//
-		// We pass the same glif client the polling Sync uses so the
-		// ingestor can do bounded inline backfill when a gossipsub
-		// arrival lands at head+N>1 (rather than skipping and waiting
-		// the full poll cycle).
+		// We pass the same bitswap-backed adapter the polling Sync uses so
+		// the ingestor's inline backfill (when a gossipsub arrival lands at
+		// head+N>1) serves parent blocks from the content-addressed fetcher
+		// first and only falls back to Glif (#53). Previously this was a raw
+		// Glif client, so a slow Glif drove backfillFail up and desynced the
+		// node despite live blocks arriving fine over gossipsub.
 		if store != nil && p2pHost.PubSub != nil {
-			gossipSrc := glif.New(glifURLForNetwork(network), 8*time.Second)
+			gossipSrc := newBitswapBackedSource(glif.New(glifURLForNetwork(network), 8*time.Second), func() blockGetter { return fetcher })
 			if ing, _, gerr := startGossipBlocks(ctx, p2pHost.PubSub, store, gossipSrc, network.GossipTopicBlocks()); gerr != nil {
 				fmt.Printf("  gossipsub-blocks: failed to start: %v (continuing without)\n", gerr)
 			} else {
