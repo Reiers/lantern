@@ -81,6 +81,7 @@ func init() {
 }
 
 func main() {
+	setupLogging()
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(1)
