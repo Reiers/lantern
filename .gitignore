@@ -13,3 +13,7 @@ PHASE*-PEER-COUNT-ASK.md
 F3-WIRING-NOTES.md
 ISSUE-*.md
 docs/phase*
+
+# Per-tag release notes are published on the GitHub release, not committed.
+# Canonical in-repo history is CHANGELOG.md.
+RELEASE-NOTES-v*.md

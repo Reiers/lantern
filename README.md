@@ -347,7 +347,7 @@ SCOPE.md              full project scope
 MODULES.md            module layout + lift-vs-reimplement decisions
 CURIO-RPC-SURFACE.md  the 71-method Curio compatibility target with call-site map
 TRUSTED-ROOT.md       trusted-root data structure spec
-PHASE*-BLOCKERS.md    per-phase deferred decisions and known limitations
+CHANGELOG.md          release history (per-release notes live on the GitHub releases)
 ```
 
 ---
