@@ -413,6 +413,19 @@ body[data-mode="dev"]    [data-show~="dev"].flex-show { display: flex; }
   </div>
 
   <div class="card">
+    <div class="card-header"><h2 class="card-title">Block source counters</h2></div>
+    <table>
+      <thead><tr><th>Source</th><th>Hits</th></tr></thead>
+      <tbody id="d-fetcher-tbody"><tr><td colspan="2" class="empty">loading…</td></tr></tbody>
+    </table>
+    <div class="stat-grid" style="margin-top:10px">
+      <div class="stat"><div class="stat-label">Bitswap blocks served</div><div class="stat-value small" id="d-bs-blocks">—</div></div>
+      <div class="stat"><div class="stat-label">Bitswap bytes in</div><div class="stat-value small" id="d-bs-bytes">—</div></div>
+      <div class="stat"><div class="stat-label">Bitswap want failures</div><div class="stat-value small" id="d-bs-errors">—</div></div>
+    </div>
+  </div>
+
+  <div class="card">
     <div class="card-header"><h2 class="card-title">Header store sync</h2></div>
     <div class="stat-grid">
       <div class="stat"><div class="stat-label">Polls</div><div class="stat-value small" id="d-polls">—</div></div>
@@ -484,19 +497,6 @@ body[data-mode="dev"]    [data-show~="dev"].flex-show { display: flex; }
     <div class="stat-grid">
       <div class="stat"><div class="stat-label">Received</div><div class="stat-value small" id="d-xchg-recv">—</div></div>
       <div class="stat"><div class="stat-label">Rejected</div><div class="stat-value small" id="d-xchg-rej">—</div></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header"><h2 class="card-title">Block source counters</h2></div>
-    <table>
-      <thead><tr><th>Source</th><th>Hits</th></tr></thead>
-      <tbody id="d-fetcher-tbody"><tr><td colspan="2" class="empty">loading…</td></tr></tbody>
-    </table>
-    <div class="stat-grid" style="margin-top:10px">
-      <div class="stat"><div class="stat-label">Bitswap blocks served</div><div class="stat-value small" id="d-bs-blocks">—</div></div>
-      <div class="stat"><div class="stat-label">Bitswap bytes in</div><div class="stat-value small" id="d-bs-bytes">—</div></div>
-      <div class="stat"><div class="stat-label">Bitswap want failures</div><div class="stat-value small" id="d-bs-errors">—</div></div>
     </div>
   </div>
 
