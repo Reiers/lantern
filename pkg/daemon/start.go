@@ -210,9 +210,17 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		// the cache instead of falling back to the bridge. Strictly
 		// best-effort: walks run on goroutines, and a failed walk is logged
 		// at debug and dropped.
-		if len(d.cfg.FEVMPrefetchAddrs) > 0 {
+		// lantern#69: merge Lantern's built-in per-network warm-set (the
+		// well-known PDP/FWSS/registry/USDFC proxies) with any addresses the
+		// consumer injected. This makes the zero-bridge read path work even
+		// for consumers that supply nothing (e.g. stock upstream Curio),
+		// whose Settle / provider-lookup eth_calls would otherwise local-miss
+		// and fall back to the bridge.
+		builtinWarm := prefetch.BuiltinWarmSet(d.cfg.Network)
+		warmAddrs := prefetch.MergeWarmSets(builtinWarm, d.cfg.FEVMPrefetchAddrs)
+		if len(warmAddrs) > 0 {
 			pf := prefetch.New(prefetch.Config{
-				Addrs:            d.cfg.FEVMPrefetchAddrs,
+				Addrs:            warmAddrs,
 				MaxBlocksPerAddr: d.cfg.FEVMPrefetchMaxBlocksPerAddr,
 				PerAddrTimeout:   d.cfg.FEVMPrefetchPerAddrTimeout,
 				MinInterval:      d.cfg.FEVMPrefetchMinInterval,
@@ -224,7 +232,10 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 			d.fevmPrefetch = pf
 			d.mu.Unlock()
 			log.Infow("FEVM state prefetcher wired",
-				"addrs", len(d.cfg.FEVMPrefetchAddrs),
+				"addrs", len(warmAddrs),
+				"builtin", len(builtinWarm),
+				"consumer", len(d.cfg.FEVMPrefetchAddrs),
+				"network", d.cfg.Network,
 				"max_blocks_per_addr", d.cfg.FEVMPrefetchMaxBlocksPerAddr,
 				"per_addr_timeout", d.cfg.FEVMPrefetchPerAddrTimeout,
 				"min_interval", d.cfg.FEVMPrefetchMinInterval,
