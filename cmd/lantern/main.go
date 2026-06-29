@@ -1029,6 +1029,15 @@ func cmdDaemon(args []string) error {
 			PreferredPeers: preferred,
 			FastDeadline:   *bitswapFastDL,
 			FullDeadline:   *bitswapFullDL,
+			// lantern#50: Filecoin nodes serve bitswap under the "/chain"
+			// protocol prefix (/chain/ipfs/bitswap/...), NOT the boxo/IPFS
+			// default (/ipfs/bitswap/...). Without this the standalone daemon
+			// connects to mainnet peers but every stream negotiation fails
+			// ("protocols not supported: /ipfs/bitswap/..."), so bitswap serves
+			// zero blocks and the gateway carries the entire cold-block tail.
+			// The embedded daemon (pkg/daemon/start.go) already set this; the
+			// standalone CLI path was missing it.
+			ProtocolPrefix: network.BitswapProtocolPrefix(),
 		})
 		if err != nil {
 			return fmt.Errorf("start bitswap: %w", err)

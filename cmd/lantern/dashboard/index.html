@@ -493,6 +493,11 @@ body[data-mode="dev"]    [data-show~="dev"].flex-show { display: flex; }
       <thead><tr><th>Source</th><th>Hits</th></tr></thead>
       <tbody id="d-fetcher-tbody"><tr><td colspan="2" class="empty">loading…</td></tr></tbody>
     </table>
+    <div class="stat-grid" style="margin-top:10px">
+      <div class="stat"><div class="stat-label">Bitswap blocks served</div><div class="stat-value small" id="d-bs-blocks">—</div></div>
+      <div class="stat"><div class="stat-label">Bitswap bytes in</div><div class="stat-value small" id="d-bs-bytes">—</div></div>
+      <div class="stat"><div class="stat-label">Bitswap want failures</div><div class="stat-value small" id="d-bs-errors">—</div></div>
+    </div>
   </div>
 
 </div>
@@ -959,6 +964,14 @@ function renderDev(o, s, peers, fetcher) {
   } else {
     ft.innerHTML = entries.map(([k,v]) => '<tr><td>' + k + '</td><td>' + fmt.int(v) + '</td></tr>').join("");
   }
+
+  // Bitswap detail (lantern#50): blocks actually served from the swarm,
+  // bytes received, and want failures. Lets an operator confirm the swarm
+  // is carrying cold blocks rather than the gateway doing all the work.
+  const bs = (fetcher || {}).bitswap || {};
+  $("d-bs-blocks").textContent = fmt.int(bs.blocks);
+  $("d-bs-bytes").textContent = fmt.bytes(bs.bytes_in || 0);
+  $("d-bs-errors").textContent = fmt.int(bs.errors);
 }
 
 // ---- Poll loop ----

@@ -2,6 +2,32 @@
 
 All notable changes to Lantern.
 
+## v1.8.4 (2026-06-29)
+
+**Fix: standalone `lantern daemon` could not fetch cold blocks over Bitswap.**
+The standalone CLI constructed its Bitswap client without the Filecoin protocol
+prefix, so it negotiated the boxo/IPFS default `/ipfs/bitswap/...` instead of
+Filecoin's `/chain/ipfs/bitswap/...`. Every mainnet/calibration peer rejected
+the stream ("protocols not supported: /ipfs/bitswap/..."), so Bitswap served
+zero blocks and the HTTP gateway carried the entire cold-block tail. The
+embedded daemon (`pkg/daemon`, used by Curio Core / maxboom) already set the
+prefix; only the standalone path was affected.
+
+### Fixed
+
+- **Bitswap protocol prefix on the standalone daemon** — set
+  `ProtocolPrefix: network.BitswapProtocolPrefix()` (`/chain`) on the
+  `cmd/lantern` Bitswap client. Verified on mainnet: Bitswap now serves cold
+  state blocks from the swarm (0 → tens of blocks under a 300-read load), and
+  Glif stays at zero. ([#50](https://github.com/Reiers/lantern/issues/50))
+
+### Added
+
+- **Dashboard: live Bitswap detail on the dev page.** The "Block source
+  counters" card now shows Bitswap blocks served, bytes in, and want failures
+  (5s auto-refresh) alongside the per-source hit table, so operators can
+  confirm the swarm is carrying cold blocks rather than the gateway.
+
 ## v1.8.3 (2026-06-29)
 
 **Bridge-off RPC parity for stock Curio.** Upstream's PDP-only Curio build

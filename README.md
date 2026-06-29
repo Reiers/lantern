@@ -9,7 +9,7 @@
 
   [![CI](https://github.com/Reiers/lantern/actions/workflows/ci.yml/badge.svg)](https://github.com/Reiers/lantern/actions/workflows/ci.yml)
   [![License: Apache 2.0 OR MIT](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](#license)
-  [![Release: v1.8.3](https://img.shields.io/badge/release-v1.8.3-0090ff.svg)](https://github.com/Reiers/lantern/releases)
+  [![Release: v1.8.4](https://img.shields.io/badge/release-v1.8.4-0090ff.svg)](https://github.com/Reiers/lantern/releases)
   [![Go: 1.25+](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](go.mod)
 
   **One line to install:**
@@ -28,7 +28,7 @@
 
 Lantern is a pure-Go Filecoin light node. **~40 MB binary, ~1 GB working state, zero CGo, no `filecoin-ffi`, no Rust toolchain.** It serves a Lotus-compatible JSON-RPC (71 / 71 of the Curio `FULLNODE_API` surface, plus the `eth_*` surface needed by FoC clients) and verifies every byte locally against BLS, F3, DRAND, and IPLD content addressing. No trusted RPC provider. No 76 GB snapshot.
 
-**Current release:** [v1.8.3](https://github.com/Reiers/lantern/releases/tag/v1.8.3) on mainnet + calibration. **In production today** as the chain backend embedded in [Curio Core](https://curiocore.io) (which ran a full PDP hot-storage flow on Filecoin **mainnet** end-to-end on Lantern) and as a secondary node on the mainnet SP `f03678816` (sp.reiers.io).
+**Current release:** [v1.8.4](https://github.com/Reiers/lantern/releases/tag/v1.8.4) on mainnet + calibration. **In production today** as the chain backend embedded in [Curio Core](https://curiocore.io) (which ran a full PDP hot-storage flow on Filecoin **mainnet** end-to-end on Lantern) and as a secondary node on the mainnet SP `f03678816` (sp.reiers.io).
 
 ## What is Lantern?
 
@@ -227,7 +227,7 @@ Or use Lantern's own CLI:
 
 ## Status
 
-**Current release: [v1.8.3](https://github.com/Reiers/lantern/releases/tag/v1.8.3)** — production on mainnet + calibration.
+**Current release: [v1.8.4](https://github.com/Reiers/lantern/releases/tag/v1.8.4)** — production on mainnet + calibration.
 
 What works today:
 
@@ -252,7 +252,8 @@ Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on m
 
 | Release | What landed |
 |---|---|
-| v1.8.3 (current) | **Bridge-off RPC parity for stock Curio** ([#76](https://github.com/Reiers/lantern/issues/76)). Local `eth_getLogs` ([#73](https://github.com/Reiers/lantern/issues/73)), `eth_getCode` ([#74](https://github.com/Reiers/lantern/issues/74)), `eth_getStorageAt`/`eth_getBlockByHash` ([#75](https://github.com/Reiers/lantern/issues/75)); mpool pending→confirm→rebroadcast ([#47](https://github.com/Reiers/lantern/issues/47)); message/receipt block availability ([#50](https://github.com/Reiers/lantern/issues/50)); gossip-aware ChainHead poll skip ([#71](https://github.com/Reiers/lantern/issues/71)). The PDP read+write+event hot path now runs with **no `--vm-bridge-rpc`** and zero Glif — what upstream's PDP-only Curio build ("maxboom") needs. |
+| v1.8.4 (current) | **Fix: standalone `lantern daemon` Bitswap couldn't fetch cold blocks** — it negotiated the IPFS-default protocol instead of Filecoin's `/chain/...` prefix, so the swarm served zero blocks and the gateway carried the whole cold tail ([#50](https://github.com/Reiers/lantern/issues/50)). Now Bitswap serves cold state blocks from the mainnet swarm. Plus a live Bitswap detail panel on the dashboard dev page. |
+| v1.8.3 | **Bridge-off RPC parity for stock Curio** ([#76](https://github.com/Reiers/lantern/issues/76)). Local `eth_getLogs` ([#73](https://github.com/Reiers/lantern/issues/73)), `eth_getCode` ([#74](https://github.com/Reiers/lantern/issues/74)), `eth_getStorageAt`/`eth_getBlockByHash` ([#75](https://github.com/Reiers/lantern/issues/75)); mpool pending→confirm→rebroadcast ([#47](https://github.com/Reiers/lantern/issues/47)); message/receipt block availability ([#50](https://github.com/Reiers/lantern/issues/50)); gossip-aware ChainHead poll skip ([#71](https://github.com/Reiers/lantern/issues/71)). The PDP read+write+event hot path now runs with **no `--vm-bridge-rpc`** and zero Glif — what upstream's PDP-only Curio build ("maxboom") needs. |
 | v1.8.2 | **Built-in FEVM warm-set** ([#69](https://github.com/Reiers/lantern/issues/69)). Per-network default warm-set (PDPVerifier, FWSS, ServiceProviderRegistry, USDFC) merged with consumer-supplied addresses, so the zero-Glif read path works for **any** Lotus-API consumer with no wiring. |
 | v1.8.1 | **Sync resilience + chain-watcher fixes** (both field-reported). Header backfill moved off the Glif critical path onto the bitswap+gateway fetcher ([#53](https://github.com/Reiers/lantern/issues/53)) — fixes the desync that surfaced as `cannot draw randomness from future epoch`. `ChainGetTipSet(key)` now served from the header store ([#68](https://github.com/Reiers/lantern/issues/68)) — fixes Curio's chain watcher looping on `tipset not in local store`. |
 | v1.8.0 | **Security hardening** ([#54](https://github.com/Reiers/lantern/issues/54)–[#59](https://github.com/Reiers/lantern/issues/59)). Verified boot anchor (multi-source + F3 finality cross-check), https-only gateway by default, `eth_*` write-path gate + non-loopback RPC bind guard, dashboard auth, fail-loud on empty keystore passphrase, trusted beacon floor + DHT peer cap. No protocol/wire changes. |
