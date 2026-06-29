@@ -446,6 +446,32 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 			d.mpool = mp
 			d.mu.Unlock()
 			log.Infow("gossipsub mempool publisher wired", "topic", network.GossipTopicMessages())
+
+			// lantern#47: drive the mpool's pending -> confirm -> rebroadcast
+			// loop on every head advance. StateSearchMsg is local + zero-Glif
+			// (#9/#49), so a published-but-unmined tx gets rebroadcast
+			// (identical bytes, same nonce) instead of stalling silently and
+			// blocking the sender's later nonces. Confirmed txs are dropped;
+			// max-retries-exhausted txs surface as failed (never stuck).
+			// Reconcile also walks each pending tx's message/receipt blocks
+			// via StateSearchMsg, which warms exactly the blocks #50 needs
+			// for a writing SP's own in-flight txs bridge-off.
+			search := func(sctx context.Context, msgCID cid.Cid) (mpool.SearchResult, error) {
+				lk, serr := chainAPI.StateSearchMsg(sctx, types.TipSetKey{}, msgCID, 0, false)
+				if serr != nil {
+					return mpool.SearchUnknown, serr
+				}
+				if lk != nil {
+					return mpool.SearchFound, nil
+				}
+				return mpool.SearchUnknown, nil
+			}
+			store.OnHeadChange(func(ts *types.TipSet) {
+				if ts == nil {
+					return
+				}
+				mp.Reconcile(ctx, int64(ts.Height()), search)
+			})
 		}
 	}
 

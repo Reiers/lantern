@@ -120,6 +120,33 @@ func Lookup(ctx context.Context, root cid.Cid, i uint64, bg hamt.BlockGetter, op
 	return d.Raw, prs.Path(), nil
 }
 
+// ForEachRaw walks a v4 AMT in index order, invoking fn with each entry's
+// index and raw value bytes. Used to enumerate small per-receipt AMTs like
+// the EventsRoot events AMT (lantern#73). Returns the proof path (node CIDs
+// fetched). fn must not retain the value slice past the call.
+func ForEachRaw(ctx context.Context, root cid.Cid, bg hamt.BlockGetter, opts *LookupOptions, fn func(i uint64, val []byte) error) ([]cid.Cid, error) {
+	if !root.Defined() {
+		return nil, nil
+	}
+	if opts == nil {
+		opts = &LookupOptions{}
+	}
+	prs := newPathRecordingStore(bg)
+	cstore := cbornode.NewCborStore(prs)
+
+	r, err := amtipld.LoadAMT(ctx, cstore, root, opts.amtOpts()...)
+	if err != nil {
+		return prs.Path(), fmt.Errorf("loading AMT root %s: %w", root, err)
+	}
+	err = r.ForEach(ctx, func(i uint64, d *cbg.Deferred) error {
+		return fn(i, d.Raw)
+	})
+	if err != nil {
+		return prs.Path(), err
+	}
+	return prs.Path(), nil
+}
+
 // LookupCBOR is a convenience wrapper that decodes the leaf bytes via
 // cbor-gen into `out`.
 func LookupCBOR(ctx context.Context, root cid.Cid, i uint64, bg hamt.BlockGetter, out cbg.CBORUnmarshaler, opts *LookupOptions) ([]cid.Cid, error) {

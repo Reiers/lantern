@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	amtipld "github.com/filecoin-project/go-amt-ipld/v4"
+	"github.com/ipfs/go-cid"
 	cbg "github.com/whyrusleeping/cbor-gen"
 
 	"github.com/Reiers/lantern/state/hamt"
@@ -95,5 +96,62 @@ func TestSyntheticAMT_VerifyProof(t *testing.T) {
 	}
 	if err := VerifyProof(ctx, rootCID, idx, []byte{0xff}, proof, thin, nil); err == nil {
 		t.Fatalf("VerifyProof should detect wrong value")
+	}
+}
+
+func TestForEachRaw(t *testing.T) {
+	ctx := context.Background()
+	mem := hamt.NewMemBlockStore()
+	store := hamt.CborStoreFromMem(mem)
+
+	amtRoot, err := amtipld.NewAMT(store, amtipld.UseTreeBitWidth(FilBitWidth))
+	if err != nil {
+		t.Fatalf("NewAMT: %v", err)
+	}
+	want := map[uint64][]byte{}
+	for i := uint64(0); i < 12; i++ {
+		val := &cbg.Deferred{Raw: []byte{0x41, byte(i)}} // CBOR bytestring len 1
+		if err := amtRoot.Set(ctx, i, val); err != nil {
+			t.Fatalf("Set %d: %v", i, err)
+		}
+		want[i] = val.Raw
+	}
+	rootCID, err := amtRoot.Flush(ctx)
+	if err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	got := map[uint64][]byte{}
+	_, err = ForEachRaw(ctx, rootCID, mem, nil, func(i uint64, val []byte) error {
+		cp := make([]byte, len(val))
+		copy(cp, val)
+		got[i] = cp
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ForEachRaw: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ForEachRaw visited %d entries, want %d", len(got), len(want))
+	}
+	for i, w := range want {
+		if !bytes.Equal(got[i], w) {
+			t.Fatalf("entry %d: got %x want %x", i, got[i], w)
+		}
+	}
+}
+
+func TestForEachRaw_UndefinedRootIsNoop(t *testing.T) {
+	mem := hamt.NewMemBlockStore()
+	n := 0
+	_, err := ForEachRaw(context.Background(), cid.Undef, mem, nil, func(uint64, []byte) error {
+		n++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ForEachRaw(undef): %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected 0 visits for undefined root, got %d", n)
 	}
 }

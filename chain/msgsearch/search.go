@@ -123,6 +123,55 @@ func (s *Searcher) Find(ctx context.Context, fromEpoch abi.ChainEpoch, msgCID ci
 	return nil, ErrNotFound
 }
 
+// OrderedMessageCIDs returns ts's messages in the canonical Filecoin
+// application order (all blocks' BLS messages in block order, then all
+// blocks' secp messages, with cross-block duplicates applied once). This
+// is the exact order the child tipset's ParentMessageReceipts AMT is
+// indexed by, so receipt[i] corresponds to OrderedMessageCIDs[i]
+// (lantern#73, used by eth_getLogs to pair events with tx hashes).
+func (s *Searcher) OrderedMessageCIDs(ctx context.Context, ts *ltypes.TipSet) ([]cid.Cid, error) {
+	type collected struct {
+		bls  []cid.Cid
+		secp []cid.Cid
+	}
+	perBlock := make([]collected, len(ts.Blocks()))
+	for bi, b := range ts.Blocks() {
+		bls, secp, err := s.fetchMsgMeta(ctx, b.Messages)
+		if err != nil {
+			return nil, fmt.Errorf("block %s msgmeta: %w", b.Cid(), err)
+		}
+		perBlock[bi] = collected{bls: bls, secp: secp}
+	}
+	seen := make(map[cid.Cid]bool)
+	var out []cid.Cid
+	for _, c := range perBlock {
+		for _, mc := range c.bls {
+			if seen[mc] {
+				continue
+			}
+			seen[mc] = true
+			out = append(out, mc)
+		}
+	}
+	for _, c := range perBlock {
+		for _, mc := range c.secp {
+			if seen[mc] {
+				continue
+			}
+			seen[mc] = true
+			out = append(out, mc)
+		}
+	}
+	return out, nil
+}
+
+// FindChild exposes the canonical child-tipset lookup so callers that need
+// a tipset's ParentMessageReceipts (which live in the child) can resolve
+// it. Returns ErrNotFound-style error when no child is available yet.
+func (s *Searcher) FindChild(ts *ltypes.TipSet) (*ltypes.TipSet, error) {
+	return s.findChild(ts)
+}
+
 // findChild returns the canonical tipset at ts.Height()+1 if its parent
 // matches ts.Key(). Returns an error otherwise.
 func (s *Searcher) findChild(ts *ltypes.TipSet) (*ltypes.TipSet, error) {
