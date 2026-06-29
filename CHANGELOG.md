@@ -2,6 +2,32 @@
 
 All notable changes to Lantern.
 
+## v1.8.1 (2026-06-29)
+
+Sync resilience + chain-watcher fixes. Two field-reported bugs that together
+made a node fall behind live head and then stall its consumer's chain watcher.
+No protocol/wire changes, no new external dependencies.
+
+### Fixed
+
+- **#53 — header backfill off the Glif critical path.** Parent backfill (for
+  blocks landing at `head+N`) was served by Glif `FetchBlock` with an 8s timeout
+  in both the sync agent and the gossip ingestor; a slow/rate-limited Glif drove
+  `backfillFail` up and desynced the node (surfacing downstream as e.g.
+  `cannot draw randomness from future epoch ... (head ...)`). Backfill is now
+  served from the combined bitswap+gateway content-addressed fetcher, Glif as
+  last resort; `HeadEpoch`/`TipsetCIDsByHeight` stay RPC-shaped (gossipsub
+  supplies live heads). Fetcher resolved lazily to see the bitswap-enabled
+  fetcher rebuilt after libp2p start.
+- **#68 — `ChainGetTipSet(key)` served from the header store.** It previously
+  resolved only the synthetic current head and returned `ErrTipSetNotFound` for
+  any other key even with a populated header store, so Curio's `message/watch.go`
+  / `deps/apiinfo.go` looking up recent non-head tipset keys looped on
+  `tipset not in local store (only current head is cached in V1)`. New
+  `Store.GetTipSet(key)` reassembles any persisted tipset by key; `ChainGetTipSet`
+  falls through to it after the head fast-path. Distinct from #53 (this surfaces
+  even on a healthy synced node).
+
 ## v1.8.0 (2026-06-26)
 
 Security hardening: trust model, bootstrap, and auth. Self-audit (#60) of the
