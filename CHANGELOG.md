@@ -2,6 +2,34 @@
 
 All notable changes to Lantern.
 
+## v1.8.2 (2026-06-29)
+
+Read-path coverage fix. Field-reported: a node running **stock upstream Curio**
+behind Lantern with no VM bridge failed its `Settle` task and provider lookups
+with `FEVM method requires --vm-bridge-rpc pointing at a Forest/Lotus node`. No
+protocol/wire changes, no new external dependencies.
+
+### Fixed
+
+- **#69 — built-in per-network FEVM warm-set.** The state prefetcher only
+  warmed the contract addresses its *consumer* injected via
+  `Config.FEVMPrefetchAddrs`. **curio-core injects that set itself**
+  (`cmd/curio-core/fevm_prefetch.go` — PDPVerifier, FWSS, ServiceProviderRegistry,
+  USDFC), which is why bridge-off reads have always worked under curio-core.
+  **Stock upstream Curio injects nothing**, so the prefetcher never started, and
+  every contract `eth_call` (e.g. the Settle task's
+  `ServiceProviderRegistry.getProviderByAddress` / `isRegisteredProvider`)
+  local-missed, fell back to the bridge, and — with no bridge configured —
+  errored. Lantern now ships its own built-in per-network warm-set of the
+  well-known PDP contract proxies (PDPVerifier, FWSS, ServiceProviderRegistry,
+  USDFC; mainnet + calibration), merges it with any consumer-supplied addresses
+  (consumer wins ordering, de-duped by canonical form), and starts the
+  prefetcher whenever the merged set is non-empty. The zero-Glif read path now
+  works for **any** Lotus-API consumer with no wiring and no `--vm-bridge-rpc`.
+  Built-in addresses are kept in sync with `filecoin-project/curio`
+  `pdp/contract/addresses.go`. Distinct from the v1.8.1 sync fixes (#53/#68):
+  those addressed desync, this is read-path coverage.
+
 ## v1.8.1 (2026-06-29)
 
 Sync resilience + chain-watcher fixes. Two field-reported bugs that together
