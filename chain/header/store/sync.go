@@ -67,6 +67,19 @@ type SyncOptions struct {
 	// behind) is a single chunk, bounded enough that a deep backlog
 	// against rate-limited RPC is paced over several polls.
 	CatchUpChunk abi.ChainEpoch
+	// GossipFresh, when set, reports whether an external head source
+	// (the gossipsub block ingestor) has advanced the store's head
+	// recently — i.e. within roughly the last poll Interval. When it
+	// returns true the Sync skips its own RPCSource.HeadEpoch() poll for
+	// that tick, because gossip is already supplying the live head with
+	// no upstream-RPC dependency. The Sync then acts purely as a
+	// catch-up fallback: it resumes polling the RPCSource only when
+	// gossip goes quiet (stale store head). This is what keeps a node
+	// with healthy gossipsub from hammering a rate-limited public RPC
+	// (Glif 429) every Interval (#71). Nil disables the optimization
+	// (the Sync polls every tick, the pre-#71 behavior).
+	GossipFresh func() bool
+
 	// StaleResetThreshold is the lag (live head − store head, in epochs)
 	// beyond which a warm store is considered hopelessly stale and is
 	// re-bootstrapped near the live head instead of attempting a
@@ -111,13 +124,14 @@ type Sync struct {
 
 // SyncStats reports observable Sync activity.
 type SyncStats struct {
-	Polls         uint64
-	HeadAdvances  uint64
-	Reorgs        uint64
-	StaleResets   uint64
-	HeadersAdded  uint64
-	LastError     string
-	LastHeadEpoch abi.ChainEpoch
+	Polls              uint64
+	SkippedGossipFresh uint64 // #71: ticks where the Glif poll was skipped because gossip was fresh
+	HeadAdvances       uint64
+	Reorgs             uint64
+	StaleResets        uint64
+	HeadersAdded       uint64
+	LastError          string
+	LastHeadEpoch      abi.ChainEpoch
 }
 
 // NewSync returns a Sync agent that has not been started.
@@ -163,6 +177,17 @@ func (s *Sync) Start(ctx context.Context) error {
 	return nil
 }
 
+// SetGossipFresh wires the gossip-freshness callback after construction.
+// The gossipsub ingestor is created after the Sync in both daemon paths,
+// so the callback can't be passed to NewSync; this lets the caller wire
+// it once the ingestor exists (#71). Safe to call before or after
+// Start. Passing nil disables the gossip-aware poll skip.
+func (s *Sync) SetGossipFresh(fn func() bool) {
+	s.mu.Lock()
+	s.opts.GossipFresh = fn
+	s.mu.Unlock()
+}
+
 // Stop halts the polling loop.
 func (s *Sync) Stop() {
 	s.mu.Lock()
@@ -202,6 +227,24 @@ func (s *Sync) pollAndApply(ctx context.Context) error {
 	s.mu.Lock()
 	s.stats.Polls++
 	s.mu.Unlock()
+
+	// #71: when the gossipsub ingestor is keeping the store head fresh,
+	// skip the upstream-RPC HeadEpoch() poll entirely. Gossip installs
+	// blocks into this same store via SetHead with 0-1 epoch latency and
+	// no Glif call, so polling Glif on every tick is pure redundant load
+	// that gets a node rate-limited (429). The Sync stays a catch-up
+	// fallback: as soon as gossip goes quiet, GossipFresh() returns false
+	// and we resume polling. A cold/empty store (currentHead < 0) always
+	// polls so the very first head can be bootstrapped from the RPC.
+	s.mu.Lock()
+	gossipFresh := s.opts.GossipFresh
+	s.mu.Unlock()
+	if gossipFresh != nil && s.store.HeadEpoch() >= 0 && gossipFresh() {
+		s.mu.Lock()
+		s.stats.SkippedGossipFresh++
+		s.mu.Unlock()
+		return nil
+	}
 
 	head, err := s.src.HeadEpoch(ctx)
 	if err != nil {

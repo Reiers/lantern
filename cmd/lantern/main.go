@@ -859,8 +859,21 @@ func cmdDaemon(args []string) error {
 		// the header store fills with the wrong chain's headers (silent
 		// corruption).
 		src := newBitswapBackedSource(glif.New(glifURLForNetwork(network), 8*time.Second), func() blockGetter { return fetcher })
+		// #71: when libp2p/gossipsub is enabled it is the PRIMARY head source
+		// (0-1 epoch latency, no Glif), so relax the polling-Sync cadence to
+		// 30s as a catch-up fallback instead of polling Glif's ChainHead every
+		// 6s. This matches the embedded daemon (pkg/daemon/start.go) and stops
+		// a healthy node from getting Glif-rate-limited (429). An explicit
+		// non-default -sync-interval is always honored. The gossip-aware skip
+		// wired below (SetGossipFresh) drops Glif polls to ~zero when gossip is
+		// live; this relaxed floor covers the brief windows it doesn't.
+		effSyncInterval := *syncInterval
+		gossipEnabled := !*noLibp2p && *p2pListen != ""
+		if gossipEnabled && effSyncInterval == 6*time.Second {
+			effSyncInterval = 30 * time.Second
+		}
 		sync = hstore.NewSync(store, src, hstore.SyncOptions{
-			Interval:       *syncInterval,
+			Interval:       effSyncInterval,
 			MaxBacktrack:   60,
 			BootstrapDepth: 3, // small cold start; ongoing polls catch up
 			// #51 "down for a week" auto-heal: if the persisted store is
@@ -878,7 +891,7 @@ func cmdDaemon(args []string) error {
 		}
 		defer sync.Stop()
 		fmt.Printf("  header store: %s (sync every %s, buf=%d)\n",
-			*hsPath, syncInterval.String(), *notifyBufSize)
+			*hsPath, effSyncInterval.String(), *notifyBufSize)
 	}
 
 	// Phase 10 Part A: bring up the live libp2p host so the Net* RPC
@@ -989,6 +1002,13 @@ func cmdDaemon(args []string) error {
 			} else {
 				gossipIngestor = ing
 				fmt.Printf("  gossipsub-blocks: subscribed to %s (ingestor active, inline backfill on)\n", network.GossipTopicBlocks())
+				// #71: let the polling Sync skip its Glif HeadEpoch() poll while
+				// gossip is keeping the store head fresh, so a healthy node stops
+				// hammering (and getting 429'd by) Glif. Window = 60s (2x the
+				// relaxed 30s cadence); when gossip goes quiet the Sync resumes.
+				if sync != nil {
+					sync.SetGossipFresh(func() bool { return ing.Fresh(60 * time.Second) })
+				}
 			}
 		}
 	}

@@ -265,3 +265,20 @@ func TestIngestor_InlineBackfillRespectsCapsToSkip(t *testing.T) {
 	require.Equal(t, uint64(1), ing.backfillFailed.Load(), "backfill should fail with gap > cap")
 	require.Equal(t, uint64(1), ing.skipped.Load(), "and the head block itself is skipped")
 }
+
+// TestIngestor_Fresh: Fresh() is false before any install and true right
+// after one, within the window (#71).
+func TestIngestor_Fresh(t *testing.T) {
+	s, head := withStore(t, 10)
+	ing := New(s, nil)
+	ctx := context.Background()
+
+	require.False(t, ing.Fresh(time.Minute), "Fresh must be false before any install")
+
+	next := mkBlock(t, head.Height()+1, []cid.Cid{head.Blocks()[0].Cid()}, 1000, "next")
+	ing.process(ctx, &ltypes.BlockMsg{Header: next})
+	require.Equal(t, uint64(1), ing.installed.Load())
+
+	require.True(t, ing.Fresh(time.Minute), "Fresh must be true right after an install")
+	require.False(t, ing.Fresh(0), "Fresh(0) must be false (no install is within a zero window)")
+}
