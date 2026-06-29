@@ -2,6 +2,59 @@
 
 All notable changes to Lantern.
 
+## v1.8.3 (2026-06-29)
+
+**Bridge-off RPC parity for stock Curio.** Upstream's PDP-only Curio build
+("maxboom", filecoin-project/curio#1311) embeds Lantern over plain JSON-RPC
+with **no `--vm-bridge-rpc`**. Several RPC methods still forwarded to the VM
+bridge and therefore hard-failed bridge-off. (Curio Core was never affected:
+it reads and writes through the embedded VMBridge seam.) This release serves
+the remaining PDP read / event / write methods from local state, so a
+bridge-off node runs the PDP hot path with zero Glif. No wire/protocol
+changes; the `pkg/daemon` and `wallet` public APIs are unchanged.
+
+### Added (local-first, all with graceful bridge fallback)
+
+- **#74 — local `eth_getCode`.** Resolves contract bytecode from live-head
+  EVM actor state (CID + hash verified). Returns `0x` for EOAs / non-EVM /
+  unknown addresses. Unblocks every `ethclient.CodeAt` contract-presence
+  check (PDPVerifier / FWSS / ServiceProviderRegistry / USDFC) bridge-off.
+- **#73 — local `eth_getLogs`.** Decodes per-receipt event AMTs into ETH
+  logs (the `t1..t4` / `d` recipe, matching Lotus), so PDP settlement and
+  dataset watchers plus FilecoinPay rail indexing run with no bridge.
+  Bounded to a 24h block range; falls back for older/gapped ranges.
+- **#75 — local `eth_getStorageAt` + `eth_getBlockByHash`.** Storage slots
+  from the contract KAMT; recent blocks resolved by hash over a bounded
+  header-store window.
+- **#47 — mpool pending → confirm → rebroadcast loop.** A published-but-
+  unmined message is now rebroadcast (identical bytes, same nonce/CID) once
+  past a confidence window, dropped when it lands, and surfaced as **failed**
+  (with an `OnFailed` callback) after max retries — instead of silently
+  stalling and blocking the sender's later nonces. No re-signing, no RBF
+  (explicitly out of scope). Wired on the embedded daemon head tick.
+
+### Fixed
+
+- **#71 — redundant Glif `ChainHead` poll under live gossipsub.** A
+  standalone node with gossipsub healthy still polled Glif every 6s and got
+  rate-limited (HTTP 429). The polling Sync now skips its upstream poll when
+  gossip is keeping the store head fresh, and the standalone daemon relaxes
+  its sync interval to 30s when libp2p is enabled (matching the embedded
+  daemon). Glif is a true catch-up fallback again.
+- **#50 — message/receipt block availability bridge-off.** `StateSearchMsg`
+  wraps its block fetch in the retrying getter, and the #47 reconcile loop
+  warms each in-flight tx's message/receipt blocks on every head, so the
+  write-confirm path resolves without Glif.
+
+### Internal
+
+- `state/amt`: `ForEachRaw` (v4 AMT value iteration) for the events AMT.
+- `chain/msgsearch`: exported `OrderedMessageCIDs` + `FindChild` so the logs
+  path pairs receipts/events with tx hashes in canonical application order.
+
+Tracking umbrella: #76. gofmt + `go vet` + full build clean; hermetic suite
+green; `net/mpool` race-clean.
+
 ## v1.8.2 (2026-06-29)
 
 Read-path coverage fix. Field-reported: a node running **stock upstream Curio**
