@@ -262,6 +262,19 @@ func (s *Store) canonicalAt(epoch abi.ChainEpoch) (*ltypes.TipSet, error) {
 	return s.loadTipSet(tsk)
 }
 
+// GetTipSet resolves a tipset directly by its key (the set of block
+// CIDs). It reads each block header from the store and reassembles the
+// tipset. Returns ErrNotFound if any constituent block is missing. Unlike
+// GetTipSetByHeight this does NOT require the tipset to be on the
+// canonical chain — it serves any tipset whose headers were persisted,
+// which is what callers like ChainGetTipSet(key) need.
+func (s *Store) GetTipSet(tsk ltypes.TipSetKey) (*ltypes.TipSet, error) {
+	if tsk.IsEmpty() {
+		return nil, ErrNotFound
+	}
+	return s.loadTipSet(tsk)
+}
+
 func (s *Store) loadTipSet(tsk ltypes.TipSetKey) (*ltypes.TipSet, error) {
 	cids := tsk.Cids()
 	blocks := make([]*ltypes.BlockHeader, 0, len(cids))

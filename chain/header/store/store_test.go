@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -214,4 +215,53 @@ func TestOnHeadChange(t *testing.T) {
 	default:
 		t.Fatal("OnHeadChange callback did not fire")
 	}
+}
+
+// TestGetTipSetByKey verifies GetTipSet(key) resolves a tipset directly
+// from persisted headers, including a NON-head historical tipset (the
+// Curio chain-watcher scenario from #68), and returns ErrNotFound when a
+// constituent block is missing or the key is empty.
+func TestGetTipSetByKey(t *testing.T) {
+	s, _ := newStore(t, false)
+
+	// Build a short linear chain: genesis -> h1 -> h2 (h2 is head).
+	g := mkBlock(t, 0, nil, 1000, "g")
+	require.NoError(t, s.Put(g))
+	gts, err := ltypes.NewTipSet([]*ltypes.BlockHeader{g})
+	require.NoError(t, err)
+	require.NoError(t, s.SetHead(context.Background(), gts))
+
+	b1 := mkBlock(t, 1, []cid.Cid{g.Cid()}, 1000, "1")
+	require.NoError(t, s.Put(b1))
+	ts1, err := ltypes.NewTipSet([]*ltypes.BlockHeader{b1})
+	require.NoError(t, err)
+	require.NoError(t, s.SetHead(context.Background(), ts1))
+
+	b2 := mkBlock(t, 2, []cid.Cid{b1.Cid()}, 1000, "2")
+	require.NoError(t, s.Put(b2))
+	ts2, err := ltypes.NewTipSet([]*ltypes.BlockHeader{b2})
+	require.NoError(t, err)
+	require.NoError(t, s.SetHead(context.Background(), ts2))
+
+	// Resolve a NON-head historical tipset (epoch 1) directly by key.
+	got, err := s.GetTipSet(ts1.Key())
+	require.NoError(t, err)
+	require.Equal(t, abi.ChainEpoch(1), got.Height())
+	require.Equal(t, ts1.Key().String(), got.Key().String())
+
+	// Resolve the head tipset by key too.
+	gotHead, err := s.GetTipSet(ts2.Key())
+	require.NoError(t, err)
+	require.Equal(t, abi.ChainEpoch(2), gotHead.Height())
+
+	// Empty key -> ErrNotFound.
+	_, err = s.GetTipSet(ltypes.EmptyTSK)
+	require.ErrorIs(t, err, store.ErrNotFound)
+
+	// Key referencing a block we never persisted -> ErrNotFound.
+	missing := mkBlock(t, 3, []cid.Cid{b2.Cid()}, 1000, "missing")
+	missingTS, err := ltypes.NewTipSet([]*ltypes.BlockHeader{missing})
+	require.NoError(t, err)
+	_, err = s.GetTipSet(missingTS.Key())
+	require.True(t, errors.Is(err, store.ErrNotFound), "missing block should be ErrNotFound, got %v", err)
 }

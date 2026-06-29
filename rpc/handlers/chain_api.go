@@ -365,17 +365,28 @@ func mustZeroIDAddr() address.Address {
 
 // ChainGetTipSet returns a tipset by key. Tier 1 (#18).
 //
-// V1 implementation only knows the current trusted tipset. Requests for
-// other keys return ErrTipSetNotFound. Phase 5 wires the header-store
-// lookup.
+// Resolution order:
+//  1. The synthetic current trusted head (matches empty key or head key).
+//  2. The persistent header store, by key (#68) — serves any historical
+//     tipset whose headers we've persisted. Curio's message/watch.go and
+//     apiinfo.go ask for specific recent (non-head) tipset keys; before
+//     this fell straight through to ErrTipSetNotFound, surfacing as
+//     "tipset not in local store (only current head is cached in V1)" and
+//     stalling Curio's chain watcher.
 func (c *ChainAPI) ChainGetTipSet(_ context.Context, key types.TipSetKey) (*types.TipSet, error) {
 	if c.Trusted == nil {
 		return nil, errors.New("trusted root not initialised")
 	}
-	// Heuristic match: requested key matches the synthetic head's key.
+	// Fast path: requested key matches (or omits) the synthetic head's key.
 	cur := synthesizeTipSet(c.Trusted)
 	if key.IsEmpty() || tipsetKeyMatches(cur.Key(), key) {
 		return cur, nil
+	}
+	// Fall through to the header store for historical / non-head tipsets.
+	if c.HeaderStore != nil {
+		if ts, err := c.HeaderStore.GetTipSet(key); err == nil {
+			return ts, nil
+		}
 	}
 	return nil, ErrTipSetNotFound
 }
