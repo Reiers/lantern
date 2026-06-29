@@ -555,3 +555,88 @@ func TestSyncStaleResetDisabled(t *testing.T) {
 	require.Equal(t, abi.ChainEpoch(30), s.HeadEpoch())
 	require.Equal(t, 0, resetFired, "threshold=0 must never fire a stale reset")
 }
+
+// countingSource wraps an RPCSource and counts HeadEpoch() calls, to
+// verify the #71 gossip-aware poll skip.
+type countingSource struct {
+	inner     hstore.RPCSource
+	headCalls int
+	mu        sync.Mutex
+}
+
+func (c *countingSource) HeadEpoch(ctx context.Context) (abi.ChainEpoch, error) {
+	c.mu.Lock()
+	c.headCalls++
+	c.mu.Unlock()
+	return c.inner.HeadEpoch(ctx)
+}
+func (c *countingSource) TipsetCIDsByHeight(ctx context.Context, h abi.ChainEpoch) ([]cid.Cid, error) {
+	return c.inner.TipsetCIDsByHeight(ctx, h)
+}
+func (c *countingSource) FetchBlock(ctx context.Context, k cid.Cid) (*ltypes.BlockHeader, error) {
+	return c.inner.FetchBlock(ctx, k)
+}
+func (c *countingSource) calls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.headCalls
+}
+
+// TestSyncSkipsPollWhenGossipFresh: with a warm store head and
+// GossipFresh()==true, the Sync must NOT call src.HeadEpoch() (#71).
+func TestSyncSkipsPollWhenGossipFresh(t *testing.T) {
+	s, _ := newStore(t, false)
+	fake := newFakeSource()
+
+	// Seed canonical 0..3 and prime the store head so it's "warm".
+	g := mkBlock(t, 0, nil, 1000, "g")
+	fake.put(g)
+	parents := []cid.Cid{g.Cid()}
+	for h := abi.ChainEpoch(1); h <= 3; h++ {
+		b := mkBlock(t, h, parents, 1000, "")
+		fake.put(b)
+		parents = []cid.Cid{b.Cid()}
+	}
+	src := &countingSource{inner: fake}
+	sync := hstore.NewSync(s, src, hstore.SyncOptions{MaxBacktrack: 10})
+
+	// First poll (no GossipFresh): warms the store head, calls HeadEpoch.
+	require.NoError(t, sync.PollOnce(context.Background()))
+	require.Equal(t, abi.ChainEpoch(3), s.HeadEpoch())
+	base := src.calls()
+	require.GreaterOrEqual(t, base, 1)
+
+	// Now gossip is "fresh": the next poll must skip HeadEpoch entirely.
+	gossipFresh := true
+	sync.SetGossipFresh(func() bool { return gossipFresh })
+	require.NoError(t, sync.PollOnce(context.Background()))
+	require.Equal(t, base, src.calls(), "HeadEpoch must NOT be polled while gossip is fresh")
+
+	// Gossip goes quiet: the Sync must resume polling HeadEpoch.
+	gossipFresh = false
+	require.NoError(t, sync.PollOnce(context.Background()))
+	require.Equal(t, base+1, src.calls(), "HeadEpoch must resume when gossip is stale")
+}
+
+// TestSyncColdStartPollsDespiteGossipFresh: a cold/empty store (head<0)
+// must still poll HeadEpoch even if GossipFresh()==true, so the very
+// first head can bootstrap from the RPC (#71 guard).
+func TestSyncColdStartPollsDespiteGossipFresh(t *testing.T) {
+	s, _ := newStore(t, false)
+	fake := newFakeSource()
+	g := mkBlock(t, 0, nil, 1000, "g")
+	fake.put(g)
+	parents := []cid.Cid{g.Cid()}
+	for h := abi.ChainEpoch(1); h <= 2; h++ {
+		b := mkBlock(t, h, parents, 1000, "")
+		fake.put(b)
+		parents = []cid.Cid{b.Cid()}
+	}
+	src := &countingSource{inner: fake}
+	sync := hstore.NewSync(s, src, hstore.SyncOptions{MaxBacktrack: 10, BootstrapDepth: 2})
+	sync.SetGossipFresh(func() bool { return true }) // gossip claims fresh...
+
+	require.Equal(t, abi.ChainEpoch(-1), s.HeadEpoch(), "store starts cold")
+	require.NoError(t, sync.PollOnce(context.Background()))
+	require.GreaterOrEqual(t, src.calls(), 1, "cold store must poll HeadEpoch despite GossipFresh")
+}

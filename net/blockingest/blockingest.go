@@ -85,6 +85,7 @@ type Ingestor struct {
 	backfilled       atomic.Uint64
 	backfillFailed   atomic.Uint64
 	lastInstallEpoch atomic.Int64
+	lastInstallNanos atomic.Int64 // wall-clock UnixNano of the last successful install (#71)
 }
 
 // New builds an ingestor wired to the header store. src may be nil; when
@@ -183,6 +184,20 @@ func (g *Ingestor) process(ctx context.Context, blk *ltypes.BlockMsg) {
 	}
 	g.installed.Add(1)
 	g.lastInstallEpoch.Store(int64(bh.Height))
+	g.lastInstallNanos.Store(time.Now().UnixNano())
+}
+
+// Fresh reports whether the ingestor installed a block within the last
+// `within` duration. Used by the polling Sync (#71) to decide whether
+// gossip is currently keeping the store head live, in which case the
+// Sync skips its upstream-RPC HeadEpoch() poll for that tick. Returns
+// false before the first install (zero timestamp).
+func (g *Ingestor) Fresh(within time.Duration) bool {
+	ns := g.lastInstallNanos.Load()
+	if ns == 0 {
+		return false
+	}
+	return time.Since(time.Unix(0, ns)) <= within
 }
 
 // allParentsPresent returns true if every parent CID is already in the

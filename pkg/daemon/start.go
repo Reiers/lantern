@@ -411,6 +411,24 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 		return fmt.Errorf("start gossipsub block ingestor: %w", err)
 	}
 
+	// #71: now that the gossip ingestor exists, let the polling Sync skip
+	// its upstream-RPC HeadEpoch() poll whenever gossip installed a block
+	// recently. Freshness window = 2x the (relaxed, 30s) sync interval so a
+	// single missed gossip block doesn't immediately re-trigger Glif polls.
+	// When gossip goes quiet the window lapses and the Sync resumes polling.
+	d.mu.Lock()
+	hsync := d.headerSync
+	d.mu.Unlock()
+	if hsync != nil {
+		// libp2p is on here (startGossipHead only runs when enabled), so the
+		// Sync interval was relaxed to 30s above; mirror that for the window.
+		freshWindow := 60 * time.Second // 2x the relaxed 30s sync interval
+		if d.cfg.SyncInterval > 0 && d.cfg.SyncInterval*2 > freshWindow {
+			freshWindow = d.cfg.SyncInterval * 2
+		}
+		hsync.SetGossipFresh(func() bool { return ing.Fresh(freshWindow) })
+	}
+
 	// lantern#45 Stage 4: wire the gossipsub mempool publisher on the same
 	// pubsub instance, so eth_sendRawTransaction can broadcast SP txs over
 	// /fil/msgs/<network> locally instead of forwarding to the bridge.
