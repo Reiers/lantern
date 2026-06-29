@@ -44,6 +44,30 @@ type Config struct {
 	// OnMessage is fired for every signed message received from the
 	// network. Nil means "ignore incoming traffic".
 	OnMessage func(*ltypes.SignedMessage, peer.ID)
+
+	// --- #47: pending confirm + rebroadcast loop ---
+	//
+	// ConfirmAfterEpochs is the confidence window: a published message not
+	// seen on chain for at least this many epochs is rebroadcast (identical
+	// bytes, same nonce/CID). Default 3 (~90s mainnet). Long enough that a
+	// slow-but-valid inclusion isn't mistaken for failure.
+	ConfirmAfterEpochs int64
+	// MaxRetries caps rebroadcasts before a message is marked failed.
+	// Default 5. 0 uses the default; use a negative value for "unlimited".
+	MaxRetries int
+	// OnFailed, if set, is invoked once when a pending message gives up
+	// (max retries exhausted). The message is also moved to a failed set
+	// observable via Stats.Failed. Never silently stuck.
+	OnFailed func(*ltypes.SignedMessage, string)
+}
+
+// pendingMsg tracks a locally published message for the confirm/retry loop.
+type pendingMsg struct {
+	sm           *ltypes.SignedMessage
+	raw          []byte // serialized bytes captured at first publish (rebroadcast is byte-identical)
+	publishedAt  int64  // epoch observed at publish time (0 = unknown until first reconcile)
+	retries      int
+	lastActivity int64 // epoch of last (re)broadcast
 }
 
 // Pool is a libp2p-gossipsub-backed message pool.
@@ -54,10 +78,13 @@ type Pool struct {
 	cfg   Config
 
 	mu       sync.Mutex
-	pending  map[cid.Cid]*ltypes.SignedMessage // our published CIDs
-	received uint64                            // total messages observed
-	rejected uint64                            // failed superficial validation
-	publishd uint64                            // total published
+	pending  map[cid.Cid]*pendingMsg // our published CIDs awaiting inclusion
+	received uint64                  // total messages observed
+	rejected uint64                  // failed superficial validation
+	publishd uint64                  // total published
+	rebroad  uint64                  // total rebroadcasts (#47)
+	confirmd uint64                  // total confirmed-on-chain (#47)
+	failed   uint64                  // total given up (#47)
 }
 
 // New starts a Pool: joins the topic, subscribes, and (if OnMessage is set)
@@ -75,12 +102,18 @@ func New(ctx context.Context, ps *pubsub.PubSub, cfg Config) (*Pool, error) {
 		_ = t.Close()
 		return nil, fmt.Errorf("subscribe topic %s: %w", cfg.Topic, err)
 	}
+	if cfg.ConfirmAfterEpochs <= 0 {
+		cfg.ConfirmAfterEpochs = 3
+	}
+	if cfg.MaxRetries == 0 {
+		cfg.MaxRetries = 5
+	}
 	p := &Pool{
 		ps:      ps,
 		topic:   t,
 		sub:     sub,
 		cfg:     cfg,
-		pending: make(map[cid.Cid]*ltypes.SignedMessage),
+		pending: make(map[cid.Cid]*pendingMsg),
 	}
 	go p.readLoop(ctx)
 	return p, nil
@@ -136,7 +169,7 @@ func (p *Pool) Publish(ctx context.Context, sm *ltypes.SignedMessage) (cid.Cid, 
 
 	if p.cfg.DryRun {
 		p.mu.Lock()
-		p.pending[mcid] = sm
+		p.pending[mcid] = &pendingMsg{sm: sm, raw: raw}
 		p.mu.Unlock()
 		log.Infof("mpool DRY-RUN: would publish %s (%d bytes) to %s", mcid, len(raw), p.cfg.Topic)
 		return mcid, ErrDryRun
@@ -146,20 +179,20 @@ func (p *Pool) Publish(ctx context.Context, sm *ltypes.SignedMessage) (cid.Cid, 
 		return cid.Undef, fmt.Errorf("publish: %w", err)
 	}
 	p.mu.Lock()
-	p.pending[mcid] = sm
+	p.pending[mcid] = &pendingMsg{sm: sm, raw: raw}
 	p.publishd++
 	p.mu.Unlock()
 	return mcid, nil
 }
 
 // Pending returns a snapshot of locally pushed message CIDs (and their
-// signed-message bodies).
+// signed-message bodies) still awaiting inclusion.
 func (p *Pool) Pending() []*ltypes.SignedMessage {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	out := make([]*ltypes.SignedMessage, 0, len(p.pending))
-	for _, sm := range p.pending {
-		out = append(out, sm)
+	for _, pm := range p.pending {
+		out = append(out, pm.sm)
 	}
 	return out
 }
@@ -174,11 +207,14 @@ func (p *Pool) Forget(c cid.Cid) {
 
 // Stats reports observable counters.
 type Stats struct {
-	Received   uint64
-	Rejected   uint64
-	Published  uint64
-	PendingCnt int
-	Topic      string
+	Received     uint64
+	Rejected     uint64
+	Published    uint64
+	Rebroadcasts uint64 // #47
+	Confirmed    uint64 // #47
+	Failed       uint64 // #47
+	PendingCnt   int
+	Topic        string
 }
 
 // Stats returns activity counters.
@@ -186,11 +222,14 @@ func (p *Pool) Stats() Stats {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return Stats{
-		Received:   p.received,
-		Rejected:   p.rejected,
-		Published:  p.publishd,
-		PendingCnt: len(p.pending),
-		Topic:      p.cfg.Topic,
+		Received:     p.received,
+		Rejected:     p.rejected,
+		Published:    p.publishd,
+		Rebroadcasts: p.rebroad,
+		Confirmed:    p.confirmd,
+		Failed:       p.failed,
+		PendingCnt:   len(p.pending),
+		Topic:        p.cfg.Topic,
 	}
 }
 

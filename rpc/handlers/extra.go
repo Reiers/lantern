@@ -717,7 +717,15 @@ func (c *ChainAPI) EthGetTransactionByBlockNumberAndIndex(ctx context.Context, b
 // EthGetCode returns the deployed contract bytecode at an address.
 // Used by every ethclient.CodeAt call (e.g. wallet detection, contract
 // presence checks before calling).
+//
+// Local-first (lantern#74): resolve the bytecode from local state so a
+// bridge-off node (stock Curio / maxboom) serves contract-presence checks
+// without a VMBridge. Falls back to the bridge only when the address
+// can't be resolved locally (cold blocks during rollout).
 func (c *ChainAPI) EthGetCode(ctx context.Context, addr string, blockParam any) (string, error) {
+	if out, served, err := c.localEthGetCode(ctx, addr); served {
+		return out, err
+	}
 	raw, err := c.forwardEth(ctx, "eth_getCode", []any{addr, blockParam})
 	if err != nil {
 		return "", err
@@ -732,6 +740,11 @@ func (c *ChainAPI) EthGetCode(ctx context.Context, addr string, blockParam any) 
 // EthGetStorageAt returns the raw 32-byte storage slot value at the
 // given key on the given contract.
 func (c *ChainAPI) EthGetStorageAt(ctx context.Context, addr string, key string, blockParam any) (string, error) {
+	// Local-first (lantern#75): read the storage slot from local state so a
+	// bridge-off node serves it without a VMBridge; fall back otherwise.
+	if out, served, err := c.localEthGetStorageAt(ctx, addr, key); served {
+		return out, err
+	}
 	raw, err := c.forwardEth(ctx, "eth_getStorageAt", []any{addr, key, blockParam})
 	if err != nil {
 		return "", err
@@ -747,7 +760,13 @@ func (c *ChainAPI) EthGetStorageAt(ctx context.Context, addr string, key string,
 // Mirrors EthGetBlockByNumber's behaviour: prefer local header store
 // if present, otherwise forward to the bridge.
 func (c *ChainAPI) EthGetBlockByHash(ctx context.Context, blockHash string, fullTx bool) (any, error) {
-	// We don't have hash-indexed local block lookup yet; always forward.
+	// Local-first (lantern#75): resolve recent blocks from the header store
+	// (scanned by hash over a bounded window) so a bridge-off node serves
+	// receipt/tx-context block lookups without a VMBridge. Falls back for
+	// hashes older than the window or when no header store is mounted.
+	if out, served, err := c.localEthGetBlockByHash(ctx, blockHash, fullTx); served {
+		return out, err
+	}
 	return c.forwardEth(ctx, "eth_getBlockByHash", []any{blockHash, fullTx})
 }
 
@@ -756,6 +775,13 @@ func (c *ChainAPI) EthGetBlockByHash(ctx context.Context, blockHash string, full
 // indexing). Lantern doesn't run an FEVM log index of its own; the
 // upstream's index is the source of truth.
 func (c *ChainAPI) EthGetLogs(ctx context.Context, filter any) (any, error) {
+	// Local-first (lantern#73): decode logs from per-receipt event AMTs so
+	// a bridge-off node (stock Curio / maxboom) serves PDP settlement +
+	// FilecoinPay rail watchers without a VMBridge. Falls back to the
+	// bridge for ranges/blocks outside the local window or on decode gaps.
+	if out, served, err := c.localEthGetLogs(ctx, filter); served {
+		return out, err
+	}
 	return c.forwardEth(ctx, "eth_getLogs", []any{filter})
 }
 
