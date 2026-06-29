@@ -37,6 +37,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/filecoin-project/go-state-types/abi"
@@ -466,11 +467,26 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 				}
 				return mpool.SearchUnknown, nil
 			}
+			// The header store fires OnHeadChange listeners INLINE on the
+			// SetHead path, so the callback must not block head advancement.
+			// Reconcile does StateSearchMsg I/O across every pending tx, so we
+			// run it on its own goroutine, with a single-flight guard so a slow
+			// reconcile can't pile up behind fast head advances (we'd rather
+			// skip a tick than queue an unbounded backlog; the next head picks
+			// up any still-pending tx).
+			var reconciling int32
 			store.OnHeadChange(func(ts *types.TipSet) {
 				if ts == nil {
 					return
 				}
-				mp.Reconcile(ctx, int64(ts.Height()), search)
+				if !atomic.CompareAndSwapInt32(&reconciling, 0, 1) {
+					return // a reconcile is already in flight; skip this tick
+				}
+				height := int64(ts.Height())
+				go func() {
+					defer atomic.StoreInt32(&reconciling, 0)
+					mp.Reconcile(ctx, height, search)
+				}()
 			})
 		}
 	}
