@@ -17,3 +17,6 @@ docs/phase*
 # Per-tag release notes are published on the GitHub release, not committed.
 # Canonical in-repo history is CHANGELOG.md.
 RELEASE-NOTES-v*.md
+
+# Internal working notes — never publish to the public repo.
+internal-notes/
