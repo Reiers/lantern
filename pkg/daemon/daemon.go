@@ -366,7 +366,8 @@ func (d *Daemon) Host() *llibp2p.Host {
 
 // FEVMPrefetchStats returns a snapshot of the FEVM state-block
 // prefetcher's counters and true when the prefetcher is wired.
-// Returns (zero, false) when FEVMPrefetchAddrs was empty (lantern#44).
+// Returns (zero, false) when the merged warm-set (built-in + consumer)
+// was empty, so the prefetcher never started (lantern#44, #69).
 func (d *Daemon) FEVMPrefetchStats() (prefetch.Stats, bool) {
 	d.mu.Lock()
 	pf := d.fevmPrefetch
