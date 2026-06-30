@@ -46,6 +46,29 @@ fork-choice gap on the running head.
   sybil peers" to "out-weight the real chain." Does not fully close the
   un-finalized-tip split against an adversary with real power — that's F3.
 
+- **Un-evictable trusted peer floor** ([#80](https://github.com/Reiers/lantern/issues/80)).
+  The trusted bootstrap/beacon/direct-peer set is now `connmgr`-protected,
+  so the connection-manager trim path can never drop it. An attacker
+  flooding the node with dials can no longer fully replace the peer table
+  with peers it controls — the honest floor survives, keeping the heavier
+  canonical chain reachable. Complements #79 (which makes a lighter fork
+  unadoptable). Head-source diversity (≥N distinct peers) is a tracked
+  follow-up.
+
+- **Prefetch-on-send** ([#50](https://github.com/Reiers/lantern/issues/50)).
+  When `eth_sendRawTransaction` publishes a tx locally, its message/receipt
+  blocks are warmed into the Bitswap cache in the background so the
+  follow-up receipt poll resolves locally instead of racing a cold
+  cross-peer fetch. Closes the residual write-confirm availability gap.
+
+- **Explicit bridge-off head source** ([#50](https://github.com/Reiers/lantern/issues/50)).
+  New `FallbackRPC` (override the upstream RPC, e.g. your own Forest) and
+  `NoFallbackRPC` (remove the upstream RPC entirely — head from gossipsub,
+  cold blocks from gateway+Bitswap). Previously a bridge-off node silently
+  fell back to Glif when gossip stalled, a hidden third-party dependency;
+  now a stall surfaces as an observable stalled head. Refuses to start if
+  `NoFallbackRPC` is set without libp2p (no head source).
+
 ### Changed
 
 - **`TRUST-MODEL.md` §2.1 corrected for accuracy**
