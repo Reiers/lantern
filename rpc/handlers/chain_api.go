@@ -803,8 +803,8 @@ func (c *ChainAPI) tipsetForRandomness(ctx context.Context, randEpoch abi.ChainE
 		// epoch and errors immediately.
 		const (
 			randWaitWindow abi.ChainEpoch = 10
-			randWaitTotal                = 20 * time.Second
-			randWaitPoll                 = 500 * time.Millisecond
+			randWaitTotal                 = 20 * time.Second
+			randWaitPoll                  = 500 * time.Millisecond
 		)
 		if c.HeaderStore == nil || randEpoch > liveHead+randWaitWindow {
 			return nil, fmt.Errorf("cannot draw randomness from future epoch %d (head %d)", randEpoch, liveHead)
