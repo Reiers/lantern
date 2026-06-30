@@ -757,16 +757,61 @@ func (c *ChainAPI) StateGetBeaconEntry(ctx context.Context, epoch abi.ChainEpoch
 // back through null rounds. Uses the header store when configured;
 // otherwise returns the synthesized current-head tipset if randEpoch is
 // the current head, else an error.
-func (c *ChainAPI) tipsetForRandomness(_ context.Context, randEpoch abi.ChainEpoch) (*types.TipSet, error) {
+func (c *ChainAPI) tipsetForRandomness(ctx context.Context, randEpoch abi.ChainEpoch) (*types.TipSet, error) {
 	if c.Trusted == nil {
 		return nil, errors.New("trusted root not initialised")
 	}
 	if randEpoch < 0 {
 		return nil, fmt.Errorf("randomness epoch %d cannot be negative", randEpoch)
 	}
-	if randEpoch > c.Trusted.Epoch {
-		return nil, fmt.Errorf("cannot draw randomness from future epoch %d (head %d)", randEpoch, c.Trusted.Epoch)
+
+	// #82: the ceiling for "is this a future epoch?" must be the LIVE head
+	// (HeaderStore.Head()), not the frozen boot anchor (c.Trusted.Epoch).
+	// c.Trusted is set once at construction and never advances (see #48),
+	// so comparing randEpoch against it incorrectly reports epochs the node
+	// has actually reached as "future". A PDP prove task asks for randomness
+	// at its challenge epoch the instant the window opens; on a node whose
+	// header sync is a few epochs behind the chain tip, that epoch can be
+	// just above the current head. Bridge-off there is no upstream to fall
+	// to, so instead of hard-failing we wait briefly for the header sync to
+	// reach randEpoch, then draw locally. The wait is bounded so a genuinely
+	// future epoch still errors promptly.
+	liveHead := c.Trusted.Epoch
+	if c.HeaderStore != nil {
+		if ts := c.HeaderStore.Head(); ts != nil {
+			liveHead = ts.Height()
+		}
 	}
+
+	if randEpoch > liveHead {
+		// Bounded wait-for-head: only worth waiting when randEpoch is
+		// within a small window above the live head (the normal
+		// sync-catch-up case). Anything far ahead is a genuinely future
+		// epoch and errors immediately.
+		const (
+			randWaitWindow abi.ChainEpoch = 10
+			randWaitTotal                = 20 * time.Second
+			randWaitPoll                 = 500 * time.Millisecond
+		)
+		if c.HeaderStore == nil || randEpoch > liveHead+randWaitWindow {
+			return nil, fmt.Errorf("cannot draw randomness from future epoch %d (head %d)", randEpoch, liveHead)
+		}
+		deadline := time.Now().Add(randWaitTotal)
+		for randEpoch > liveHead {
+			if time.Now().After(deadline) {
+				return nil, fmt.Errorf("cannot draw randomness from future epoch %d (head %d after waiting %s for sync)", randEpoch, liveHead, randWaitTotal)
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(randWaitPoll):
+			}
+			if ts := c.HeaderStore.Head(); ts != nil {
+				liveHead = ts.Height()
+			}
+		}
+	}
+
 	if c.HeaderStore != nil {
 		ts, err := c.HeaderStore.GetTipSetByHeight(randEpoch)
 		if err == nil {
