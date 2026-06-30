@@ -282,3 +282,50 @@ func TestIngestor_Fresh(t *testing.T) {
 	require.True(t, ing.Fresh(time.Minute), "Fresh must be true right after an install")
 	require.False(t, ing.Fresh(0), "Fresh(0) must be false (no install is within a zero window)")
 }
+
+// TestIngestor_ForkChoiceRejectsLighterFork covers #79: a candidate at a
+// HIGHER height but with lower-or-equal ParentWeight than the current head
+// (an attacker's valid-but-non-canonical lighter fork, fed via an eclipsed
+// peer table) must be rejected by heaviest-ParentWeight fork choice, even
+// though it passes the height fence and parent linkage.
+func TestIngestor_ForkChoiceRejectsLighterFork(t *testing.T) {
+	// Seed head at height 10. withStore's mkBlock sets ParentWeight == height,
+	// so the head at h=10 has ParentWeight 10.
+	s, head := withStore(t, 10)
+	ing := New(s, nil)
+	ctx := context.Background()
+
+	// Attacker block: height 11 (passes the height fence) but on a lighter
+	// fork - explicitly set ParentWeight to 5, BELOW the current head's 10.
+	// Parent-linked to the real head so linkage passes too.
+	light := mkBlock(t, head.Height()+1, []cid.Cid{head.Blocks()[0].Cid()}, 1000, "attacker")
+	light.ParentWeight = ltypes.NewInt(5)
+
+	ing.process(ctx, &ltypes.BlockMsg{Header: light})
+
+	require.Equal(t, uint64(0), ing.installed.Load(),
+		"lighter fork must NOT be installed as head")
+	require.Equal(t, uint64(1), ing.Stats().RejectedLighter,
+		"rejection must be counted as a fork-choice (lighter) reject")
+	require.Equal(t, head.Height(), s.HeadEpoch(),
+		"head must stay on the heavier canonical chain")
+}
+
+// TestIngestor_ForkChoiceAcceptsHeavierAdvance is the companion: a normal
+// descendant (higher height, strictly greater weight) must still be adopted.
+func TestIngestor_ForkChoiceAcceptsHeavierAdvance(t *testing.T) {
+	s, head := withStore(t, 10) // head weight == 10
+	ing := New(s, nil)
+	ctx := context.Background()
+
+	// Legit next block: height 11, weight 11 (> 10).
+	next := mkBlock(t, head.Height()+1, []cid.Cid{head.Blocks()[0].Cid()}, 1000, "next")
+	// mkBlock already sets ParentWeight == height == 11.
+
+	ing.process(ctx, &ltypes.BlockMsg{Header: next})
+
+	require.Equal(t, uint64(1), ing.installed.Load(),
+		"a strictly-heavier descendant must be adopted as head")
+	require.Equal(t, uint64(0), ing.Stats().RejectedLighter)
+	require.Equal(t, head.Height()+1, s.HeadEpoch())
+}
