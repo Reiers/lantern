@@ -40,6 +40,7 @@ import (
 
 	lapi "github.com/Reiers/lantern/api"
 	"github.com/Reiers/lantern/build"
+	"github.com/Reiers/lantern/chain/headcheck"
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	"github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
@@ -125,6 +126,14 @@ type Config struct {
 	// default). Point this at your own Forest/Lotus node to remove the
 	// Glif dependency without going fully bridge-off (lantern#50 part 3).
 	FallbackRPC string
+
+	// HeadCheckRPCs is an optional list of Lotus-compatible JSON-RPC URLs
+	// used by the running-head divergence monitor (chain/headcheck,
+	// snadrus#85) to CORROBORATE the gossip-derived head. These are never
+	// the source of truth for the head - they only raise an eclipse/fork
+	// alarm when a diversity of independent observers disagrees with our
+	// head beyond the 3-block lookback. Empty disables the monitor.
+	HeadCheckRPCs []string
 
 	// NoFallbackRPC, when true, wires NO upstream RPC as the Sync head
 	// source or cold-block fallback - the node relies purely on gossipsub
@@ -292,10 +301,11 @@ type Daemon struct {
 	// When present, gossipsub is the primary head source (0-1 epoch
 	// latency) and headerSync runs at a relaxed cadence as the catch-up
 	// fallback. See lantern#40.
-	p2pHost  *llibp2p.Host
-	ingestor *blockingest.Ingestor
-	mpool    *mpool.Pool     // gossipsub mempool publisher (#45 Stage 4)
-	bitswap  *bitswap.Client // libp2p block source on the embedded fetcher (#50)
+	p2pHost   *llibp2p.Host
+	ingestor  *blockingest.Ingestor
+	mpool     *mpool.Pool        // gossipsub mempool publisher (#45 Stage 4)
+	headcheck *headcheck.Monitor // running-head divergence monitor (#85)
+	bitswap   *bitswap.Client    // libp2p block source on the embedded fetcher (#50)
 
 	// sendWarmer pre-warms a sent tx's message/receipt blocks into the
 	// Bitswap cache in the background so the receipt poll resolves locally
