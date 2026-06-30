@@ -305,6 +305,15 @@ func (s *Sync) pollAndApply(ctx context.Context) error {
 		}
 	}
 
+	// #50 part 3: a nil source means no upstream RPC was wired (bridge-off
+	// NoFallbackRPC). Gossipsub is the sole head driver in that mode, so
+	// the polling Sync has nothing to do - it stays a no-op rather than
+	// nil-panicking on HeadEpoch. The store head still advances via the
+	// gossip ingestor's SetHead calls.
+	if s.src == nil {
+		return nil
+	}
+
 	head, err := s.src.HeadEpoch(ctx)
 	if err != nil {
 		s.recordErr(err)

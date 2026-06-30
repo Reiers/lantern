@@ -715,3 +715,32 @@ func TestSyncGossipFreshSkipAtTip(t *testing.T) {
 		"poll must be skipped when at the tip (preserve #71 429-protection)")
 	require.Equal(t, abi.ChainEpoch(10), s.HeadEpoch())
 }
+
+// TestSyncNilSourceIsNoOp covers #50 part 3: a Sync constructed with no
+// upstream RPC source (bridge-off NoFallbackRPC, gossip is the sole head
+// driver) must not panic - PollOnce is a safe no-op and head is untouched.
+func TestSyncNilSourceIsNoOp(t *testing.T) {
+	s, _ := newStore(t, false)
+
+	// Seed a head via a normal source first, then drop the source.
+	src := newFakeSource()
+	g := mkBlock(t, 0, nil, 1000, "g")
+	src.put(g)
+	parents := []cid.Cid{g.Cid()}
+	for h := abi.ChainEpoch(1); h <= 3; h++ {
+		b := mkBlock(t, h, parents, 1000, "")
+		src.put(b)
+		parents = []cid.Cid{b.Cid()}
+	}
+	seed := hstore.NewSync(s, src, hstore.SyncOptions{MaxBacktrack: 10})
+	require.NoError(t, seed.PollOnce(context.Background()))
+	require.Equal(t, abi.ChainEpoch(3), s.HeadEpoch())
+
+	// Now a nil-source Sync: PollOnce must be a no-op, no panic, head intact.
+	nilSync := hstore.NewSync(s, nil, hstore.SyncOptions{MaxBacktrack: 10})
+	require.NotPanics(t, func() {
+		require.NoError(t, nilSync.PollOnce(context.Background()))
+	})
+	require.Equal(t, abi.ChainEpoch(3), s.HeadEpoch(),
+		"nil-source Sync must not alter head")
+}

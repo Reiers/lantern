@@ -119,6 +119,24 @@ type Config struct {
 	// connected Bitswap providers (beacon nodes typically).
 	BitswapPeers string
 
+	// FallbackRPC overrides the Lotus-compatible RPC URL used as the
+	// polling Sync head source and the cold state-block fallback. Empty
+	// uses the built-in Glif URL for the active network (the historical
+	// default). Point this at your own Forest/Lotus node to remove the
+	// Glif dependency without going fully bridge-off (lantern#50 part 3).
+	FallbackRPC string
+
+	// NoFallbackRPC, when true, wires NO upstream RPC as the Sync head
+	// source or cold-block fallback - the node relies purely on gossipsub
+	// for the head and Bitswap for cold blocks (lantern#50 part 3). This
+	// makes the bridge-off trust posture EXPLICIT: under the old default a
+	// bridge-off node silently fell back to Glif whenever gossip stalled,
+	// a hidden third-party dependency. With this set, a gossip stall
+	// surfaces as a stalled head (observable) instead of a silent Glif
+	// fetch. Intended for operators who have a healthy swarm/beacon set
+	// and want a provably-Glif-free node. Overrides FallbackRPC.
+	NoFallbackRPC bool
+
 	// VMBridgeRPC is an upstream Forest/Lotus JSON-RPC URL for the VM
 	// bridge (needed for AllowBlockSubmit=true). Empty disables bridge.
 	VMBridgeRPC string
