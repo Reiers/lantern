@@ -238,12 +238,56 @@ func New(ctx context.Context, cfg HostConfig) (*Host, error) {
 		out.AddCleanup(func() { _ = sub.Close() })
 	}
 
+	// #80: pin the trusted bootstrap/beacon/direct peers as an un-evictable
+	// floor. connmgr.Protect prevents the trim path (when peer count exceeds
+	// the high-water-mark) from ever dropping these, so an attacker flooding
+	// us with dials cannot fully replace our peer table with peers it
+	// controls - the trusted floor always survives. This is the
+	// eclipse-resistance complement to the #79 heaviest-weight fork choice:
+	// #79 makes a lighter fork unadoptable, #80 keeps honest peers in the
+	// table so we keep hearing the heavier canonical chain.
+	floor := cfg.GossipSubDirectPeers
+	if len(floor) == 0 {
+		floor = cfg.BootstrapPeers
+	}
+	out.ProtectPeers(floor, "lantern-trusted-floor")
+
 	// Background dial of bootstrap peers (non-blocking).
 	if len(cfg.BootstrapPeers) > 0 {
 		go out.connectBootstrap(ctx, cfg.BootstrapPeers)
 	}
 
 	return out, nil
+}
+
+// ProtectPeers marks the given multiaddr peers as connmgr-protected under
+// tag, making them an un-evictable floor the connection-manager trim path
+// will never drop (#80). Used for the trusted bootstrap/beacon/direct-peer
+// set so a dial flood from an attacker can't fully replace the peer table.
+// Safe to call repeatedly; unparseable/empty entries are skipped. Returns
+// the count of peers actually protected.
+func (h *Host) ProtectPeers(peers []string, tag string) int {
+	if h == nil || h.H == nil {
+		return 0
+	}
+	cm := h.H.ConnManager()
+	if cm == nil {
+		return 0
+	}
+	n := 0
+	for _, p := range peers {
+		ma, err := multiaddr.NewMultiaddr(p)
+		if err != nil {
+			continue
+		}
+		info, err := peer.AddrInfoFromP2pAddr(ma)
+		if err != nil || info.ID == "" {
+			continue
+		}
+		cm.Protect(info.ID, tag)
+		n++
+	}
+	return n
 }
 
 // consumeReachability mirrors EvtLocalReachabilityChanged into the cached

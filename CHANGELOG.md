@@ -2,6 +2,83 @@
 
 All notable changes to Lantern.
 
+## v1.8.5 (2026-06-30)
+
+**Head catch-up + bridge-off PDP proving robustness, and head fork-choice
+hardening.** A bridge-off node could wedge its head ~10-20 epochs behind the
+chain tip and then fail PDP proving with "cannot draw randomness from future
+epoch" (reported on v1.8.4-m). Root-caused to two stacked bugs plus a
+fork-choice gap on the running head.
+
+### Fixed
+
+- **Head catch-up no longer wedges behind the tip** ([#83](https://github.com/Reiers/lantern/issues/83)).
+  The #71 gossip-fresh skip suspended the polling Sync whenever gossip
+  installed any block recently — but a node whose gossip is fresh-but-lagging
+  (installing some blocks while skipping head+N>1 blocks it can't backfill)
+  would then have neither path reach the tip. The skip is now **lag-aware**:
+  it consults the gossip-observed tip (`blockingest.ObservedHead()`) and only
+  skips the catch-up poll when the store head is within a small tolerance of
+  it, so a lagging node resumes catch-up. Uses the gossip-observed tip, so
+  no extra upstream RPC — #71's 429-protection is preserved at the tip.
+
+- **Bridge-off PDP prove randomness** ([#82](https://github.com/Reiers/lantern/issues/82)).
+  `tipsetForRandomness` compared the requested epoch against the frozen boot
+  anchor (`Trusted.Epoch`, which never advances) instead of the live header
+  head, and the only fallback was bridge-only — so bridge-off nodes failed
+  outright and burned the prove task's retry budget. The ceiling is now the
+  live head, and when the requested epoch is within a small window above it
+  (normal sync catch-up) the call waits briefly (bounded) for the header sync
+  to reach it, then draws locally. No bridge required. Genuinely-future
+  epochs still error promptly.
+
+### Added
+
+- **Heaviest-ParentWeight fork choice on the running gossip head**
+  ([#79](https://github.com/Reiers/lantern/issues/79)). The head ingestor
+  advanced head on height-fence + parent-linkage only, so an eclipsed peer
+  table could feed parent-linked, height-advancing blocks on a
+  valid-but-lighter fork and walk a node onto it. Lantern now applies
+  Filecoin's fork-choice rule: adopt a candidate as head only when its
+  `ParentWeight` strictly exceeds the current head's. A competing lighter
+  fork is rejected (counted as `rejectedLighter`). Pure header arithmetic —
+  no proof verification, no ffi. Raises the eclipse cost from "spin up N
+  sybil peers" to "out-weight the real chain." Does not fully close the
+  un-finalized-tip split against an adversary with real power — that's F3.
+
+- **Un-evictable trusted peer floor** ([#80](https://github.com/Reiers/lantern/issues/80)).
+  The trusted bootstrap/beacon/direct-peer set is now `connmgr`-protected,
+  so the connection-manager trim path can never drop it. An attacker
+  flooding the node with dials can no longer fully replace the peer table
+  with peers it controls — the honest floor survives, keeping the heavier
+  canonical chain reachable. Complements #79 (which makes a lighter fork
+  unadoptable). Head-source diversity (≥N distinct peers) is a tracked
+  follow-up.
+
+- **Prefetch-on-send** ([#50](https://github.com/Reiers/lantern/issues/50)).
+  When `eth_sendRawTransaction` publishes a tx locally, its message/receipt
+  blocks are warmed into the Bitswap cache in the background so the
+  follow-up receipt poll resolves locally instead of racing a cold
+  cross-peer fetch. Closes the residual write-confirm availability gap.
+
+- **Explicit bridge-off head source** ([#50](https://github.com/Reiers/lantern/issues/50)).
+  New `FallbackRPC` (override the upstream RPC, e.g. your own Forest) and
+  `NoFallbackRPC` (remove the upstream RPC entirely — head from gossipsub,
+  cold blocks from gateway+Bitswap). Previously a bridge-off node silently
+  fell back to Glif when gossip stalled, a hidden third-party dependency;
+  now a stall surfaces as an observable stalled head. Refuses to start if
+  `NoFallbackRPC` is set without libp2p (no head source).
+
+### Changed
+
+- **`TRUST-MODEL.md` §2.1 corrected for accuracy**
+  ([#81](https://github.com/Reiers/lantern/issues/81)). The section claimed
+  election-proof and weight were re-verified on every header; it now states
+  precisely what is verified (CID integrity, signature shape, parent linkage,
+  heaviest-ParentWeight fork choice) vs what is not (election-proof VRF,
+  winning-PoSt, message re-execution) and why (no-ffi design), and points at
+  F3 + the boot quorum as what carries head trust.
+
 ## v1.8.4 (2026-06-29)
 
 **Fix: standalone `lantern daemon` could not fetch cold blocks over Bitswap.**

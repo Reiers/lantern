@@ -82,6 +82,7 @@ type Ingestor struct {
 	installed        atomic.Uint64
 	skipped          atomic.Uint64
 	rejected         atomic.Uint64
+	rejectedLighter  atomic.Uint64 // #79: candidates rejected by heaviest-weight fork choice
 	backfilled       atomic.Uint64
 	backfillFailed   atomic.Uint64
 	lastInstallEpoch atomic.Int64
@@ -178,6 +179,33 @@ func (g *Ingestor) process(ctx context.Context, blk *ltypes.BlockMsg) {
 		g.rejected.Add(1)
 		return
 	}
+
+	// #79: heaviest-ParentWeight fork choice on the running head.
+	//
+	// The height fence above only guarantees the candidate is *higher*
+	// than our current head - it does NOT guarantee it's on the canonical
+	// (heaviest) chain. An attacker who eclipses the peer table can feed
+	// parent-linked, height-advancing blocks on a valid-but-lighter fork
+	// and walk us onto it; content addressing doesn't catch this because
+	// the attacker's blocks hash fine, they're just not canonical.
+	//
+	// Filecoin's fork-choice rule is heaviest ParentWeight. A real
+	// descendant of our current head always has strictly greater
+	// ParentWeight; a competing lighter fork at a higher height has lower
+	// or equal weight. So we adopt the candidate as head only when its
+	// ParentWeight strictly exceeds the current head's. This is pure
+	// header arithmetic (no proof verification, no ffi) and raises the
+	// eclipse cost from "spin up N sybil peers" to "out-weight the real
+	// chain" (i.e. control real storage power).
+	if cur := g.store.Head(); cur != nil {
+		cw := cur.ParentWeight()
+		nw := ts.ParentWeight()
+		if !cw.Nil() && !nw.Nil() && nw.LessThanEqual(cw) {
+			g.rejectedLighter.Add(1)
+			return
+		}
+	}
+
 	if err := g.store.SetHead(ctx, ts); err != nil {
 		g.rejected.Add(1)
 		return
@@ -185,6 +213,26 @@ func (g *Ingestor) process(ctx context.Context, blk *ltypes.BlockMsg) {
 	g.installed.Add(1)
 	g.lastInstallEpoch.Store(int64(bh.Height))
 	g.lastInstallNanos.Store(time.Now().UnixNano())
+}
+
+// ObservedHead returns the highest block height the ingestor has
+// successfully installed into the store. This is the gossip layer's view
+// of the chain tip: it tracks the live head (>= the canonical store head,
+// since individual high-epoch blocks can be installed before the canonical
+// head advances contiguously to them). Returns -1 if nothing installed yet.
+//
+// The polling Sync uses this to make its #71 gossip-fresh skip lag-aware
+// (#83): gossip being "fresh" only means head moved recently, not that
+// head is at the tip. Comparing the store head against ObservedHead lets
+// Sync skip the catch-up poll only when actually at the tip, and run it
+// when gossip is fresh-but-lagging - without paying an upstream HeadEpoch
+// RPC call.
+func (g *Ingestor) ObservedHead() abi.ChainEpoch {
+	v := g.lastInstallEpoch.Load()
+	if v == 0 {
+		return -1
+	}
+	return abi.ChainEpoch(v)
 }
 
 // Fresh reports whether the ingestor installed a block within the last
@@ -280,6 +328,7 @@ type Stats struct {
 	Installed        uint64
 	Skipped          uint64
 	Rejected         uint64
+	RejectedLighter  uint64 // #79: rejected by heaviest-ParentWeight fork choice
 	Backfilled       uint64
 	BackfillFailed   uint64
 	LastInstallEpoch abi.ChainEpoch
@@ -293,6 +342,7 @@ func (g *Ingestor) Stats() Stats {
 		Installed:        g.installed.Load(),
 		Skipped:          g.skipped.Load(),
 		Rejected:         g.rejected.Load(),
+		RejectedLighter:  g.rejectedLighter.Load(),
 		Backfilled:       g.backfilled.Load(),
 		BackfillFailed:   g.backfillFailed.Load(),
 		LastInstallEpoch: abi.ChainEpoch(g.lastInstallEpoch.Load()),

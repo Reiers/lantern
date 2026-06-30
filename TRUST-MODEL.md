@@ -36,12 +36,47 @@ any of the following without being detected.
 
 ### 2.1 Header chain
 
-* Every header walked back to genesis (or to the trusted anchor checkpoint)
-  has its BLS signature, election proof, ticket, parent linkage, and weight
-  re-verified against the local copy of the previous header.
-* The header validator (`chain/header/header.go`) refuses any header that
-  fails any of these checks. Implemented logic lifted from
-  `lotus@v1.36 chain/sync.go::ValidateBlock`.
+Lantern is an **F3-anchored light client**, not a full re-executing
+validator. It deliberately does NOT do full Lotus-style block validation,
+because cryptographic election-proof / winning-PoSt verification requires
+`filecoin-ffi` (Rust), which Lantern's zero-CGo / one-binary design
+excludes by construction. Be precise about what that means per-field:
+
+**What every ingested header IS verified for:**
+
+* **CID integrity** — the header's CID is re-derived and checked against the
+  bytes (`header.VerifyBlockHeaderCID`). A peer cannot serve a header under
+  a CID it doesn't hash to.
+* **BLS / signature presence and shape** — structural validation
+  (`chain/header/header.go::ValidateHeader`, `ValidateTipsetShape`),
+  modelled on `lotus@v1.36 chain/sync.go`.
+* **Parent linkage** — a header is only adopted when its parents are present
+  in the local store (inline-backfilled if needed).
+* **Heaviest-ParentWeight fork choice** (#79) — the running gossip head is
+  advanced only when a candidate's `ParentWeight` strictly exceeds the
+  current head's. A competing valid-but-lighter fork is rejected. This is
+  Filecoin's fork-choice rule applied with pure header arithmetic.
+
+**What is NOT verified (by design, no-ffi):**
+
+* **Election-proof VRF validity** — Lantern checks that `ElectionProof` is
+  *present* for non-genesis heights, but does NOT cryptographically verify
+  the VRF (that needs the proofs/ffi path).
+* **Winning-PoSt** — not verified, same reason.
+* **Full message re-execution** — not performed.
+
+**What carries the trust instead:** the boot anchor (multi-source quorum on
+the F3-finalized tipset, §below) plus the F3 finality cert chain (§2.2,
+BLS-aggregate-verified). Past the finalized depth, the head is followed
+optimistically with the fork-choice + linkage checks above — the same
+probabilistic tip every node follows until F3 finalizes it. The residual
+eclipse/fork-selection exposure on the un-finalized tip is documented in
+§5 and tracked in #79 / #80; finality (F3) is what fully closes it.
+
+> Note: an earlier version of this section claimed election-proof and
+> weight were "re-verified" on every header back to genesis. That
+> overstated the code (weight fork-choice landed in #79; election-proof
+> VRF is presence-checked, not verified). Corrected for accuracy.
 
 ### 2.2 F3 finality
 

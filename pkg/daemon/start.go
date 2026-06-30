@@ -98,21 +98,40 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 	// cmd/lantern wiring (without bitswap, since libp2p isn't mounted
 	// here yet — the gateway+glif pair covers cold state-tree reads).
 	cache := hamt.NewMemBlockStore()
-	// glifURL is the RPC fallback for the polling Sync head source AND the
-	// gossipsub ingestor's head+N backfill source. Gossipsub is the PRIMARY
-	// (Glif-free) head source when libp2p is enabled; this URL is the
+	// fallbackRPC is the Lotus-compatible RPC used as the polling Sync head
+	// source AND the gossipsub ingestor's head+N backfill source AND the
+	// last-resort cold state-block fetcher. Gossipsub is the PRIMARY
+	// (RPC-free) head source when libp2p is enabled; this URL is the
 	// fallback that keeps head advancing when the gossip mesh is cold or
-	// stalls. Previously empty on mainnet, which left the mainnet daemon
-	// with no working catch-up source: when gossip stalled, head froze.
-	// Callers can override via Config.Gateway / a future Config.FallbackRPC.
-	glifURL := "https://api.node.glif.io/rpc/v1"
-	if network == build.Calibration {
-		glifURL = "https://api.calibration.node.glif.io/rpc/v1"
+	// stalls.
+	//
+	// lantern#50 part 3: bridge-off trust is now EXPLICIT.
+	//   - Config.FallbackRPC overrides the URL (e.g. operator's own Forest).
+	//   - Config.NoFallbackRPC removes the upstream RPC entirely: head comes
+	//     only from gossipsub, cold blocks only from gateway+Bitswap. A
+	//     gossip stall then surfaces as a stalled head (observable) instead
+	//     of a silent Glif fetch. Previously a bridge-off node fell back to
+	//     Glif here with no way to opt out - a hidden third-party dependency.
+	fallbackRPC := d.cfg.FallbackRPC
+	if fallbackRPC == "" {
+		fallbackRPC = "https://api.node.glif.io/rpc/v1"
+		if network == build.Calibration {
+			fallbackRPC = "https://api.calibration.node.glif.io/rpc/v1"
+		}
 	}
-	fetcher := combined.New(cache,
-		combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
-		combined.Source{Name: "glif", Getter: glif.New(glifURL, 20*time.Second), Timeout: 20 * time.Second},
-	)
+	noFallback := d.cfg.NoFallbackRPC
+
+	fetcherSources := []combined.Source{
+		{Name: "gateway", Getter: hsync.NewClient([]string{gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
+	}
+	if !noFallback {
+		fetcherSources = append(fetcherSources,
+			combined.Source{Name: "glif", Getter: glif.New(fallbackRPC, 20*time.Second), Timeout: 20 * time.Second})
+	} else {
+		log.Infow("bridge-off: no upstream RPC fallback wired (lantern#50)",
+			"head_source", "gossipsub-only", "cold_blocks", "gateway+bitswap")
+	}
+	fetcher := combined.New(cache, fetcherSources...)
 
 	chainAPI := handlers.New(tr, fetcher, d.cfg.Wallet, nil, network.String())
 
@@ -147,8 +166,6 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		dist.Start()
 		chainAPI.HeadNotify = dist
 
-		src := glif.New(glifURL, 8*time.Second)
-
 		// #40: when libp2p is enabled, gossipsub is the PRIMARY head
 		// source (0-1 epoch latency, no upstream-RPC dependency) and the
 		// polling Sync drops to a relaxed cadence as the catch-up fallback,
@@ -156,6 +173,25 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		// curio-core default today), Sync stays at the configured interval
 		// as the sole head source.
 		libp2pEnabled := !d.cfg.NoLibp2p && d.cfg.P2PListen != ""
+
+		// #50 part 3: when NoFallbackRPC is set there is no RPC Sync source.
+		// Gossipsub must be the head driver; the polling Sync becomes a no-op.
+		// IMPORTANT: build syncSrc / backfillSrc as truly-nil INTERFACES (not
+		// a typed-nil *glif.Client), so the nil guards in hstore.Sync and the
+		// gossip ingestor fire correctly. A typed-nil wrapped in an interface
+		// is non-nil and would nil-panic on first method call.
+		var syncSrc hstore.RPCSource
+		var backfillSrc blockingest.BackfillSource
+		if !noFallback {
+			gc := glif.New(fallbackRPC, 8*time.Second)
+			syncSrc = gc
+			backfillSrc = gc
+		} else if !libp2pEnabled {
+			// No RPC fallback AND no gossip head source = no way to track
+			// head at all. Refuse rather than silently freeze.
+			_ = store.Close()
+			return fmt.Errorf("NoFallbackRPC requires libp2p/gossipsub enabled (it is the only head source); enable P2PListen or unset NoFallbackRPC")
+		}
 		syncInterval := d.cfg.SyncInterval
 		if libp2pEnabled {
 			syncInterval = 30 * time.Second
@@ -167,7 +203,7 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		// the rest next poll rather than aborting). MaxBacktrack is raised
 		// so reorg/backfill depth comfortably exceeds the deepest realistic
 		// single-wait lag.
-		sync := hstore.NewSync(store, src, hstore.SyncOptions{
+		sync := hstore.NewSync(store, syncSrc, hstore.SyncOptions{
 			Interval:       syncInterval,
 			MaxBacktrack:   900, // ~7.5h at 30s blocks; covers long proving waits
 			BootstrapDepth: 3,
@@ -200,7 +236,7 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		// (the polling Sync still tracks head). src doubles as the
 		// ingestor's bounded inline-backfill source for head+N>1 arrivals.
 		if libp2pEnabled {
-			if err := d.startGossipHead(ctx, store, src, network, chainAPI, fetcher); err != nil {
+			if err := d.startGossipHead(ctx, store, backfillSrc, network, chainAPI, fetcher); err != nil {
 				log.Warnw("gossipsub head-tracking unavailable; falling back to polling Sync", "err", err)
 			}
 		}
@@ -259,6 +295,14 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 	if pf := d.fevmPrefetch; pf != nil {
 		chainAPI.OnLocalMiss = pf.AddAddr
 	}
+
+	// lantern#50 prefetch-on-send: when eth_sendRawTransaction publishes a
+	// tx locally, warm its message/receipt blocks into the Bitswap cache in
+	// the background so the follow-up receipt poll resolves locally instead
+	// of racing a cold cross-peer fetch. Bound to the daemon root context
+	// (cancelled on Stop). Best-effort and read-only; nil hook = unchanged.
+	d.sendWarmer = newSendWarmer(ctx, chainAPI)
+	chainAPI.OnSentTx = d.sendWarmer.Warm
 
 	// Stash for accessor-style reads (LocalEthCallStats, etc.).
 	d.mu.Lock()
@@ -428,6 +472,10 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 			freshWindow = d.cfg.SyncInterval * 2
 		}
 		hsync.SetGossipFresh(func() bool { return ing.Fresh(freshWindow) })
+		// #83: make the gossip-fresh skip lag-aware so a fresh-but-lagging
+		// node (gossip skipping head+N>1 blocks it can't backfill) resumes
+		// catch-up instead of wedging ~10-20 epochs behind the tip.
+		hsync.SetGossipObservedHead(func() abi.ChainEpoch { return ing.ObservedHead() }, 0)
 	}
 
 	// lantern#45 Stage 4: wire the gossipsub mempool publisher on the same
