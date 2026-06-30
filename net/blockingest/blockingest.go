@@ -187,6 +187,26 @@ func (g *Ingestor) process(ctx context.Context, blk *ltypes.BlockMsg) {
 	g.lastInstallNanos.Store(time.Now().UnixNano())
 }
 
+// ObservedHead returns the highest block height the ingestor has
+// successfully installed into the store. This is the gossip layer's view
+// of the chain tip: it tracks the live head (>= the canonical store head,
+// since individual high-epoch blocks can be installed before the canonical
+// head advances contiguously to them). Returns -1 if nothing installed yet.
+//
+// The polling Sync uses this to make its #71 gossip-fresh skip lag-aware
+// (#83): gossip being "fresh" only means head moved recently, not that
+// head is at the tip. Comparing the store head against ObservedHead lets
+// Sync skip the catch-up poll only when actually at the tip, and run it
+// when gossip is fresh-but-lagging - without paying an upstream HeadEpoch
+// RPC call.
+func (g *Ingestor) ObservedHead() abi.ChainEpoch {
+	v := g.lastInstallEpoch.Load()
+	if v == 0 {
+		return -1
+	}
+	return abi.ChainEpoch(v)
+}
+
 // Fresh reports whether the ingestor installed a block within the last
 // `within` duration. Used by the polling Sync (#71) to decide whether
 // gossip is currently keeping the store head live, in which case the

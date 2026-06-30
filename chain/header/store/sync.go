@@ -80,6 +80,28 @@ type SyncOptions struct {
 	// (the Sync polls every tick, the pre-#71 behavior).
 	GossipFresh func() bool
 
+	// GossipObservedHead, when set, reports the highest chain epoch the
+	// gossip ingestor has observed/installed - i.e. the gossip layer's
+	// view of the live tip (>= the canonical store head). It makes the
+	// #71 GossipFresh skip LAG-AWARE (#83): GossipFresh alone only tells
+	// us the head moved recently, not that it reached the tip. A node
+	// whose gossip is fresh-but-lagging (installing some blocks while
+	// skipping head+N>1 blocks it can't backfill) would otherwise have
+	// Sync skip its catch-up poll forever, wedging the head ~10-20 epochs
+	// behind the tip. With this set, Sync skips only when the store head
+	// is within SkipLagTolerance of the observed tip; when further behind
+	// it runs the catch-up poll regardless of GossipFresh. Returns a
+	// negative epoch when no observation is available (treated as "can't
+	// confirm we're at the tip" -> don't skip). Nil keeps the pre-#83
+	// behavior (skip purely on GossipFresh).
+	GossipObservedHead func() abi.ChainEpoch
+
+	// SkipLagTolerance is how many epochs behind the gossip-observed tip
+	// the store head may be and still skip the catch-up poll (#83). Only
+	// consulted when GossipObservedHead is set. Default 2 (allows the
+	// normal 0-1 epoch gossip latency without forcing an RPC poll).
+	SkipLagTolerance abi.ChainEpoch
+
 	// StaleResetThreshold is the lag (live head − store head, in epochs)
 	// beyond which a warm store is considered hopelessly stale and is
 	// re-bootstrapped near the live head instead of attempting a
@@ -177,6 +199,18 @@ func (s *Sync) Start(ctx context.Context) error {
 	return nil
 }
 
+// SetGossipObservedHead wires the gossip-observed-tip callback after
+// construction (#83). Pair with SetGossipFresh to make the #71 skip
+// lag-aware. tol is the SkipLagTolerance in epochs; <=0 uses the default.
+func (s *Sync) SetGossipObservedHead(fn func() abi.ChainEpoch, tol abi.ChainEpoch) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.opts.GossipObservedHead = fn
+	if tol > 0 {
+		s.opts.SkipLagTolerance = tol
+	}
+}
+
 // SetGossipFresh wires the gossip-freshness callback after construction.
 // The gossipsub ingestor is created after the Sync in both daemon paths,
 // so the callback can't be passed to NewSync; this lets the caller wire
@@ -238,12 +272,37 @@ func (s *Sync) pollAndApply(ctx context.Context) error {
 	// polls so the very first head can be bootstrapped from the RPC.
 	s.mu.Lock()
 	gossipFresh := s.opts.GossipFresh
+	gossipObservedHead := s.opts.GossipObservedHead
+	skipLagTol := s.opts.SkipLagTolerance
 	s.mu.Unlock()
+	if skipLagTol <= 0 {
+		skipLagTol = 2
+	}
 	if gossipFresh != nil && s.store.HeadEpoch() >= 0 && gossipFresh() {
-		s.mu.Lock()
-		s.stats.SkippedGossipFresh++
-		s.mu.Unlock()
-		return nil
+		// #83: the gossip-fresh skip must be lag-aware. GossipFresh only
+		// reports that the head moved recently, not that it reached the
+		// tip. A node whose gossip installs some blocks while skipping
+		// head+N>1 blocks it can't backfill stays fresh-but-lagging; if
+		// we skip the catch-up poll here the head wedges ~10-20 epochs
+		// behind the tip forever (Beck, v1.8.4-m). Only skip when we can
+		// confirm the store head is within SkipLagTolerance of the
+		// gossip-observed tip. When GossipObservedHead is unset or can't
+		// confirm (negative), fall back to the pre-#83 behavior of
+		// trusting GossipFresh, since without a tip estimate the only
+		// alternative is paying the RPC HeadEpoch poll #71 exists to
+		// avoid.
+		atTip := true
+		if gossipObservedHead != nil {
+			if tip := gossipObservedHead(); tip >= 0 {
+				atTip = s.store.HeadEpoch() >= tip-skipLagTol
+			}
+		}
+		if atTip {
+			s.mu.Lock()
+			s.stats.SkippedGossipFresh++
+			s.mu.Unlock()
+			return nil
+		}
 	}
 
 	head, err := s.src.HeadEpoch(ctx)

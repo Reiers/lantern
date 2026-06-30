@@ -428,6 +428,10 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 			freshWindow = d.cfg.SyncInterval * 2
 		}
 		hsync.SetGossipFresh(func() bool { return ing.Fresh(freshWindow) })
+		// #83: make the gossip-fresh skip lag-aware so a fresh-but-lagging
+		// node (gossip skipping head+N>1 blocks it can't backfill) resumes
+		// catch-up instead of wedging ~10-20 epochs behind the tip.
+		hsync.SetGossipObservedHead(func() abi.ChainEpoch { return ing.ObservedHead() }, 0)
 	}
 
 	// lantern#45 Stage 4: wire the gossipsub mempool publisher on the same

@@ -640,3 +640,78 @@ func TestSyncColdStartPollsDespiteGossipFresh(t *testing.T) {
 	require.NoError(t, sync.PollOnce(context.Background()))
 	require.GreaterOrEqual(t, src.calls(), 1, "cold store must poll HeadEpoch despite GossipFresh")
 }
+
+// TestSyncGossipFreshSkipIsLagAware covers #83: the #71 gossip-fresh skip
+// must not suspend the catch-up poll when gossip is fresh-but-lagging.
+// A node whose gossip installs some blocks while skipping head+N>1 blocks
+// it can't backfill would otherwise wedge its head behind the tip forever.
+func TestSyncGossipFreshSkipIsLagAware(t *testing.T) {
+	s, _ := newStore(t, false)
+	src := newFakeSource()
+
+	// Seed a warm chain 0..4 and bring the store to head 4.
+	g := mkBlock(t, 0, nil, 1000, "g")
+	src.put(g)
+	parents := []cid.Cid{g.Cid()}
+	for h := abi.ChainEpoch(1); h <= 4; h++ {
+		b := mkBlock(t, h, parents, 1000, "")
+		src.put(b)
+		parents = []cid.Cid{b.Cid()}
+	}
+	sync := hstore.NewSync(s, src, hstore.SyncOptions{MaxBacktrack: 50, CatchUpChunk: 200})
+	require.NoError(t, sync.PollOnce(context.Background()))
+	require.Equal(t, abi.ChainEpoch(4), s.HeadEpoch())
+
+	// Advance the live source far ahead (to 20) - simulating the real tip
+	// the lagging node hasn't reached.
+	parents = []cid.Cid{src.canon[4].Cid()}
+	for h := abi.ChainEpoch(5); h <= 20; h++ {
+		b := mkBlock(t, h, parents, 1000, "")
+		src.put(b)
+		parents = []cid.Cid{b.Cid()}
+	}
+
+	// Gossip is "fresh" (it installed *something* recently) but its
+	// observed tip is far above our store head (4) - the fresh-but-lagging
+	// state. The skip must NOT fire; catch-up must run and advance.
+	sync.SetGossipFresh(func() bool { return true })
+	sync.SetGossipObservedHead(func() abi.ChainEpoch { return 20 }, 0)
+
+	before := sync.Stats().SkippedGossipFresh
+	require.NoError(t, sync.PollOnce(context.Background()))
+	require.Equal(t, before, sync.Stats().SkippedGossipFresh,
+		"poll must not be skipped while gossip is fresh-but-lagging")
+	require.Greater(t, int64(s.HeadEpoch()), int64(4),
+		"head must advance toward the tip, not wedge at 4")
+}
+
+// TestSyncGossipFreshSkipAtTip covers the other half of #83: when gossip is
+// fresh AND the store head is at (within tolerance of) the observed tip, the
+// #71 skip must still fire so a healthy node doesn't hammer the upstream RPC.
+func TestSyncGossipFreshSkipAtTip(t *testing.T) {
+	s, _ := newStore(t, false)
+	src := newFakeSource()
+
+	g := mkBlock(t, 0, nil, 1000, "g")
+	src.put(g)
+	parents := []cid.Cid{g.Cid()}
+	for h := abi.ChainEpoch(1); h <= 10; h++ {
+		b := mkBlock(t, h, parents, 1000, "")
+		src.put(b)
+		parents = []cid.Cid{b.Cid()}
+	}
+	sync := hstore.NewSync(s, src, hstore.SyncOptions{MaxBacktrack: 50, CatchUpChunk: 200})
+	require.NoError(t, sync.PollOnce(context.Background()))
+	require.Equal(t, abi.ChainEpoch(10), s.HeadEpoch())
+
+	// Gossip fresh and observed tip == store head (at the tip): skip must
+	// fire (429-protection preserved).
+	sync.SetGossipFresh(func() bool { return true })
+	sync.SetGossipObservedHead(func() abi.ChainEpoch { return 10 }, 0)
+
+	before := sync.Stats().SkippedGossipFresh
+	require.NoError(t, sync.PollOnce(context.Background()))
+	require.Equal(t, before+1, sync.Stats().SkippedGossipFresh,
+		"poll must be skipped when at the tip (preserve #71 429-protection)")
+	require.Equal(t, abi.ChainEpoch(10), s.HeadEpoch())
+}

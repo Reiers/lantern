@@ -1009,6 +1009,9 @@ func cmdDaemon(args []string) error {
 				// relaxed 30s cadence); when gossip goes quiet the Sync resumes.
 				if sync != nil {
 					sync.SetGossipFresh(func() bool { return ing.Fresh(60 * time.Second) })
+					// #83: lag-aware skip - resume catch-up when gossip is
+					// fresh-but-lagging instead of wedging behind the tip.
+					sync.SetGossipObservedHead(func() abi.ChainEpoch { return ing.ObservedHead() }, 0)
 				}
 			}
 		}
