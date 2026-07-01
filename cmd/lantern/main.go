@@ -47,6 +47,7 @@ import (
 
 	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/anchorverify"
+	"github.com/Reiers/lantern/chain/crosscheck"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
 	"github.com/Reiers/lantern/chain/fullvalidate"
 	hstore "github.com/Reiers/lantern/chain/header/store"
@@ -721,6 +722,11 @@ func cmdDaemon(args []string) error {
 	// Light/PDP: off). 0 = off. N>0 = require N distinct forwarding peers
 	// (or one trusted floor peer) before adopting a gossip head.
 	headCorroPeers := fs.Int("head-corroboration-peers", -1, "Distinct gossip peers required to corroborate a head advance before adoption. -1=auto (Full tier 2, others off), 0=off.")
+	// #98: VM-bridge cross-check auditor. Observe-only: compares the local
+	// canonical tipset at head-3 against the bridge node once a minute and
+	// alarms on divergence. Requires --vm-bridge-rpc.
+	vmCrossCheck := fs.Bool("vm-crosscheck", false, "Audit the local chain against the VM bridge node (observe-only divergence alarm). Requires --vm-bridge-rpc.")
+	vmCrossCheckInterval := fs.Duration("vm-crosscheck-interval", crosscheck.DefaultInterval, "Interval between VM-bridge cross-checks.")
 	fs.Parse(args)
 
 	// #58: --allow-empty-passphrase is sugar for the env the keystore guard
@@ -862,12 +868,13 @@ func cmdDaemon(args []string) error {
 	if effAllowBlockSubmit && *vmBridgeRPC == "" {
 		return fmt.Errorf("block submission (tier=%s or --allow-block-submit) requires --vm-bridge-rpc to be set (see issue #4 in repo)", profile.Tier)
 	}
+	var vmBr *bridge.ForestBridge
 	if *vmBridgeRPC != "" {
 		token := *vmBridgeToken
 		if token == "" {
 			token = os.Getenv("LANTERN_VM_BRIDGE_TOKEN")
 		}
-		vmBr := bridge.NewForestBridge(*vmBridgeRPC, token, *vmBridgeTimeout)
+		vmBr = bridge.NewForestBridge(*vmBridgeRPC, token, *vmBridgeTimeout)
 		chainAPI.WithBridge(vmBr)
 		chainAPI.AllowBlockSubmit = effAllowBlockSubmit
 		fmt.Printf("  vm-bridge:    %s", vmBr.Provenance())
@@ -1164,6 +1171,32 @@ func cmdDaemon(args []string) error {
 	// operators can see Bitswap carrying load. Issue #5 added the dashboard
 	// on the same listener. v1.5.5 enables both by default on 127.0.0.1:9092
 	// so a fresh `lantern daemon` always has a webui without extra flags.
+	// #98: VM-bridge cross-check auditor. Observe-only; needs both the
+	// bridge and the header store. Divergences alarm via log + counters
+	// (dashboard card below); reads are never answered by the bridge.
+	var xchecker *crosscheck.Checker
+	if *vmCrossCheck {
+		switch {
+		case vmBr == nil:
+			return fmt.Errorf("--vm-crosscheck requires --vm-bridge-rpc")
+		case store == nil:
+			return fmt.Errorf("--vm-crosscheck requires the header store (remove --header-store \"\" overrides)")
+		default:
+			xc, xerr := crosscheck.New(crosscheck.Config{
+				Bridge:   vmBr,
+				Source:   store,
+				Interval: *vmCrossCheckInterval,
+			})
+			if xerr != nil {
+				return xerr
+			}
+			xc.Start(ctx)
+			xchecker = xc
+			fmt.Printf("  vm-crosscheck: on (auditing local chain vs %s every %s, observe-only)\n",
+				vmBr.Provenance(), vmCrossCheckInterval.String())
+		}
+	}
+
 	var dashboardURL string
 	if *metricsListen != "" {
 		// SECURITY #57: the dashboard/metrics listener exposes node internals
@@ -1209,6 +1242,8 @@ func cmdDaemon(args []string) error {
 				// #96: observed-data EC finality (FRC-0089). Nil-safe in
 				// the handler; store==nil (no header store) leaves it off.
 				ecfin: newECFinality(store),
+				// #98: VM-bridge cross-check auditor stats (nil when off).
+				xcheck: xchecker,
 			}
 			dashboardURL = fmt.Sprintf("http://%s/dashboard/", *metricsListen)
 		}

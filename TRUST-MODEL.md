@@ -231,7 +231,18 @@ A malicious or compromised bridge upstream **cannot**:
 In short: the bridge is bounded to message-execution semantics, on the
 operator's own active path. It is NOT a chain-level oracle.
 
-### 4.2 Recommended operator configurations
+### 4.2 The bridge as an auditor (`--vm-crosscheck`, #98)
+
+The same bridge connection can optionally AUDIT the read path: once a
+minute Lantern compares its canonical tipset at head-3 against the
+bridge node's and alarms loudly on divergence. This adds no new trust
+(the bridge is already trusted for block production) and changes no
+behavior (observe-only; reads are never answered by the bridge). It
+catches the class of attack full re-execution would catch - a fabricated
+chain whose headers verify but whose state was never honestly executed -
+as long as the operator's bridge node is honest and unpartitioned.
+
+### 4.3 Recommended operator configurations
 
 | Profile                | Bridge | Trust posture |
 |------------------------|--------|---------------|
@@ -240,7 +251,7 @@ operator's own active path. It is NOT a chain-level oracle.
 | Light + deal flow      | Operator's own Forest as a sidecar | Bridge used only for the few `StateCall` paths Curio needs (e.g. storage-market PSD verification). All chain reads still verified locally. |
 | **Don't do this**      | A third-party public RPC | Equivalent to "trust your RPC provider." Defeats the point of running Lantern in the first place. We don't ship a default public bridge for this reason. |
 
-### 4.3 Bridge provenance + auditability
+### 4.4 Bridge provenance + auditability
 
 `vm/bridge.Bridge.Provenance()` returns an opaque tag (`forest@<host>`,
 `lotus@<host>`, etc.) that Lantern uses in trace logs. When StateCall

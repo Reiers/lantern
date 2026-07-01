@@ -21,6 +21,18 @@ All notable changes to Lantern.
   lotus). TRUST-MODEL.md section 2.7 documents what it does and does NOT
   guarantee.
 
+- **VM-bridge cross-check auditor** ([#98](https://github.com/Reiers/lantern/issues/98)).
+  New opt-in `--vm-crosscheck` (requires `--vm-bridge-rpc`): once a minute
+  Lantern asks the operator's own Forest/Lotus bridge node for the
+  canonical tipset at head-3 and compares it against the local header
+  store. A mismatch (state-root-level attack, eclipse, or bug) raises a
+  loud `DIVERGE` alarm (log + counters + dashboard card) but is strictly
+  **observe-only**: reads stay 100% local, the head path is never blocked
+  or rewritten, and bridge lag / null rounds are skipped, never
+  false-alarmed. No new trust: the bridge is already trusted for block
+  production; this reuses the connection as an auditor. Pragmatic
+  precursor to full pure-Go re-execution (#89).
+
 - **Wallet import/export + import-from-Lotus** ([#93](https://github.com/Reiers/lantern/issues/93)).
   `lantern wallet export <addr>` / `wallet import [hex|-]` speak Lotus's
   hex-KeyInfo wire format, so keys round-trip between Lotus and Lantern
