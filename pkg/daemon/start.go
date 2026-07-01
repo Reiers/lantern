@@ -501,8 +501,18 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 	// that). It periodically asks a diversity of independent RPC observers
 	// what epoch the head is at and raises an eclipse/fork alarm if a
 	// quorum of independent sources disagrees with our gossip head beyond
-	// the 3-block lookback. Disabled when no HeadCheckRPCs are configured.
-	if len(d.cfg.HeadCheckRPCs) > 0 {
+	// the 3-block lookback.
+	//
+	// #80 head-source diversity: build a Kind-DIVERSE source set, not just
+	// operator RPC URLs. We add, when available: the operator's HeadCheckRPCs
+	// (KindForest), the Lantern gateway (KindLanternGateway, HTTP /state/root),
+	// and the fallback RPC / Glif (KindForest). headcheck counts agreement by
+	// Kind, so N URLs of one kind = 1 source - this gives an honest multi-kind
+	// quorum on the running head instead of boot-only. The monitor starts
+	// whenever at least one corroborating source exists; it self-reports
+	// StatusInsufficient (a no-op alarm) until enough distinct kinds are
+	// reachable, so enabling it broadly is safe.
+	{
 		var hcSources []headcheck.HeadSource
 		for _, u := range d.cfg.HeadCheckRPCs {
 			u = strings.TrimSpace(u)
@@ -510,6 +520,25 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 				continue
 			}
 			hcSources = append(hcSources, headcheck.NewRPCHeadSource("", bootstrap.KindForest, u, "", 0))
+		}
+		// Gateway as an independent kind (unless the operator went
+		// gateway-less). Distinct Kind => real diversity even with one RPC.
+		// (Derived from cfg here since startGossipHead doesn't take the
+		// startInternal-local gw/fallback vars; same resolution logic.)
+		if d.cfg.Gateway != "" {
+			hcSources = append(hcSources, headcheck.NewGatewayHeadSource(d.cfg.Gateway, 0))
+		}
+		// Fallback RPC / Glif as another corroborating source, unless the
+		// operator explicitly went no-fallback (bridge-off purist).
+		if !d.cfg.NoFallbackRPC {
+			hcFallback := d.cfg.FallbackRPC
+			if hcFallback == "" {
+				hcFallback = "https://api.node.glif.io/rpc/v1"
+				if network == build.Calibration {
+					hcFallback = "https://api.calibration.node.glif.io/rpc/v1"
+				}
+			}
+			hcSources = append(hcSources, headcheck.NewRPCHeadSource("glif", bootstrap.KindForest, hcFallback, "", 0))
 		}
 		if len(hcSources) > 0 {
 			mon := headcheck.New(headcheck.Config{

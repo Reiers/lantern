@@ -454,6 +454,32 @@ func (d *Daemon) GossipStats() (blockingest.Stats, bool) {
 	return ing.Stats(), true
 }
 
+// HeadCorroboration returns the latest running-head divergence-monitor
+// result (chain/headcheck, #85/#86) and true when the monitor is running.
+// This is the observable answer to "is my running head corroborated by a
+// diversity of independent sources right now, or does it look eclipsed?"
+// - it surfaces the monitor's verdict (agree / diverge / insufficient)
+// plus the local vs median-external head epochs and the agree/disagree
+// tallies, so an operator (or the dashboard) can SEE an eclipse alarm
+// instead of grepping logs. Returns (zero, false) when the monitor is
+// disabled (no HeadCheckRPCs configured) or the daemon isn't started.
+//
+// It deliberately reports status only; it never halts the node. Divergence
+// is an alarm, not an auto-stop - a false positive must not become a
+// self-inflicted DoS. Closing the loop on #79 (periodic re-quorum) / #80
+// (head-source diversity) is about making the running head continuously,
+// visibly corroborated; the head itself still advances on gossip + the
+// #79 heaviest-weight fork choice.
+func (d *Daemon) HeadCorroboration() (headcheck.Result, bool) {
+	d.mu.Lock()
+	mon := d.headcheck
+	d.mu.Unlock()
+	if mon == nil {
+		return headcheck.Result{}, false
+	}
+	return mon.Last(), true
+}
+
 // Start brings the daemon up: fetches the trusted head, opens the
 // header store, brings up libp2p + gossipsub, mounts the JSON-RPC server,
 // and (optionally) the metrics + dashboard endpoints. Blocks until ctx

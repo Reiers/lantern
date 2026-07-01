@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	abi "github.com/filecoin-project/go-state-types/abi"
@@ -51,6 +52,60 @@ func NewRPCHeadSource(name string, kind bootstrap.Kind, url, token string, timeo
 
 func (s *RPCHeadSource) Name() string         { return s.name }
 func (s *RPCHeadSource) Kind() bootstrap.Kind { return s.kind }
+
+// GatewayHeadSource is a HeadSource backed by the Lantern gateway's HTTP
+// /state/root endpoint (net/hsync shape), which returns an Epoch field.
+// The gateway speaks HTTP, not Filecoin.ChainHead JSON-RPC, so it needs
+// its own adapter. Tagged KindLanternGateway so diversity counting treats
+// it as its own kind (and, per bootstrap policy, does not let the project
+// gateway alone satisfy a quorum). Purely corroborative, never the head
+// oracle - same contract as RPCHeadSource.
+type GatewayHeadSource struct {
+	name    string
+	url     string // gateway base URL
+	timeout time.Duration
+	client  *http.Client
+}
+
+// NewGatewayHeadSource builds a gateway-backed head source. url is the
+// gateway base (e.g. https://gateway.golantern.io); zero timeout => 15s.
+func NewGatewayHeadSource(url string, timeout time.Duration) *GatewayHeadSource {
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
+	return &GatewayHeadSource{
+		name: "gateway:" + url, url: strings.TrimRight(url, "/"), timeout: timeout,
+		client: &http.Client{Timeout: timeout},
+	}
+}
+
+func (s *GatewayHeadSource) Name() string         { return s.name }
+func (s *GatewayHeadSource) Kind() bootstrap.Kind { return bootstrap.KindLanternGateway }
+
+func (s *GatewayHeadSource) HeadEpoch(ctx context.Context) (abi.ChainEpoch, error) {
+	cctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(cctx, "GET", s.url+"/state/root", nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("headcheck gateway %s: %w", s.url, err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return 0, fmt.Errorf("headcheck gateway %s: HTTP %d", s.url, resp.StatusCode)
+	}
+	var head struct {
+		Epoch abi.ChainEpoch `json:"Epoch"`
+	}
+	if err := json.Unmarshal(raw, &head); err != nil {
+		return 0, fmt.Errorf("headcheck gateway %s: decode: %w", s.url, err)
+	}
+	return head.Epoch, nil
+}
 
 func (s *RPCHeadSource) HeadEpoch(ctx context.Context) (abi.ChainEpoch, error) {
 	cctx, cancel := context.WithTimeout(ctx, s.timeout)
