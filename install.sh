@@ -16,7 +16,8 @@
 #     LANTERN_REINSTALL=1   Force re-download even if binary exists
 #     LANTERN_REANCHOR=1    Force re-run of the bootstrap quorum
 #     LANTERN_YES=1         Non-interactive; assume defaults (light node, background service)
-#     LANTERN_NODE_TYPE     Node tier: light | pdp | full (default: light; asked interactively)
+#     LANTERN_NODE_TYPE     Node tier: light | pdp | full  (Light Node / PDP Node / Full Node)
+#                           (default: light; asked interactively)
 #     LANTERN_PDP_CACHE_GB  PDP/Full persistent-cache budget in GB (default: 3)
 #     LANTERN_ALLOW_BLOCK_SUBMIT=1  Record PDP/Full block-submit opt-in (needs --vm-bridge-rpc at run)
 #     LANTERN_NO_SERVICE=1  Skip the OS service installation step
@@ -418,13 +419,15 @@ check_path() {
 # the larger footprint. The choice is persisted (lantern node-type) and the
 # daemon reads it on start.
 #
-#   Light  — ~1 GB, wallet / deal-client / SP chain reads. In-memory cache.
-#   PDP    — mid node: persistent 2-5 GB cache (warm PDP/payments/registry/
-#            USDFC state survives restart) + full write surface incl. block
-#            production, so it can prove/settle PDP and double as a backup
-#            block producer. (Block production needs a VM bridge.)
-#   Full   — reserved; native full validation needs a VM bridge today
-#            (no-CGo constraint). Recorded, behaves like PDP for now.
+#   Light Node  — ~1 GB. Clients, wallets, SP chain reads, backup node.
+#                 In-memory cache. Smallest footprint.
+#   PDP Node    — mid node: persistent 2-5 GB cache (warm PDP/payments/registry/
+#                 USDFC state survives restart) + full write surface incl. block
+#                 production, so it can prove/settle PDP and double as a backup
+#                 block producer. (Block production needs a VM bridge.)
+#   Full Node   — F3-anchored full node: snapshot-free boot, serves the whole
+#                 chain, pure-Go verification. Full-node track is in progress;
+#                 recorded now, behaves like PDP until it lands.
 
 node_type_setup() {
   step "Node type"
@@ -434,9 +437,9 @@ node_type_setup() {
   # Honor a non-interactive / pre-set choice.
   local choice="${LANTERN_NODE_TYPE:-}"
   if [[ -z "$choice" ]]; then
-    info "  ${BOLD}l${RESET}  Light  ${DIM}— ~1 GB, wallet / reads. Smallest footprint. (default)${RESET}"
-    info "  ${BOLD}p${RESET}  PDP    ${DIM}— persistent 2-5 GB cache + prove/settle + backup block producer${RESET}"
-    info "  ${BOLD}f${RESET}  Full   ${DIM}— reserved; behaves like PDP until the full-node track lands${RESET}"
+    info "  ${BOLD}l${RESET}  Light Node  ${DIM}— ~1 GB. Clients, wallets, backup node. Smallest footprint. (default)${RESET}"
+    info "  ${BOLD}p${RESET}  PDP Node    ${DIM}— mid node: persistent 2-5 GB cache + prove/settle + backup block producer${RESET}"
+    info "  ${BOLD}f${RESET}  Full Node   ${DIM}— snapshot-free full node, serves the whole chain (track in progress)${RESET}"
     echo
     if [[ "${LANTERN_YES:-}" == "1" ]] || [[ ! -r /dev/tty ]]; then
       choice="l"
@@ -462,9 +465,9 @@ node_type_setup() {
 
   if env LANTERN_HOME="$LANTERN_HOME" "$bin" node-type "$tier" $extra >/dev/null 2>&1; then
     case "$tier" in
-      light) ok "Node type: ${BOLD}Light${RESET} ${DIM}(in-memory cache, ~1 GB)${RESET}" ;;
-      pdp)   ok "Node type: ${BOLD}PDP${RESET} ${DIM}(persistent cache; run with --vm-bridge-rpc to submit blocks)${RESET}" ;;
-      full)  ok "Node type: ${BOLD}Full${RESET} ${DIM}(recorded; behaves like PDP for now)${RESET}" ;;
+      light) ok "Node type: ${BOLD}Light Node${RESET} ${DIM}(in-memory cache, ~1 GB)${RESET}" ;;
+      pdp)   ok "Node type: ${BOLD}PDP Node${RESET} ${DIM}(persistent cache; run with --vm-bridge-rpc to submit blocks)${RESET}" ;;
+      full)  ok "Node type: ${BOLD}Full Node${RESET} ${DIM}(recorded; behaves like PDP until the full-node track lands)${RESET}" ;;
     esac
   else
     warn "Could not persist node type; defaulting to light at run time."
