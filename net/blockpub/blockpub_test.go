@@ -111,3 +111,61 @@ func TestBlockTopicValidator_AcceptsValid(t *testing.T) {
 		t.Errorf("got %v, want ValidationAccept", got)
 	}
 }
+
+// validBlockBytes builds a well-formed, marshalled BlockMsg for tamper tests.
+func validBlockBytes(t *testing.T) []byte {
+	t.Helper()
+	miner, err := address.NewIDAddress(1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dummyCID, _ := cid.Parse("bafy2bzacecnamqgqmifpluoeldx7zzglxcljo6oja4vrmtj7432rphldpdmm2")
+	blk := &ltypes.BlockMsg{
+		Header: &ltypes.BlockHeader{
+			Miner:                 miner,
+			ParentStateRoot:       dummyCID,
+			ParentMessageReceipts: dummyCID,
+			Messages:              dummyCID,
+			BlockSig:              &gscrypto.Signature{Type: gscrypto.SigTypeBLS, Data: make([]byte, 96)},
+			BLSAggregate:          &gscrypto.Signature{Type: gscrypto.SigTypeBLS, Data: make([]byte, 96)},
+		},
+	}
+	var buf bytes.Buffer
+	if err := blk.MarshalCBOR(&buf); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// TestBlockTopicValidator_RejectsTrailingGarbage covers the #85 header
+// propagation integrity gate: a message that *starts* with a valid block
+// CBOR but carries extra trailing bytes must be rejected, so Lantern
+// never re-propagates a header whose on-wire bytes don't round-trip
+// cleanly. (gossipsub only forwards messages the validator Accepts, so
+// this is the propagation gate, not just an ingest check.)
+func TestBlockTopicValidator_RejectsTrailingGarbage(t *testing.T) {
+	good := validBlockBytes(t)
+	tampered := append(append([]byte(nil), good...), 0xde, 0xad, 0xbe, 0xef)
+	msg := &pubsub.Message{Message: &pubsubpb.Message{Data: tampered}}
+	if got := blockTopicValidator(context.Background(), peer.ID(""), msg); got != pubsub.ValidationReject {
+		t.Errorf("trailing-garbage block: got %v, want ValidationReject", got)
+	}
+}
+
+// TestBlockTopicValidator_RejectsNilHeader: a CBOR message that decodes
+// to a BlockMsg with no header must be rejected before the CID check.
+func TestBlockTopicValidator_RejectsNilHeader(t *testing.T) {
+	// superficiallyValid already guards nil header; assert the validator
+	// surfaces it as a reject (defense for the propagation path).
+	empty := &ltypes.BlockMsg{}
+	var buf bytes.Buffer
+	if err := empty.MarshalCBOR(&buf); err != nil {
+		// An empty BlockMsg may legitimately fail to marshal; that path is
+		// covered by the garbage-data cases. Skip if so.
+		t.Skipf("empty marshal not applicable: %v", err)
+	}
+	msg := &pubsub.Message{Message: &pubsubpb.Message{Data: buf.Bytes()}}
+	if got := blockTopicValidator(context.Background(), peer.ID(""), msg); got != pubsub.ValidationReject {
+		t.Errorf("nil-header block: got %v, want ValidationReject", got)
+	}
+}

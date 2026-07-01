@@ -46,7 +46,9 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 
 	"github.com/Reiers/lantern/build"
+	"github.com/Reiers/lantern/chain/bootstrap"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
+	"github.com/Reiers/lantern/chain/headcheck"
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	"github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
@@ -492,6 +494,45 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 		// node (gossip skipping head+N>1 blocks it can't backfill) resumes
 		// catch-up instead of wedging ~10-20 epochs behind the tip.
 		hsync.SetGossipObservedHead(func() abi.ChainEpoch { return ing.ObservedHead() }, 0)
+	}
+
+	// snadrus#85 item 2: running-head divergence monitor. Best-effort and
+	// observational - it never moves our head (gossip + #79 fork choice do
+	// that). It periodically asks a diversity of independent RPC observers
+	// what epoch the head is at and raises an eclipse/fork alarm if a
+	// quorum of independent sources disagrees with our gossip head beyond
+	// the 3-block lookback. Disabled when no HeadCheckRPCs are configured.
+	if len(d.cfg.HeadCheckRPCs) > 0 {
+		var hcSources []headcheck.HeadSource
+		for _, u := range d.cfg.HeadCheckRPCs {
+			u = strings.TrimSpace(u)
+			if u == "" {
+				continue
+			}
+			hcSources = append(hcSources, headcheck.NewRPCHeadSource("", bootstrap.KindForest, u, "", 0))
+		}
+		if len(hcSources) > 0 {
+			mon := headcheck.New(headcheck.Config{
+				Local:   func() abi.ChainEpoch { return ing.ObservedHead() },
+				Sources: hcSources,
+				OnResult: func(r headcheck.Result) {
+					switch r.Status {
+					case headcheck.StatusDiverge:
+						log.Warnw("headcheck: running head DIVERGES from independent sources (possible eclipse/fork)",
+							"localHead", r.LocalHead, "medianExtHead", r.MedianExtHead,
+							"agreeing", r.Agreeing, "disagreeing", r.Disagreeing, "reachable", r.Reachable)
+					case headcheck.StatusInsufficient:
+						log.Debugw("headcheck: head uncorroborated (too few reachable sources)",
+							"localHead", r.LocalHead, "reachable", r.Reachable)
+					}
+				},
+			})
+			mon.Start(ctx)
+			d.mu.Lock()
+			d.headcheck = mon
+			d.mu.Unlock()
+			log.Infow("running-head divergence monitor started", "sources", len(hcSources), "lookback", headcheck.DefaultLookback)
+		}
 	}
 
 	// lantern#45 Stage 4: wire the gossipsub mempool publisher on the same
