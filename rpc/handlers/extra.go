@@ -614,10 +614,20 @@ func (c *ChainAPI) EthCall(ctx context.Context, callObj any, blockParam any) (st
 // Stage 5: local resolve for txs we originated, bridge fallback otherwise).
 
 // EthFeeHistory returns historical gas fee data used by tx builders to
-// suggest EIP-1559 priority fees. Forwarded to the upstream VM bridge
-// since Filecoin's fee market shape doesn't map 1:1 to Ethereum's
-// baseFee+tip model and the upstream already does the right shimming.
+// suggest EIP-1559 priority fees. Local-first (lantern#76): Filecoin's
+// base fee is consensus-determined per tipset and lives in each header's
+// ParentBaseFee, which Lantern already tracks in the header store. So we
+// can serve the base-fee history straight from local headers with NO
+// bridge - closing the last read method on a writing SP's path that
+// hard-failed bridge-off. Priority fees (rewards) don't have a native
+// Filecoin equivalent; we report a zero-premium reward vector (clients
+// price premium off eth_gasPrice / eth_maxPriorityFeePerGas separately),
+// which matches how a min-base-fee chain behaves. Bridge remains the
+// fallback for ranges outside the local header window.
 func (c *ChainAPI) EthFeeHistory(ctx context.Context, blockCount string, newestBlock string, rewardPercentiles []float64) (any, error) {
+	if out, served, err := c.localEthFeeHistory(ctx, blockCount, newestBlock, rewardPercentiles); served {
+		return out, err
+	}
 	if c.Bridge == nil {
 		return nil, errBridgeUnconfigured
 	}
@@ -634,6 +644,141 @@ func (c *ChainAPI) EthFeeHistory(ctx context.Context, blockCount string, newestB
 		return nil, xerrors.Errorf("decode eth_feeHistory result: %w", err)
 	}
 	return out, nil
+}
+
+// parseEthUintDefault parses an Ethereum QUANTITY (0x-hex) or a plain
+// decimal string into a uint64, returning def on any parse failure or
+// empty input. Used for eth_feeHistory's blockCount / newestBlock which
+// clients send as either form.
+func parseEthUintDefault(s string, def uint64) uint64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return def
+	}
+	base := 10
+	if len(s) >= 2 && (s[:2] == "0x" || s[:2] == "0X") {
+		s = s[2:]
+		base = 16
+	}
+	v, ok := new(stdbig.Int).SetString(s, base)
+	if !ok || v.Sign() < 0 || !v.IsUint64() {
+		return def
+	}
+	return v.Uint64()
+}
+
+// localEthFeeHistory serves eth_feeHistory from the local header store's
+// per-tipset ParentBaseFee. Returns (result, served, err); served==false
+// means fall back to the bridge (no header store, or the requested range
+// lies outside what we have locally).
+//
+// Result shape matches Ethereum's eth_feeHistory: oldestBlock,
+// baseFeePerGas (len n+1: one per block plus the next-block projection),
+// gasUsedRatio (len n), and reward (len n, each an array sized to
+// rewardPercentiles) when percentiles were requested. On Filecoin the
+// premium market has no on-chain per-percentile history, so reward
+// entries are reported as zero - callers derive priority fee from
+// eth_gasPrice / gas estimation, not from this vector.
+func (c *ChainAPI) localEthFeeHistory(ctx context.Context, blockCount string, newestBlock string, rewardPercentiles []float64) (any, bool, error) {
+	if c.HeaderStore == nil {
+		return nil, false, nil
+	}
+
+	// Parse blockCount (hex quantity or small decimal). Clamp to a sane
+	// window so a huge count can't walk the whole store.
+	n := parseEthUintDefault(blockCount, 0)
+	if n == 0 {
+		return nil, false, nil
+	}
+	const maxFeeHistoryBlocks = uint64(1024)
+	if n > maxFeeHistoryBlocks {
+		n = maxFeeHistoryBlocks
+	}
+
+	// Resolve newestBlock: "latest"/"pending"/"" => head; else a hex/dec height.
+	head := abi.ChainEpoch(c.HeaderStore.HeadEpoch())
+	newest := head
+	switch nb := strings.ToLower(strings.TrimSpace(newestBlock)); nb {
+	case "", "latest", "pending", "safe", "finalized":
+		newest = head
+	default:
+		newest = abi.ChainEpoch(parseEthUintDefault(newestBlock, uint64(head)))
+	}
+	if newest > head {
+		newest = head
+	}
+	if newest < 0 {
+		return nil, false, nil
+	}
+
+	oldest := newest - abi.ChainEpoch(n) + 1
+	if oldest < 0 {
+		oldest = 0
+	}
+
+	// Walk oldest..newest from local headers, collecting ParentBaseFee.
+	// A single missing tipset in the window => fall back to the bridge
+	// (don't return a hole-y history that misleads a fee estimator).
+	baseFees := make([]string, 0, int(newest-oldest)+2)
+	gasUsedRatio := make([]float64, 0, int(newest-oldest)+1)
+	var lastBaseFee string
+	for ep := oldest; ep <= newest; ep++ {
+		ts, err := c.HeaderStore.GetTipSetByHeight(ep)
+		if err != nil || ts == nil {
+			// Null round or gap. Null rounds are legitimate; carry the
+			// prior base fee forward. A true gap (err) below the window
+			// start means we don't have local coverage -> bridge.
+			if lastBaseFee == "" {
+				return nil, false, nil
+			}
+			baseFees = append(baseFees, lastBaseFee)
+			gasUsedRatio = append(gasUsedRatio, 0)
+			continue
+		}
+		blocks := ts.Blocks()
+		if len(blocks) == 0 || blocks[0].ParentBaseFee.Int == nil {
+			if lastBaseFee == "" {
+				return nil, false, nil
+			}
+			baseFees = append(baseFees, lastBaseFee)
+			gasUsedRatio = append(gasUsedRatio, 0)
+			continue
+		}
+		bf := "0x" + blocks[0].ParentBaseFee.Int.Text(16)
+		baseFees = append(baseFees, bf)
+		lastBaseFee = bf
+		// We don't track per-block gas used locally without message
+		// re-execution; report 0.0 (a min-base-fee chain sits near-empty).
+		gasUsedRatio = append(gasUsedRatio, 0)
+	}
+	if len(baseFees) == 0 {
+		return nil, false, nil
+	}
+
+	// eth_feeHistory's baseFeePerGas is len n+1: append the next-block
+	// projection (Filecoin: the head tipset's ParentBaseFee is already the
+	// next-block base fee, so reuse the last observed value).
+	baseFees = append(baseFees, lastBaseFee)
+
+	out := map[string]any{
+		"oldestBlock":   "0x" + abiEpochHex(oldest), // abiEpochHex returns minimal hex w/o 0x ("0" for zero)
+		"baseFeePerGas": baseFees,
+		"gasUsedRatio":  gasUsedRatio,
+	}
+	// reward is only present when percentiles were requested; each entry is
+	// a per-percentile array. No native premium history on Filecoin => zero.
+	if len(rewardPercentiles) > 0 {
+		reward := make([][]string, len(gasUsedRatio))
+		for i := range reward {
+			row := make([]string, len(rewardPercentiles))
+			for j := range row {
+				row[j] = "0x0"
+			}
+			reward[i] = row
+		}
+		out["reward"] = reward
+	}
+	return out, true, nil
 }
 
 // EthSendRawTransaction forwards a signed raw transaction to the

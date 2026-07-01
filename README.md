@@ -7,9 +7,11 @@
 
   *Boots in minutes. Verifies everything. No 76 GB snapshot. No third-party trust.*
 
+  *Now in three tiers — Light, PDP, and a pure-Go Full node — chosen at install time.*
+
   [![CI](https://github.com/Reiers/lantern/actions/workflows/ci.yml/badge.svg)](https://github.com/Reiers/lantern/actions/workflows/ci.yml)
   [![License: Apache 2.0 OR MIT](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](#license)
-  [![Release: v1.8.4](https://img.shields.io/badge/release-v1.8.4-0090ff.svg)](https://github.com/Reiers/lantern/releases)
+  [![Release: v1.9.0-rc1](https://img.shields.io/badge/release-v1.9.0--rc1-0090ff.svg)](https://github.com/Reiers/lantern/releases)
   [![Go: 1.25+](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](go.mod)
 
   **One line to install:**
@@ -26,7 +28,17 @@
 
 ## TL;DR
 
-Lantern is a pure-Go Filecoin light node. **~40 MB binary, ~1 GB working state, zero CGo, no `filecoin-ffi`, no Rust toolchain.** It serves a Lotus-compatible JSON-RPC (71 / 71 of the Curio `FULLNODE_API` surface, plus the `eth_*` surface needed by FoC clients) and verifies every byte locally against BLS, F3, DRAND, and IPLD content addressing. No trusted RPC provider. No 76 GB snapshot.
+Lantern is a pure-Go Filecoin node. **~40 MB binary, zero CGo, no `filecoin-ffi`, no Rust toolchain.** It serves a Lotus-compatible JSON-RPC (71 / 71 of the Curio `FULLNODE_API` surface, plus the `eth_*` surface needed by FoC clients) and verifies every byte locally against BLS, F3, DRAND, and IPLD content addressing. No trusted RPC provider. No 76 GB snapshot.
+
+**Lantern now installs in three tiers, chosen up front so a light client never carries a heavy footprint:**
+
+| Tier | Footprint | For |
+|------|-----------|-----|
+| **Light Node** | ~1 GB, in-memory | Clients, wallets, chain reads, SP backup node |
+| **PDP Node** (mid) | persistent 2–5 GB | PDP prove/settle + backup block producer |
+| **Full Node** | tunable low-GB (not 76) | A real, snapshot-free full node — *in active development* |
+
+> **🚧 Lantern is undergoing a major expansion.** It began as a light client; it is growing into a full node you can run on a Mac mini — snapshot-free boot, tunable single-digit-GB on-disk footprint, and pure-Go block validation with **no Rust**. See [the Full Node epic (#87)](https://github.com/Reiers/lantern/issues/87). The Light and PDP tiers are production-shape today; the Full tier is landing tier by tier.
 
 **Current release:** [v1.8.4](https://github.com/Reiers/lantern/releases/tag/v1.8.4) on mainnet + calibration. **In production today** as the chain backend embedded in [Curio Core](https://curiocore.io) (which ran a full PDP hot-storage flow on Filecoin **mainnet** end-to-end on Lantern) and as a secondary node on the mainnet SP `f03678816` (sp.reiers.io).
 
@@ -40,10 +52,12 @@ Lantern is the middle path: a real Filecoin node with real cryptographic verific
 
 ### Who is this for?
 
-- **🌱 Filecoin users.** Hold your own keys, send and receive FIL, look up balances and miners, without trusting Glif or any custodial RPC. Your wallet is your wallet.
-- **🪪 SP operators.** Run Lantern as a secondary chain node next to your primary Lotus or Forest. If the primary stalls during a WdPost window, Curio fails over to Lantern and your sectors stay current.
+- **🌱 Filecoin users.** Hold your own keys, send and receive FIL, look up balances and miners, without trusting Glif or any custodial RPC. Your wallet is your wallet. *(Light Node.)*
+- **🪪 SP operators.** Run Lantern as a secondary chain node next to your primary Lotus or Forest. If the primary stalls during a WdPost window, Curio fails over to Lantern and your sectors stay current. *(Light or PDP Node.)*
+- **🧱 PDP providers.** Run the PDP prove/settle loop on a persistent, restart-warm cache without standing up a 76 GB Lotus sidecar. *(PDP Node.)*
 - **📐 SP / FoC client embedders.** Pull `pkg/daemon` into your Go binary and run a fully verified Filecoin chain backend in-process. [Curio Core](https://github.com/Reiers/curio-core) does exactly this.
 - **🔧 Tooling developers.** A real Lotus-compatible RPC on your laptop, no rate limits. Run `eth_*` against a node you control.
+- **🖥️ Full-node runners.** Want a real, snapshot-free Filecoin full node on a Mac mini, pure-Go, no Rust? That's the Full Node tier, in active development. *(Full Node.)*
 
 ---
 
@@ -55,7 +69,13 @@ Lantern is the middle path: a real Filecoin node with real cryptographic verific
 curl -fsSL https://get.golantern.io | bash
 ```
 
-This downloads the latest signed release binary, walks you through a multi-source trust quorum to anchor the node, sets up the wallet, and offers to install Lantern as a background service. Three minutes start to finish.
+This downloads the latest signed release binary, **asks which node tier you want (Light / PDP / Full)**, walks you through a multi-source trust quorum to anchor the node, sets up the wallet, and offers to install Lantern as a background service. Three minutes start to finish. The tier is chosen *at install time* (not a runtime flag) so a Light node genuinely stays light — only the tier you pick provisions the larger cache and footprint.
+
+```
+  l  Light Node  — ~1 GB. Clients, wallets, backup node. Smallest footprint. (default)
+  p  PDP Node    — persistent 2–5 GB cache + prove/settle + backup block producer
+  f  Full Node   — snapshot-free full node, serves the whole chain (in development)
+```
 
 Once it's running:
 
@@ -79,6 +99,25 @@ Three views via the pill switcher in the top right:
 - **Dev**. The full data dump. Daemon stats, sync stats, gossipsub ingestor stats, quorum anchor, full peer list with multiaddrs, raw fetcher counters.
 
 Dark mode follows your OS setting. Zero JS framework dependencies, ~34 KB total, all embedded in the binary.
+
+## Node tiers
+
+Lantern is one binary that installs as one of three tiers. You pick the tier **at install time**; the daemon reads the persisted choice at start. This keeps a Light node genuinely light — the PDP and Full footprints are opt-in, not carried by everyone.
+
+### Light Node
+The original Lantern. ~1 GB, in-memory block cache. Wallets, chain reads, `eth_*`, the full 71-method Curio RPC surface, and an SP **backup node** role (fail-over chain backend next to a primary Lotus/Forest). Production-shape today.
+
+### PDP Node (mid)
+Everything Light does, plus a **persistent** 2–5 GB block cache whose warm PDP/payments/registry/USDFC contract state **survives restart** (a restarted node doesn't cold-fetch its whole warm set mid proving-window), plus the full write surface including **block production** — so it can run the PDP prove/settle loop and double as a backup block producer. Block production requires a VM bridge for a valid post-execution state root. Production-shape today.
+
+### Full Node — *in active development*
+A real, snapshot-free Filecoin full node that runs on a Mac mini:
+
+- **Snapshot-free boot.** Anchors at a recent F3-finalized tipset via a multi-source quorum, then fills history over BlockSync + follows head over gossip. No 76 GB snapshot, no genesis re-execution, minutes not days. The anchor's multi-source, BLS-verified, F3-finalized quorum is a *stronger* boot trust than downloading a single-source snapshot.
+- **Tunable low-GB footprint.** Keeps headers, F3 certs, DRAND, and actor code always; recent state/messages/receipts for a tunable number of finalities; drops older data (safely re-fetchable, CID-verified). Single-digit-GB steady state instead of ~76 GB, tunable up for archive roles.
+- **Pure-Go block validation, no Rust.** Re-verifies each block's signature, election + ticket VRF, miner eligibility, and win-count in pure Go. The two proof-heavy pieces — WinningPoSt SNARK verify and FVM re-execution — are currently anchored to F3 finality (the network's own consensus), with pure-Go implementations of both on the roadmap so a Full node can eventually re-derive them itself with zero Rust.
+
+Full-node work is tracked under [the Full Node epic (#87)](https://github.com/Reiers/lantern/issues/87) and lands tier by tier.
 
 ## How it works
 

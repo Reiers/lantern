@@ -27,6 +27,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/Reiers/lantern/build"
+	"github.com/Reiers/lantern/chain/header"
 	ltypes "github.com/Reiers/lantern/chain/types"
 )
 
@@ -100,8 +101,8 @@ func New(ctx context.Context, ps *pubsub.PubSub, cfg Config) (*Publisher, error)
 
 // blockTopicValidator is the gossipsub validator function registered on
 // the block topic. Returns ValidationAccept for blocks that pass our
-// shape check; ValidationReject for blocks that don't decode or fail
-// shape validation; ValidationIgnore for ambiguous cases.
+// shape + CID-integrity check; ValidationReject for blocks that don't
+// decode, fail shape validation, or whose CID does not re-derive.
 //
 // Why this matters for issue #18: gossipsub uses these decisions to
 // credit peers in its peer-score machinery. Accept on a fresh message
@@ -109,15 +110,57 @@ func New(ctx context.Context, ps *pubsub.PubSub, cfg Config) (*Publisher, error)
 // which raises their score (and by symmetry, raises OUR score in the
 // view of peers we forward to). Without a validator, gossipsub treats
 // us as a passive consumer and we get nothing.
+//
+// Why the CID re-derive matters for issue #85 (header propagation):
+// gossipsub only forwards (re-propagates) a message to our mesh peers
+// after the registered TopicValidator returns ValidationAccept. So this
+// function is *also* Lantern's propagation gate. #85 asks Lantern
+// to propagate block headers; it already does via gossipsub forwarding,
+// but a shape-only check would let us re-propagate a block whose CID was
+// tampered (header bytes mutated, signature-presence still true). By
+// re-deriving the CID here we guarantee Lantern only forwards blocks
+// whose header bytes are genuine - the same VerifyBlockHeaderCID gate
+// the ingestor applies before it installs a head. Propagation and
+// ingestion now share one integrity bar. (Full BLS/election-proof
+// validation stays the consumer's job; that needs ffi and is out of
+// scope for an F3-anchored light client - see TRUST-MODEL.md.)
 func blockTopicValidator(_ context.Context, _ peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
 	if msg == nil || len(msg.Data) == 0 {
 		return pubsub.ValidationReject
 	}
+	// Decode the message and require it to consume the ENTIRE payload.
+	// UnmarshalCBOR stops after the first CBOR object and ignores trailing
+	// bytes; a propagation gate must reject a message that carries extra
+	// bytes after a valid block so we never re-gossip a padded/embellished
+	// payload under a plausible block CID.
+	r := bytes.NewReader(msg.Data)
 	blk := new(ltypes.BlockMsg)
-	if err := blk.UnmarshalCBOR(bytes.NewReader(msg.Data)); err != nil {
+	if err := blk.UnmarshalCBOR(r); err != nil {
+		return pubsub.ValidationReject
+	}
+	if r.Len() != 0 {
 		return pubsub.ValidationReject
 	}
 	if !superficiallyValid(blk) {
+		return pubsub.ValidationReject
+	}
+	// CID integrity: the header must produce a well-formed CID and
+	// re-marshal to bytes that hash back to that same CID. This rejects
+	// any header whose fields don't round-trip through canonical CBOR,
+	// so we never re-propagate a malformed header under a plausible CID.
+	declared := blk.Header.Cid()
+	if !declared.Defined() {
+		return pubsub.ValidationReject
+	}
+	var hbuf bytes.Buffer
+	if err := blk.Header.MarshalCBOR(&hbuf); err != nil {
+		return pubsub.ValidationReject
+	}
+	reencoded := new(ltypes.BlockHeader)
+	if err := reencoded.UnmarshalCBOR(bytes.NewReader(hbuf.Bytes())); err != nil {
+		return pubsub.ValidationReject
+	}
+	if err := header.VerifyBlockHeaderCID(reencoded, declared); err != nil {
 		return pubsub.ValidationReject
 	}
 	return pubsub.ValidationAccept

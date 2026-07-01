@@ -46,7 +46,10 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 
 	"github.com/Reiers/lantern/build"
+	"github.com/Reiers/lantern/chain/bootstrap"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
+	"github.com/Reiers/lantern/chain/fullvalidate"
+	"github.com/Reiers/lantern/chain/headcheck"
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	"github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
@@ -60,6 +63,7 @@ import (
 	"github.com/Reiers/lantern/net/mpool"
 	"github.com/Reiers/lantern/rpc/handlers"
 	rpcserver "github.com/Reiers/lantern/rpc/server"
+	statecache "github.com/Reiers/lantern/state/cache"
 	"github.com/Reiers/lantern/state/hamt"
 	"github.com/Reiers/lantern/state/prefetch"
 	"github.com/Reiers/lantern/vm/bridge"
@@ -97,7 +101,31 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 	// Combined fetcher: gateway race + glif fallback. Matches the
 	// cmd/lantern wiring (without bitswap, since libp2p isn't mounted
 	// here yet — the gateway+glif pair covers cold state-tree reads).
-	cache := hamt.NewMemBlockStore()
+	//
+	// Cache tier selection: the PDP / mid-node tier uses a PERSISTENT
+	// (Badger) block cache so the warm contract set survives restart; the
+	// light node stays in-memory. Both satisfy combined.Cache.
+	var cache combined.Cache
+	if d.cfg.PersistentCache {
+		bcPath := filepath.Join(d.cfg.DataDir, network.String(), "blockcache")
+		if err := os.MkdirAll(bcPath, 0o700); err != nil {
+			return fmt.Errorf("create block cache dir: %w", err)
+		}
+		bc, err := statecache.Open(bcPath, statecache.Options{SoftCapBytes: d.cfg.PersistentCacheBytes})
+		if err != nil {
+			return fmt.Errorf("open persistent block cache: %w", err)
+		}
+		d.mu.Lock()
+		d.blockCache = bc
+		d.mu.Unlock()
+		cache = bc
+		if !d.cfg.EmbeddedMode {
+			fmt.Printf("daemon: persistent block cache %s (soft cap %d bytes)\n", bcPath, bc.Stats().SoftCapBytes)
+		}
+		log.Infow("persistent block cache enabled (PDP tier)", "path", bcPath, "soft_cap", bc.Stats().SoftCapBytes)
+	} else {
+		cache = hamt.NewMemBlockStore()
+	}
 	// fallbackRPC is the Lotus-compatible RPC used as the polling Sync head
 	// source AND the gossipsub ingestor's head+N backfill source AND the
 	// last-resort cold state-block fetcher. Gossipsub is the PRIMARY
@@ -203,12 +231,45 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		// the rest next poll rather than aborting). MaxBacktrack is raised
 		// so reorg/backfill depth comfortably exceeds the deepest realistic
 		// single-wait lag.
+		// #51 "down for a maintenance window" auto-heal: if the persisted
+		// store is more than staleReset epochs behind live head, re-anchor
+		// near live head instead of trying (and failing) to backfill an
+		// un-connectable gap. Without this the embedded daemon wedges its
+		// head after any downtime longer than MaxBacktrack and needs a manual
+		// `lantern reset --chain-state` (this is what forced that workaround
+		// for embedded testers). The standalone cmd/lantern daemon already
+		// wires this; pkg/daemon (the embedded path curio-core / maxboom use)
+		// previously did not. Chain state only — keys are never touched.
+		// Config.StaleResetThreshold: 0 => default 2880 (~1 day); <0 => off.
+		staleReset := resolveStaleResetThreshold(d.cfg.StaleResetThreshold)
 		sync := hstore.NewSync(store, syncSrc, hstore.SyncOptions{
-			Interval:       syncInterval,
-			MaxBacktrack:   900, // ~7.5h at 30s blocks; covers long proving waits
-			BootstrapDepth: 3,
-			CatchUpChunk:   200, // bounded per-poll catch-up work
+			Interval:            syncInterval,
+			MaxBacktrack:        900, // ~7.5h at 30s blocks; covers long proving waits
+			BootstrapDepth:      3,
+			CatchUpChunk:        200, // bounded per-poll catch-up work
+			StaleResetThreshold: staleReset,
+			OnStaleReset: func(storeHead, liveHead abi.ChainEpoch) {
+				log.Warnw("header store too stale to backfill contiguously; re-anchoring near live head (chain state only, keys untouched)",
+					"store_head", storeHead, "live_head", liveHead, "lag", liveHead-storeHead)
+			},
 		})
+		// Full tier (#90): wire the pure-Go per-block consensus validator so
+		// each ingested block's signature / VRF / win-count is re-verified
+		// against resident F3-anchored state. Observe-only unless
+		// FullValidationFatal is set. nil on Light/PDP (zero cost).
+		if d.cfg.FullValidation && chainAPI != nil {
+			sv := chainAPI.FullValidateView()
+			hsForBeacon := store
+			sync.SetBlockValidator(func(ctx context.Context, bh *types.BlockHeader) error {
+				// Resolve prevBeacon from the store so entry-less blocks
+				// validate fully (nil only if none found within the walk).
+				prevBeacon, _ := hsForBeacon.LatestBeaconEntry(bh)
+				_, err := fullvalidate.ValidateBlockConsensus(ctx, bh, prevBeacon, sv)
+				return err
+			}, d.cfg.FullValidationFatal)
+			log.Infow("full-node block validation wired (#90)",
+				"fatal", d.cfg.FullValidationFatal)
+		}
 		if err := sync.Start(ctx); err != nil {
 			_ = store.Close()
 			return fmt.Errorf("start header sync: %w", err)
@@ -262,6 +323,17 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 				PerAddrTimeout:   d.cfg.FEVMPrefetchPerAddrTimeout,
 				MinInterval:      d.cfg.FEVMPrefetchMinInterval,
 			}, fetcher)
+			// PDP tier: pin the warmed static-contract subtrees in the
+			// persistent cache so the warm set survives restart un-evicted.
+			if d.cfg.PersistentCache {
+				d.mu.Lock()
+				bc := d.blockCache
+				d.mu.Unlock()
+				if bc != nil {
+					pf.SetPinner(bc)
+					log.Infow("prefetcher pinning enabled (PDP warm set persists)")
+				}
+			}
 			store.OnHeadChange(func(ts *types.TipSet) {
 				pf.Trigger(ctx, ts)
 			})
@@ -369,6 +441,7 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 	store := d.headerStore
 	host := d.p2pHost
 	bsClient := d.bitswap
+	blockCache := d.blockCache
 	d.rpcServer = nil
 	d.auth = nil
 	d.headerSync = nil
@@ -377,6 +450,8 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 	d.p2pHost = nil
 	d.ingestor = nil
 	d.bitswap = nil
+	d.blockCache = nil
+	d.blockPub = nil
 	d.started = false
 	d.mu.Unlock()
 
@@ -404,6 +479,12 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 	if store != nil {
 		if err := store.Close(); err != nil {
 			return fmt.Errorf("close header store: %w", err)
+		}
+	}
+	// Close the persistent block cache last (nothing else rides on it).
+	if blockCache != nil {
+		if err := blockCache.Close(); err != nil {
+			return fmt.Errorf("close block cache: %w", err)
 		}
 	}
 	return nil
@@ -450,11 +531,26 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 		return fmt.Errorf("libp2p host has no pubsub instance")
 	}
 
-	ing, _, err := blockingest.Start(ctx, host.PubSub, store, src, network.GossipTopicBlocks())
+	ing, blockPub, err := blockingest.Start(ctx, host.PubSub, store, src, network.GossipTopicBlocks())
 	if err != nil {
 		_ = host.Close()
 		return fmt.Errorf("start gossipsub block ingestor: %w", err)
 	}
+	// Capture the /fil/blocks publisher so a PDP/backup-tier daemon can
+	// actually SUBMIT blocks (SyncSubmitBlock -> BlockPublisher). The CLI
+	// path already wired this; the embedded daemon previously discarded it,
+	// so an embedded node could create but never publish a block. It's only
+	// USED when AllowBlockSubmit=true (+ a VM bridge for a valid state
+	// root); otherwise it just sits idle as the block-topic subscriber.
+	// Always wire the publisher onto the ChainAPI; SyncSubmitBlock still
+	// independently gates on AllowBlockSubmit, so wiring it unconditionally
+	// is safe and means a later toggle needs no re-plumb.
+	d.mu.Lock()
+	d.blockPub = blockPub
+	if d.chainAPI != nil {
+		d.chainAPI.SetBlockPublisher(blockPub)
+	}
+	d.mu.Unlock()
 
 	// #71: now that the gossip ingestor exists, let the polling Sync skip
 	// its upstream-RPC HeadEpoch() poll whenever gossip installed a block
@@ -476,6 +572,90 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 		// node (gossip skipping head+N>1 blocks it can't backfill) resumes
 		// catch-up instead of wedging ~10-20 epochs behind the tip.
 		hsync.SetGossipObservedHead(func() abi.ChainEpoch { return ing.ObservedHead() }, 0)
+	}
+
+	// #85 item 2: running-head divergence monitor. Best-effort and
+	// observational - it never moves our head (gossip + #79 fork choice do
+	// that). It periodically asks a diversity of independent RPC observers
+	// what epoch the head is at and raises an eclipse/fork alarm if a
+	// quorum of independent sources disagrees with our gossip head beyond
+	// the 3-block lookback.
+	//
+	// #80 head-source diversity: build a Kind-DIVERSE source set, not just
+	// operator RPC URLs. We add, when available: the operator's HeadCheckRPCs
+	// (KindForest), the Lantern gateway (KindLanternGateway, HTTP /state/root),
+	// and the fallback RPC / Glif (KindForest). headcheck counts agreement by
+	// Kind, so N URLs of one kind = 1 source - this gives an honest multi-kind
+	// quorum on the running head instead of boot-only. The monitor starts
+	// whenever at least one corroborating source exists; it self-reports
+	// StatusInsufficient (a no-op alarm) until enough distinct kinds are
+	// reachable, so enabling it broadly is safe.
+	{
+		var hcSources []headcheck.HeadSource
+		for _, u := range d.cfg.HeadCheckRPCs {
+			u = strings.TrimSpace(u)
+			if u == "" {
+				continue
+			}
+			hcSources = append(hcSources, headcheck.NewRPCHeadSource("", bootstrap.KindForest, u, "", 0))
+		}
+		// Gateway as an independent kind (unless the operator went
+		// gateway-less). Distinct Kind => real diversity even with one RPC.
+		// (Derived from cfg here since startGossipHead doesn't take the
+		// startInternal-local gw/fallback vars; same resolution logic.)
+		if d.cfg.Gateway != "" {
+			hcSources = append(hcSources, headcheck.NewGatewayHeadSource(d.cfg.Gateway, 0))
+		}
+		// Fallback RPC / Glif as another corroborating source, unless the
+		// operator explicitly went no-fallback (bridge-off purist).
+		if !d.cfg.NoFallbackRPC {
+			hcFallback := d.cfg.FallbackRPC
+			if hcFallback == "" {
+				hcFallback = "https://api.node.glif.io/rpc/v1"
+				if network == build.Calibration {
+					hcFallback = "https://api.calibration.node.glif.io/rpc/v1"
+				}
+			}
+			hcSources = append(hcSources, headcheck.NewRPCHeadSource("glif", bootstrap.KindForest, hcFallback, "", 0))
+		}
+		if len(hcSources) > 0 {
+			// #79 item 2: feed the divergence verdict back to the ingestor
+			// as a head-adoption gate. While the running head diverges from
+			// the independent-source quorum, hold head (no-adopt) instead of
+			// only logging. StatusInsufficient does NOT close the gate: a
+			// node the operator gave too few sources must not freeze head.
+			var hcDiverged atomic.Bool
+			ing.SetHeadAdoptionGate(func() bool { return !hcDiverged.Load() })
+			mon := headcheck.New(headcheck.Config{
+				Local:   func() abi.ChainEpoch { return ing.ObservedHead() },
+				Sources: hcSources,
+				OnResult: func(r headcheck.Result) {
+					switch r.Status {
+					case headcheck.StatusDiverge:
+						hcDiverged.Store(true)
+						log.Warnw("headcheck: running head DIVERGES from independent sources (possible eclipse/fork); HOLDING head adoption",
+							"localHead", r.LocalHead, "medianExtHead", r.MedianExtHead,
+							"agreeing", r.Agreeing, "disagreeing", r.Disagreeing, "reachable", r.Reachable)
+					case headcheck.StatusAgree:
+						if hcDiverged.Swap(false) {
+							log.Infow("headcheck: running head re-corroborated; resuming head adoption",
+								"localHead", r.LocalHead, "agreeing", r.Agreeing)
+						}
+					case headcheck.StatusInsufficient:
+						// Too few reachable sources to judge: do not close the
+						// gate (avoid freezing a lightly-corroborated node).
+						hcDiverged.Store(false)
+						log.Debugw("headcheck: head uncorroborated (too few reachable sources)",
+							"localHead", r.LocalHead, "reachable", r.Reachable)
+					}
+				},
+			})
+			mon.Start(ctx)
+			d.mu.Lock()
+			d.headcheck = mon
+			d.mu.Unlock()
+			log.Infow("running-head divergence monitor started", "sources", len(hcSources), "lookback", headcheck.DefaultLookback)
+		}
 	}
 
 	// lantern#45 Stage 4: wire the gossipsub mempool publisher on the same
@@ -586,6 +766,30 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 			network.GossipTopicBlocks(), host.ID())
 	}
 	return nil
+}
+
+// defaultStaleResetThreshold is the epochs-behind-live-head auto-heal
+// threshold used by the embedded daemon when Config.StaleResetThreshold
+// is left at 0. 2880 epochs ~= 1 day at 30s blocks, matching the
+// standalone cmd/lantern daemon's default.
+const defaultStaleResetThreshold = abi.ChainEpoch(2880)
+
+// resolveStaleResetThreshold maps the Config knob to the effective
+// SyncOptions value: 0 => default (2880), a negative value => 0
+// (disabled), any positive value => itself. This is the #51 "down for a
+// maintenance window" auto-heal that the embedded pkg/daemon path
+// previously never set (only the standalone CLI did), which is what
+// forced embedded testers to manually `lantern reset --chain-state`
+// after downtime.
+func resolveStaleResetThreshold(cfg abi.ChainEpoch) abi.ChainEpoch {
+	switch {
+	case cfg == 0:
+		return defaultStaleResetThreshold
+	case cfg < 0:
+		return 0 // disabled
+	default:
+		return cfg
+	}
 }
 
 // splitCSV splits a comma-separated string, trimming spaces and dropping

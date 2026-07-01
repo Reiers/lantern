@@ -164,6 +164,16 @@ func (c *ChainAPI) EthSendRawTransaction(ctx context.Context, signedTxHex string
 	}
 
 	if c.Bridge == nil {
+		// Fail LOUD with an actionable message instead of the generic
+		// "FEVM method requires --vm-bridge-rpc". When the local send path
+		// was declined because the gossipsub mempool publisher isn't wired
+		// (Mpool == nil), the fix is to enable libp2p, NOT to wire a VM
+		// bridge - and an SP hitting this on AddPiece/Prove needs to know
+		// that precisely. A writing bridge-off node with no mpool is a
+		// misconfiguration, so surface exactly what's missing.
+		if c.Mpool == nil {
+			return "", fmt.Errorf("eth_sendRawTransaction: local send path unavailable (gossipsub mempool not wired) and no VM bridge configured - enable libp2p (set P2PListen / do not set NoLibp2p) so the mempool publisher comes up, or configure --vm-bridge-rpc")
+		}
 		return "", errBridgeUnconfigured
 	}
 	params, err := json.Marshal([]any{signedTxHex})

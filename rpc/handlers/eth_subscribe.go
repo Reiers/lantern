@@ -302,16 +302,23 @@ func (c *ChainAPI) subscribeNewHeads(parentCtx context.Context, revClient EthSub
 // (address + topics) and pushes each matching log to the client as an
 // eth_subscription notification.
 //
-// Design note (issue #32, option a): Lantern has no local event/receipt
-// index — EthGetLogs forwards to the VM bridge (Forest/Lotus upstream).
-// So rather than scanning tipsets locally, we reuse that bridge path:
-// each new head triggers one bridge eth_getLogs call with
-// fromBlock=toBlock=<new head>. Latency is one block time; cost is one
-// bridge call per active logs-subscription per block. Geth emits one
-// notification per matching log, which we mirror.
+// Design note (issue #32, option a; updated lantern#76): each new head
+// triggers one eth_getLogs call scoped to fromBlock=toBlock=<new head>.
+// EthGetLogs is now LOCAL-FIRST (lantern#73 per-receipt event-AMT decode),
+// so a bridge-off node with a header store serves log subscriptions from
+// local state and only falls to the bridge for out-of-window ranges. Geth
+// emits one notification per matching log, which we mirror. Latency is one
+// block time.
 func (c *ChainAPI) subscribeLogs(parentCtx context.Context, revClient EthSubscriberMethods, filter map[string]json.RawMessage) (EthSubscriptionID, error) {
-	if c.Bridge == nil {
-		return "", xerrors.New("eth_subscribe(logs): VM bridge not configured; log subscriptions require --vm-bridge-rpc")
+	// The per-head query path (EthGetLogs) is local-first and only needs the
+	// head-notify stream + a log source. Require ONE of: a header store
+	// (local getLogs) or a VM bridge (fallback). Refuse only when neither
+	// exists AND there's no head-notify to drive the subscription.
+	if c.Bridge == nil && c.HeaderStore == nil {
+		return "", xerrors.New("eth_subscribe(logs): no log source; requires a header store (local getLogs) or --vm-bridge-rpc")
+	}
+	if c.HeadNotify == nil {
+		return "", xerrors.New("eth_subscribe(logs): head-notify not wired (no persistent header store); cannot drive per-head log delivery")
 	}
 	c.ensureEthSubState()
 

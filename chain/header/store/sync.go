@@ -142,6 +142,15 @@ type Sync struct {
 	mu      sync.Mutex
 	running bool
 	stats   SyncStats
+
+	// blockValidator, when set, runs an extra per-block consensus check
+	// (chain/fullvalidate) after the Phase-1 tipset-shape check. Only the
+	// Full node tier wires it; Light/PDP leave it nil (zero cost). When
+	// blockValidateFatal is false the result is logged but not enforced,
+	// so a Full node can be brought up in observe mode before trusting the
+	// pipeline to gate ingest. (#90)
+	blockValidator     func(ctx context.Context, bh *ltypes.BlockHeader) error
+	blockValidateFatal bool
 }
 
 // SyncStats reports observable Sync activity.
@@ -219,6 +228,18 @@ func (s *Sync) SetGossipObservedHead(fn func() abi.ChainEpoch, tol abi.ChainEpoc
 func (s *Sync) SetGossipFresh(fn func() bool) {
 	s.mu.Lock()
 	s.opts.GossipFresh = fn
+	s.mu.Unlock()
+}
+
+// SetBlockValidator wires the Full-tier per-block consensus validator (#90).
+// fn runs after the tipset-shape check on each assembled block; fatal decides
+// whether a validation error rejects the tipset (true) or is only logged
+// (false, observe mode). Passing nil disables it. Safe to call before/after
+// Start. Light/PDP tiers never call this.
+func (s *Sync) SetBlockValidator(fn func(ctx context.Context, bh *ltypes.BlockHeader) error, fatal bool) {
+	s.mu.Lock()
+	s.blockValidator = fn
+	s.blockValidateFatal = fatal
 	s.mu.Unlock()
 }
 
@@ -574,6 +595,25 @@ func (s *Sync) fetchAndPersistTipset(ctx context.Context, ep abi.ChainEpoch) (*l
 	// Phase 1 tipset-shape check (identical Parents, height, etc.)
 	if _, err := header.ValidateTipsetShape(blocks); err != nil {
 		return nil, err
+	}
+	// Full-tier consensus validation (#90): sig / VRF / win-count against
+	// resident F3-anchored state. nil on Light/PDP. In observe mode
+	// (blockValidateFatal=false) failures are logged but do not reject the
+	// tipset, so a Full node can be validated on calibration before the
+	// pipeline gates ingest.
+	s.mu.Lock()
+	bv, bvFatal := s.blockValidator, s.blockValidateFatal
+	s.mu.Unlock()
+	if bv != nil {
+		for _, b := range blocks {
+			if err := bv(ctx, b); err != nil {
+				if bvFatal {
+					return nil, fmt.Errorf("fullvalidate block %s (h %d): %w", b.Cid(), b.Height, err)
+				}
+				log.Warnw("fullvalidate: block failed consensus check (observe mode, not enforced)",
+					"block", b.Cid(), "height", b.Height, "err", err)
+			}
+		}
 	}
 	// Persist each block. Note: Put requires parents to be present; for
 	// blocks far in the past during gap-fill we might be missing

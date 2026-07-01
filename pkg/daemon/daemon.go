@@ -40,6 +40,7 @@ import (
 
 	lapi "github.com/Reiers/lantern/api"
 	"github.com/Reiers/lantern/build"
+	"github.com/Reiers/lantern/chain/headcheck"
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	"github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
@@ -49,6 +50,7 @@ import (
 	"github.com/Reiers/lantern/net/mpool"
 	"github.com/Reiers/lantern/rpc/handlers"
 	rpcserver "github.com/Reiers/lantern/rpc/server"
+	statecache "github.com/Reiers/lantern/state/cache"
 	"github.com/Reiers/lantern/state/prefetch"
 	"github.com/Reiers/lantern/wallet"
 )
@@ -97,6 +99,46 @@ type Config struct {
 	// SyncInterval is the header-store poll cadence. Default 6s.
 	SyncInterval time.Duration
 
+	// PersistentCache enables the on-disk (Badger) block cache instead of
+	// the in-memory MemBlockStore. This is the PDP / mid-node tier: the warm
+	// contract subtrees (PDP/payments/registry/USDFC) SURVIVE restart, so a
+	// restarted node doesn't cold-fetch its whole warm set from the gateway
+	// on the first head advance (which for a PDP node could stall inside a
+	// proving window). The light node leaves this false and stays
+	// memory-cached. Cache lives at <DataDir>/<network>/blockcache.
+	PersistentCache bool
+
+	// PersistentCacheBytes is the soft byte budget for the persistent block
+	// cache (only used when PersistentCache=true). 0 => default 3 GiB (the
+	// middle of the 2-5 GB PDP-tier target). Eviction is sampled-LRU over
+	// unpinned blocks; pinned warm-set subtrees are never evicted.
+	PersistentCacheBytes int64
+
+	// FullValidation enables the Full-tier per-block consensus pipeline
+	// (chain/fullvalidate, #90): signature / VRF / win-count re-verified
+	// against resident F3-anchored state on every ingested block. Light/PDP
+	// leave this false. Requires an accessor-backed ChainAPI.
+	FullValidation bool
+
+	// FullValidationFatal decides whether a FullValidation failure rejects
+	// the tipset (true) or is only logged (false = observe mode). Defaults
+	// to observe so a Full node can be brought up + watched on calibration
+	// before the pipeline is trusted to gate ingest.
+	FullValidationFatal bool
+
+	// StaleResetThreshold is the number of epochs behind live head past
+	// which a persisted header store re-anchors near live head instead of
+	// trying (and failing) to backfill an un-connectable gap (#51). This is
+	// the "down for a maintenance window / crash / long proving gap"
+	// auto-heal: without it, an embedded node that falls further than
+	// MaxBacktrack (~900 epochs) behind wedges its head forever and needs a
+	// manual `lantern reset --chain-state`. Chain-state pointers only are
+	// discarded on re-anchor; keys/wallets/tokens live in separate files and
+	// are never touched. 0 = use the default; a negative value disables.
+	// Default (when 0): 2880 epochs (~1 day at 30s blocks), matching the
+	// standalone cmd/lantern daemon.
+	StaleResetThreshold abi.ChainEpoch
+
 	// NotifyBufSize is the ChainNotify per-subscriber buffer. Default 64.
 	NotifyBufSize int
 
@@ -125,6 +167,14 @@ type Config struct {
 	// default). Point this at your own Forest/Lotus node to remove the
 	// Glif dependency without going fully bridge-off (lantern#50 part 3).
 	FallbackRPC string
+
+	// HeadCheckRPCs is an optional list of Lotus-compatible JSON-RPC URLs
+	// used by the running-head divergence monitor (chain/headcheck,
+	// #85) to CORROBORATE the gossip-derived head. These are never
+	// the source of truth for the head - they only raise an eclipse/fork
+	// alarm when a diversity of independent observers disagrees with our
+	// head beyond the 3-block lookback. Empty disables the monitor.
+	HeadCheckRPCs []string
 
 	// NoFallbackRPC, when true, wires NO upstream RPC as the Sync head
 	// source or cold-block fallback - the node relies purely on gossipsub
@@ -292,10 +342,13 @@ type Daemon struct {
 	// When present, gossipsub is the primary head source (0-1 epoch
 	// latency) and headerSync runs at a relaxed cadence as the catch-up
 	// fallback. See lantern#40.
-	p2pHost  *llibp2p.Host
-	ingestor *blockingest.Ingestor
-	mpool    *mpool.Pool     // gossipsub mempool publisher (#45 Stage 4)
-	bitswap  *bitswap.Client // libp2p block source on the embedded fetcher (#50)
+	p2pHost    *llibp2p.Host
+	ingestor   *blockingest.Ingestor
+	mpool      *mpool.Pool             // gossipsub mempool publisher (#45 Stage 4)
+	headcheck  *headcheck.Monitor      // running-head divergence monitor (#85)
+	bitswap    *bitswap.Client         // libp2p block source on the embedded fetcher (#50)
+	blockCache *statecache.Store       // persistent block cache (PDP tier); nil when memory-cached
+	blockPub   handlers.BlockPublisher // /fil/blocks publisher (PDP/backup tier block submit)
 
 	// sendWarmer pre-warms a sent tx's message/receipt blocks into the
 	// Bitswap cache in the background so the receipt poll resolves locally
@@ -429,6 +482,46 @@ func (d *Daemon) GossipStats() (blockingest.Stats, bool) {
 		return blockingest.Stats{}, false
 	}
 	return ing.Stats(), true
+}
+
+// HeadCorroboration returns the latest running-head divergence-monitor
+// result (chain/headcheck, #85/#86) and true when the monitor is running.
+// This is the observable answer to "is my running head corroborated by a
+// diversity of independent sources right now, or does it look eclipsed?"
+// - it surfaces the monitor's verdict (agree / diverge / insufficient)
+// plus the local vs median-external head epochs and the agree/disagree
+// tallies, so an operator (or the dashboard) can SEE an eclipse alarm
+// instead of grepping logs. Returns (zero, false) when the monitor is
+// disabled (no HeadCheckRPCs configured) or the daemon isn't started.
+//
+// It deliberately reports status only; it never halts the node. Divergence
+// is an alarm, not an auto-stop - a false positive must not become a
+// self-inflicted DoS. Closing the loop on #79 (periodic re-quorum) / #80
+// (head-source diversity) is about making the running head continuously,
+// visibly corroborated; the head itself still advances on gossip + the
+// #79 heaviest-weight fork choice.
+// BlockCacheStats returns the persistent block-cache counters (live bytes,
+// soft cap, hits/misses/puts/evictions) and true when the PDP-tier
+// persistent cache is enabled. Returns (zero, false) for the memory-cached
+// light node. Lets the dashboard show the warm-set footprint + hit rate.
+func (d *Daemon) BlockCacheStats() (statecache.Stats, bool) {
+	d.mu.Lock()
+	bc := d.blockCache
+	d.mu.Unlock()
+	if bc == nil {
+		return statecache.Stats{}, false
+	}
+	return bc.Stats(), true
+}
+
+func (d *Daemon) HeadCorroboration() (headcheck.Result, bool) {
+	d.mu.Lock()
+	mon := d.headcheck
+	d.mu.Unlock()
+	if mon == nil {
+		return headcheck.Result{}, false
+	}
+	return mon.Last(), true
 }
 
 // Start brings the daemon up: fetches the trusted head, opens the

@@ -29,6 +29,8 @@ import (
 	"github.com/Reiers/lantern/chain/trustedroot"
 	ltypes "github.com/Reiers/lantern/chain/types"
 	"github.com/Reiers/lantern/state/accessor"
+	"github.com/ipfs/go-cid"
+
 	"github.com/Reiers/lantern/state/actors"
 	"github.com/Reiers/lantern/state/hamt"
 	"github.com/Reiers/lantern/state/kamt"
@@ -57,6 +59,13 @@ type Config struct {
 	MinInterval time.Duration
 }
 
+// Pinner pins CIDs in the persistent block cache so they are never
+// LRU-evicted. Satisfied by *state/cache.Store. Optional: nil on the
+// memory-cached light node.
+type Pinner interface {
+	Pin(cid.Cid) error
+}
+
 // Prefetcher walks contract state subtrees through a BlockGetter on
 // every Trigger() call.
 type Prefetcher struct {
@@ -64,6 +73,13 @@ type Prefetcher struct {
 	bg      hamt.BlockGetter
 	reg     *actors.Registry
 	chainID uint64
+
+	// pinner, when set (PDP tier), pins the walked nodes of STATIC
+	// (configured) contracts so the warm PDP/payments/registry/USDFC
+	// subtrees survive LRU eviction across restart. Dynamic (client-
+	// learned) addresses are deliberately NOT pinned - that set is
+	// attacker-influenceable and must stay evictable.
+	pinner Pinner
 
 	mu       sync.Mutex
 	lastRun  map[string]time.Time // keyed by canonical eth-address (lowercase hex)
@@ -106,6 +122,15 @@ func New(cfg Config, bg hamt.BlockGetter) *Prefetcher {
 		lastRun:  make(map[string]time.Time),
 		inflight: make(map[string]bool),
 	}
+}
+
+// SetPinner attaches a persistent-cache Pinner (PDP tier). When set, the
+// walked nodes of STATIC configured contracts are pinned so the warm set
+// survives restart un-evicted. Call once at wiring time before Trigger.
+func (p *Prefetcher) SetPinner(pn Pinner) {
+	p.mu.Lock()
+	p.pinner = pn
+	p.mu.Unlock()
 }
 
 // Trigger runs a prefetch pass against the given header. Returns
@@ -274,9 +299,25 @@ func (p *Prefetcher) walkOne(ctx context.Context, acc *accessor.Accessor, key st
 	if p.isDynamic(key) && maxNodes > 0 {
 		maxNodes *= 4
 	}
+	// PDP tier: pin the walked storage-trie nodes of STATIC contracts so
+	// the warm set survives LRU eviction / restart. Dynamic (learned)
+	// addresses are never pinned (attacker-influenceable set). Also pin the
+	// storage root itself so a re-walk always has its anchor.
+	var onNode func(cid.Cid)
+	p.mu.Lock()
+	pinner := p.pinner
+	p.mu.Unlock()
+	if pinner != nil && !p.isDynamic(key) {
+		onNode = func(c cid.Cid) { _ = pinner.Pin(c) }
+		_ = pinner.Pin(storageRoot)
+		if bc := st.BytecodeCID(); bc.Defined() {
+			_ = pinner.Pin(bc)
+		}
+	}
 	stats, err := kamt.WalkSubtree(wctx, storageRoot, p.bg, kamt.WalkOptions{
 		MaxNodes:     maxNodes,
 		FetchRetries: 2,
+		OnNode:       onNode,
 	})
 	if err != nil {
 		log.Debugw("prefetch: walk failed", "addr", "0x"+key, "err", err)
