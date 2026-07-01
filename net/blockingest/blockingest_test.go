@@ -390,3 +390,97 @@ func TestIngestor_ForkChoiceAcceptsHeavierAdvance(t *testing.T) {
 	require.Equal(t, uint64(0), ing.Stats().RejectedLighter)
 	require.Equal(t, head.Height()+1, s.HeadEpoch())
 }
+
+// TestIngestor_CorroborationHoldsUncorroborated covers #80 part 2: a valid
+// heavier next block whose corroboration predicate returns false must NOT
+// be adopted - the ingestor holds and counts the hold.
+func TestIngestor_CorroborationHoldsUncorroborated(t *testing.T) {
+	s, head := withStore(t, 10)
+	ing := New(s, nil)
+	ctx := context.Background()
+
+	ing.SetHeadCorroboration(func(cid.Cid) bool { return false })
+
+	next := mkBlock(t, head.Height()+1, []cid.Cid{head.Blocks()[0].Cid()}, 1000, "next")
+	ing.process(ctx, &ltypes.BlockMsg{Header: next})
+
+	require.Equal(t, uint64(0), ing.installed.Load(),
+		"uncorroborated head must be held")
+	require.Equal(t, uint64(1), ing.Stats().HeldUncorrob,
+		"hold must be counted")
+	require.Equal(t, head.Height(), s.HeadEpoch(),
+		"head must stay put while uncorroborated")
+}
+
+// TestIngestor_CorroborationRetryAdopts: a block held for lack of
+// corroboration is re-enqueued by the retry path; when corroboration
+// arrives (duplicates counted) the retry adopts it. The retry re-enters
+// process for a seen CID via corroPending, so this also covers the
+// seen-bypass.
+func TestIngestor_CorroborationRetryAdopts(t *testing.T) {
+	s, head := withStore(t, 10)
+	ing := New(s, nil)
+	ctx := context.Background()
+
+	corroborated := false
+	ing.SetHeadCorroboration(func(cid.Cid) bool { return corroborated })
+
+	next := mkBlock(t, head.Height()+1, []cid.Cid{head.Blocks()[0].Cid()}, 1000, "next")
+	msg := &ltypes.BlockMsg{Header: next}
+
+	// First delivery: held, retry scheduled (corroPending set).
+	ing.process(ctx, msg)
+	require.Equal(t, uint64(0), ing.installed.Load(), "held on first pass")
+	require.Equal(t, uint64(1), ing.Stats().HeldUncorrob)
+
+	// Corroboration arrives, then the retry re-enters process with the
+	// same (already seen) CID. Simulate the retry synchronously.
+	corroborated = true
+	ing.process(ctx, msg)
+	require.Equal(t, uint64(1), ing.installed.Load(),
+		"retry with corroboration must adopt")
+	require.Equal(t, next.Height, s.HeadEpoch(), "head must advance")
+}
+
+// TestIngestor_CorroborationRetriesExhausted: an uncorroboratable block
+// is retried corroMaxRetries times, then dropped for good; head progress
+// is left to the polling Sync safety net (no wedge, no unbounded retry).
+func TestIngestor_CorroborationRetriesExhausted(t *testing.T) {
+	s, head := withStore(t, 10)
+	ing := New(s, nil)
+	ctx := context.Background()
+
+	ing.SetHeadCorroboration(func(cid.Cid) bool { return false })
+
+	next := mkBlock(t, head.Height()+1, []cid.Cid{head.Blocks()[0].Cid()}, 1000, "next")
+	msg := &ltypes.BlockMsg{Header: next}
+
+	// First pass + simulated retries.
+	for i := 0; i < corroMaxRetries+1; i++ {
+		ing.process(ctx, msg)
+	}
+	require.Equal(t, uint64(0), ing.installed.Load(), "never adopted")
+	require.Equal(t, uint64(corroMaxRetries)+1, ing.Stats().HeldUncorrob,
+		"each pass counts a hold")
+	// After exhaustion the pending flag is gone: one more process call is
+	// a plain dedup, not another hold.
+	before := ing.Stats().HeldUncorrob
+	ing.process(ctx, msg)
+	require.Equal(t, before, ing.Stats().HeldUncorrob,
+		"post-exhaustion re-delivery must dedup, not hold")
+	require.Equal(t, uint64(1), ing.dedup.Load())
+}
+
+// TestIngestor_CorroborationNilAdoptsNormally: nil predicate = feature
+// off, adoption proceeds exactly as before (Light/PDP default).
+func TestIngestor_CorroborationNilAdoptsNormally(t *testing.T) {
+	s, head := withStore(t, 10)
+	ing := New(s, nil)
+	ctx := context.Background()
+
+	ing.SetHeadCorroboration(nil)
+
+	next := mkBlock(t, head.Height()+1, []cid.Cid{head.Blocks()[0].Cid()}, 1000, "next")
+	ing.process(ctx, &ltypes.BlockMsg{Header: next})
+	require.Equal(t, uint64(1), ing.installed.Load(), "nil gate must adopt")
+}

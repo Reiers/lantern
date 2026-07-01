@@ -2,6 +2,36 @@
 
 All notable changes to Lantern.
 
+## Unreleased (v1.9.0)
+
+### Security / head-path hardening
+
+- **Head-source corroboration** ([#80](https://github.com/Reiers/lantern/issues/80) part 2).
+  The ingestor now (optionally) requires a candidate head to have been
+  forwarded by **N distinct gossip peers** before adopting it. Gossipsub
+  deduplicates messages before subscribers see them, so the corroboration
+  votes are counted where every copy IS visible: a pubsub `RawTracer`
+  records the forwarding peer of the first delivery and of every duplicate,
+  per block CID (`blockpub.CorroborationTracker`). A trusted floor peer
+  (the connmgr-protected bootstrap/beacon/direct set from #80 part 1)
+  counts as a super-vote, and the requirement clamps to the connected-peer
+  count so a small node never wedges; an uncorroborated block is retried
+  briefly (duplicates arrive within ~1s on a healthy mesh), then left to
+  the polling Sync safety net. Off by default on Light/PDP; the Full tier
+  defaults to 2 distinct sources (`--head-corroboration-peers`, embedded:
+  `Config.HeadCorroborationPeers`). New `held_uncorrob` ingestor stat on
+  the dashboard dev page (plus previously-invisible `rejected_lighter` /
+  `held_diverged`).
+- **Per-topic gossipsub score parameters** ([#97](https://github.com/Reiers/lantern/issues/97)).
+  Lantern set Lotus's global peer-score params (incl. IP-colocation
+  penalties) but left the per-topic map empty, so a peer that never
+  usefully delivered anything scored the same as one that consistently
+  delivered blocks first. The `/fil/blocks` + `/fil/msgs` topics now carry
+  Lotus's exact `TopicScoreParams` (first-delivery credit, invalid-message
+  penalties). This is what makes #80's "distinct **scored** peers"
+  meaningful against Sybil swarms: freshly-dialed attacker peers have no
+  delivery history, score ~0, and decay out of the mesh.
+
 ## v1.8.5 (2026-06-30)
 
 **Head catch-up + bridge-off PDP proving robustness, and head fork-choice

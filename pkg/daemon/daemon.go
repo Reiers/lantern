@@ -126,6 +126,15 @@ type Config struct {
 	// before the pipeline is trusted to gate ingest.
 	FullValidationFatal bool
 
+	// HeadCorroborationPeers (#80 part 2) is the number of distinct gossip
+	// peers that must forward a block before the ingestor adopts it as the
+	// new head. A trusted floor peer (protected bootstrap/beacon/direct
+	// peer) counts as a super-vote, and the requirement clamps to the
+	// connected-peer count so a small node never wedges. 0 disables (the
+	// Light/PDP default; their head safety comes from the divergence
+	// monitor + heaviest-weight fork choice).
+	HeadCorroborationPeers int
+
 	// StaleResetThreshold is the number of epochs behind live head past
 	// which a persisted header store re-anchors near live head instead of
 	// trying (and failing) to backfill an un-connectable gap (#51). This is

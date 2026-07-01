@@ -52,6 +52,7 @@ import (
 	"github.com/Reiers/lantern/chain/types"
 	"github.com/Reiers/lantern/internal/buildinfo"
 	lbitswap "github.com/Reiers/lantern/net/bitswap"
+	"github.com/Reiers/lantern/net/blockpub"
 	"github.com/Reiers/lantern/net/chainxchg"
 	"github.com/Reiers/lantern/net/combined"
 	"github.com/Reiers/lantern/net/glif"
@@ -710,6 +711,10 @@ func cmdDaemon(args []string) error {
 	vmBridgeToken := fs.String("vm-bridge-token", "", "Optional Bearer token for the VM bridge upstream (defaults to env LANTERN_VM_BRIDGE_TOKEN when empty).")
 	vmBridgeTimeout := fs.Duration("vm-bridge-timeout", 30*time.Second, "Per-request timeout for VM bridge RPC calls.")
 	allowBlockSubmit := fs.Bool("allow-block-submit", false, "Allow SyncSubmitBlock to publish to gossipsub. Requires --vm-bridge-rpc.")
+	// #80 part 2: head-source corroboration. -1 = auto (Full tier: 2,
+	// Light/PDP: off). 0 = off. N>0 = require N distinct forwarding peers
+	// (or one trusted floor peer) before adopting a gossip head.
+	headCorroPeers := fs.Int("head-corroboration-peers", -1, "Distinct gossip peers required to corroborate a head advance before adoption. -1=auto (Full tier 2, others off), 0=off.")
 	fs.Parse(args)
 
 	// #58: --allow-empty-passphrase is sugar for the env the keystore guard
@@ -976,11 +981,28 @@ func cmdDaemon(args []string) error {
 		// nodes need 50+ because they serve chain to others, participate
 		// in F3 voting, and make deals. Lantern does none of those. The
 		// honest floor for a light client is ~20.
+		// #80 part 2: resolve the corroboration requirement. Auto: the
+		// Full tier follows head with full trust weight on it, so it
+		// requires 2 distinct sources; Light/PDP stay off (their head
+		// safety comes from the divergence monitor + fork choice).
+		effCorroPeers := *headCorroPeers
+		if effCorroPeers < 0 {
+			if profile.FullValidation() {
+				effCorroPeers = 2
+			} else {
+				effCorroPeers = 0
+			}
+		}
+		var corroTracker *blockpub.CorroborationTracker
+		if effCorroPeers > 0 {
+			corroTracker = blockpub.NewCorroborationTracker(network.GossipTopicBlocks())
+		}
 		p2pHost, err = llibp2p.New(ctx, llibp2p.HostConfig{
 			ListenAddrs:    listeners,
 			BootstrapPeers: network.BootstrapPeers(),
 			MinPeers:       20,
 			MaxPeers:       200,
+			PubSubTracer:   corroTracker.Tracer(),
 		})
 		if err != nil {
 			return fmt.Errorf("start libp2p host: %w", err)
@@ -1054,6 +1076,18 @@ func cmdDaemon(args []string) error {
 				fmt.Printf("  gossipsub-blocks: failed to start: %v (continuing without)\n", gerr)
 			} else {
 				gossipIngestor = ing
+				// #80 part 2: head adoption requires corroboration from
+				// distinct scored peers (trusted floor peers super-vote;
+				// requirement clamps to connected-peer count so a small
+				// node never wedges).
+				if corroTracker != nil {
+					hostRef := p2pHost
+					ing.SetHeadCorroboration(blockpub.CorroborationGate(
+						corroTracker, effCorroPeers,
+						hostRef.IsTrustedPeer,
+						func() int { return hostRef.PeerCount() }))
+					fmt.Printf("  head-corroboration: on (min distinct sources: %d, trusted floor super-vote)\n", effCorroPeers)
+				}
 				// Wire the /fil/blocks publisher so SyncSubmitBlock can
 				// actually publish (PDP/backup tier). SyncSubmitBlock still
 				// gates on AllowBlockSubmit, so this is safe on any tier.
