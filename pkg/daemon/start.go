@@ -56,6 +56,7 @@ import (
 	"github.com/Reiers/lantern/chain/types"
 	"github.com/Reiers/lantern/net/bitswap"
 	"github.com/Reiers/lantern/net/blockingest"
+	"github.com/Reiers/lantern/net/blockpub"
 	"github.com/Reiers/lantern/net/combined"
 	"github.com/Reiers/lantern/net/glif"
 	"github.com/Reiers/lantern/net/hsync"
@@ -501,11 +502,19 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 // caller logs and continues on the polling Sync (best-effort).
 func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src blockingest.BackfillSource, network build.Network, chainAPI *handlers.ChainAPI, fetcher *combined.Fetcher) error {
 	listeners := splitCSV(d.cfg.P2PListen)
+	// #80 part 2: when head corroboration is enabled, the tracker rides
+	// gossipsub's raw tracer so every duplicate block delivery is counted
+	// per source peer. Nil tracker => nil tracer => zero overhead.
+	var corroTracker *blockpub.CorroborationTracker
+	if d.cfg.HeadCorroborationPeers > 0 {
+		corroTracker = blockpub.NewCorroborationTracker(network.GossipTopicBlocks())
+	}
 	host, err := llibp2p.New(ctx, llibp2p.HostConfig{
 		ListenAddrs:    listeners,
 		BootstrapPeers: network.BootstrapPeers(),
 		MinPeers:       20,
 		MaxPeers:       200,
+		PubSubTracer:   corroTracker.Tracer(),
 	})
 	if err != nil {
 		return fmt.Errorf("start libp2p host: %w", err)
@@ -535,6 +544,17 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 	if err != nil {
 		_ = host.Close()
 		return fmt.Errorf("start gossipsub block ingestor: %w", err)
+	}
+	// #80 part 2: head adoption requires corroboration from distinct
+	// scored peers. Trusted floor peers super-vote; the requirement
+	// clamps to the connected-peer count so a small embedded node (a
+	// curio-core box with a handful of peers) never wedges.
+	if corroTracker != nil {
+		ing.SetHeadCorroboration(blockpub.CorroborationGate(
+			corroTracker, d.cfg.HeadCorroborationPeers,
+			host.IsTrustedPeer,
+			func() int { return host.PeerCount() }))
+		log.Infow("head-source corroboration enabled", "minSources", d.cfg.HeadCorroborationPeers)
 	}
 	// Capture the /fil/blocks publisher so a PDP/backup-tier daemon can
 	// actually SUBMIT blocks (SyncSubmitBlock -> BlockPublisher). The CLI

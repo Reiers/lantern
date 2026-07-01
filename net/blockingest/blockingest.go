@@ -48,6 +48,18 @@ var log = logging.Logger("lantern/blockingest")
 // gossipsub event before deferring to the polling Sync agent.
 const DefaultBackfillCap abi.ChainEpoch = 3
 
+// Corroboration retry tuning (#80 part 2). Gossipsub delivers a block to
+// the subscriber on FIRST receipt; the duplicate copies that serve as
+// corroboration votes arrive over the following ~1s from the rest of the
+// mesh. Three retries 1.5s apart give the mesh ~4.5s to corroborate
+// before the block is dropped (an epoch is 30s, so a corroborated block
+// still adopts with seconds to spare; an uncorroborated one is left to
+// the polling Sync safety net).
+const (
+	corroMaxRetries = 3
+	corroRetryDelay = 1500 * time.Millisecond
+)
+
 // BackfillSource is the minimal RPC surface the ingestor uses for inline
 // backfill when a gossipsub block arrives at head+N with N>1. The
 // Lantern glif client, gateway client, and combined fetcher all satisfy
@@ -86,6 +98,21 @@ type Ingestor struct {
 	// (Light/PDP, or no corroborating sources). (#79 item 2)
 	headAdoptionGate atomic.Pointer[func() bool]
 
+	// headCorroboration, when set, is consulted with the candidate head's
+	// CID before adoption (#80 part 2). It returns true once the block has
+	// been forwarded by enough distinct scored peers (or a trusted floor
+	// peer). While false the ingestor holds head and retries briefly:
+	// corroborating duplicates typically arrive within a second of first
+	// delivery, so a held head is usually adopted on the first retry.
+	// nil = always corroborated (Light/PDP default).
+	headCorroboration atomic.Pointer[func(cid.Cid) bool]
+
+	// Retry bookkeeping for corroboration holds. Touched ONLY from the
+	// processor goroutine (Run loop); AfterFunc callbacks merely re-send
+	// on the incoming channel.
+	corroRetries map[cid.Cid]int
+	corroPending map[cid.Cid]struct{}
+
 	received         atomic.Uint64
 	dedup            atomic.Uint64
 	installed        atomic.Uint64
@@ -93,6 +120,7 @@ type Ingestor struct {
 	rejected         atomic.Uint64
 	rejectedLighter  atomic.Uint64 // #79: candidates rejected by heaviest-weight fork choice
 	heldDiverged     atomic.Uint64 // #79: head adoptions held while the divergence gate was closed
+	heldUncorrob     atomic.Uint64 // #80: head adoptions held awaiting multi-peer corroboration
 	backfilled       atomic.Uint64
 	backfillFailed   atomic.Uint64
 	lastInstallEpoch atomic.Int64
@@ -113,17 +141,37 @@ func (g *Ingestor) SetHeadAdoptionGate(fn func() bool) {
 	g.headAdoptionGate.Store(&fn)
 }
 
+// SetHeadCorroboration wires the per-candidate corroboration predicate
+// (#80 part 2): before adopting a block as the new head, the ingestor
+// asks whether the block has been forwarded by enough distinct peers
+// (see blockpub.CorroborationGate). While the predicate returns false
+// the ingestor holds head where it is and schedules bounded retries
+// (corroborating duplicates arrive within ~1s of first delivery on a
+// healthy mesh). After the retries are exhausted the block is dropped;
+// the polling Sync remains the safety net for head progress, so an
+// uncorroboratable block can delay adoption but never wedge the node.
+// Passing nil disables the check. Safe to call before or after Run.
+func (g *Ingestor) SetHeadCorroboration(fn func(cid.Cid) bool) {
+	if fn == nil {
+		g.headCorroboration.Store(nil)
+		return
+	}
+	g.headCorroboration.Store(&fn)
+}
+
 // New builds an ingestor wired to the header store. src may be nil; when
 // nil, blocks at head+N>1 are skipped and the polling Sync's backfill
 // path handles them on its next cycle.
 func New(store *hstore.Store, src BackfillSource) *Ingestor {
 	return &Ingestor{
-		store:       store,
-		src:         src,
-		backfillCap: DefaultBackfillCap,
-		incoming:    make(chan *ltypes.BlockMsg, 64),
-		seen:        make(map[cid.Cid]struct{}, 256),
-		seenCap:     512,
+		store:        store,
+		src:          src,
+		backfillCap:  DefaultBackfillCap,
+		incoming:     make(chan *ltypes.BlockMsg, 64),
+		seen:         make(map[cid.Cid]struct{}, 256),
+		seenCap:      512,
+		corroRetries: make(map[cid.Cid]int, 8),
+		corroPending: make(map[cid.Cid]struct{}, 8),
 	}
 }
 
@@ -161,8 +209,13 @@ func (g *Ingestor) process(ctx context.Context, blk *ltypes.BlockMsg) {
 	headerCID := bh.Cid()
 
 	if _, ok := g.seen[headerCID]; ok {
-		g.dedup.Add(1)
-		return
+		// A corroboration retry legitimately re-enters process for a
+		// block we've already marked seen; everything else is a dup.
+		if _, retry := g.corroPending[headerCID]; !retry {
+			g.dedup.Add(1)
+			return
+		}
+		delete(g.corroPending, headerCID)
 	}
 	g.markSeen(headerCID)
 
@@ -242,6 +295,34 @@ func (g *Ingestor) process(ctx context.Context, blk *ltypes.BlockMsg) {
 			g.heldDiverged.Add(1)
 			return
 		}
+	}
+
+	// #80 part 2: head-source corroboration. Gossipsub dedups messages,
+	// so first delivery may reach us before other mesh peers' copies have
+	// been counted. If the block is not yet corroborated by enough
+	// distinct sources, hold head and retry shortly: the duplicates that
+	// serve as corroboration votes typically land within a second. Give
+	// up after corroMaxRetries - the polling Sync is the safety net, so
+	// this can delay head adoption but never wedge it.
+	if cp := g.headCorroboration.Load(); cp != nil {
+		if !(*cp)(headerCID) {
+			g.heldUncorrob.Add(1)
+			if g.corroRetries[headerCID] < corroMaxRetries {
+				g.corroRetries[headerCID]++
+				g.corroPending[headerCID] = struct{}{}
+				time.AfterFunc(corroRetryDelay, func() {
+					select {
+					case g.incoming <- blk:
+					default:
+					}
+				})
+			} else {
+				delete(g.corroRetries, headerCID)
+			}
+			return
+		}
+		delete(g.corroRetries, headerCID)
+		delete(g.corroPending, headerCID)
 	}
 
 	if err := g.store.SetHead(ctx, ts); err != nil {
@@ -368,6 +449,7 @@ type Stats struct {
 	Rejected         uint64
 	RejectedLighter  uint64 // #79: rejected by heaviest-ParentWeight fork choice
 	HeldDiverged     uint64 // #79: head adoptions held while divergence gate closed
+	HeldUncorrob     uint64 // #80: head adoptions held awaiting multi-peer corroboration
 	Backfilled       uint64
 	BackfillFailed   uint64
 	LastInstallEpoch abi.ChainEpoch
@@ -383,6 +465,7 @@ func (g *Ingestor) Stats() Stats {
 		Rejected:         g.rejected.Load(),
 		RejectedLighter:  g.rejectedLighter.Load(),
 		HeldDiverged:     g.heldDiverged.Load(),
+		HeldUncorrob:     g.heldUncorrob.Load(),
 		Backfilled:       g.backfilled.Load(),
 		BackfillFailed:   g.backfillFailed.Load(),
 		LastInstallEpoch: abi.ChainEpoch(g.lastInstallEpoch.Load()),
