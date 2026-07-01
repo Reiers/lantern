@@ -114,7 +114,7 @@ func New(ctx context.Context, ps *pubsub.PubSub, cfg Config) (*Publisher, error)
 // Why the CID re-derive matters for issue #85 (header propagation):
 // gossipsub only forwards (re-propagates) a message to our mesh peers
 // after the registered TopicValidator returns ValidationAccept. So this
-// function is *also* Lantern's propagation gate. snadrus#85 asks Lantern
+// function is *also* Lantern's propagation gate. #85 asks Lantern
 // to propagate block headers; it already does via gossipsub forwarding,
 // but a shape-only check would let us re-propagate a block whose CID was
 // tampered (header bytes mutated, signature-presence still true). By

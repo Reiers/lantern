@@ -574,7 +574,7 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 		hsync.SetGossipObservedHead(func() abi.ChainEpoch { return ing.ObservedHead() }, 0)
 	}
 
-	// snadrus#85 item 2: running-head divergence monitor. Best-effort and
+	// #85 item 2: running-head divergence monitor. Best-effort and
 	// observational - it never moves our head (gossip + #79 fork choice do
 	// that). It periodically asks a diversity of independent RPC observers
 	// what epoch the head is at and raises an eclipse/fork alarm if a

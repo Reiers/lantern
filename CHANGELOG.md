@@ -498,7 +498,7 @@ The "installer actually upgrades when a new release is out" release.
   re-ran the installer kept getting v1.2.x behaviour (asks for a passphrase
   every daemon boot because that version writes its keystore under
   `~/.lantern/keystore` instead of the network-split `~/.lantern/<net>/keystore`
-  used by v1.5+). Reported by Nicklas, 2026-05-28.
+  used by v1.5+).  Reported 2026-05-28.
 - **New behaviour:** when a local binary exists, the installer fetches the
   published `.sha256` for the requested version and compares. Match →
   skip. Differ → upgrade. Offline / sha unreachable → keep the legacy
@@ -606,7 +606,7 @@ The "installer actually works on a fresh Mac" release.
   caller-set `LANTERN_PREFIX` → `/opt/homebrew/bin` → `/usr/local/bin`
   → `~/.local/bin` (created on demand). When the chosen target is not on
   PATH, the installer prints the exact `export PATH=...` line to add to
-  the shell profile. Reported by Nicklas, 2026-05-28.
+  the shell profile.  Reported 2026-05-28.
 
 - **Symlink self-heal on re-runs.** The symlink was only created from the
   fresh-download branch; users with an existing binary at `~/.lantern/lantern`

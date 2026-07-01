@@ -170,7 +170,7 @@ type Config struct {
 
 	// HeadCheckRPCs is an optional list of Lotus-compatible JSON-RPC URLs
 	// used by the running-head divergence monitor (chain/headcheck,
-	// snadrus#85) to CORROBORATE the gossip-derived head. These are never
+	// #85) to CORROBORATE the gossip-derived head. These are never
 	// the source of truth for the head - they only raise an eclipse/fork
 	// alarm when a diversity of independent observers disagrees with our
 	// head beyond the 3-block lookback. Empty disables the monitor.

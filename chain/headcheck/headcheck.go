@@ -1,6 +1,6 @@
 // Package headcheck is Lantern's running-head divergence monitor.
 //
-// Background (snadrus#85, zenground0 fil-curio-dev thread, #80):
+// Background (#85, community discussion, #80):
 // Lantern follows the *running* (unfinalized) chain head over gossipsub
 // (net/blockingest). The boot anchor is a strong multi-source 5-of-N
 // quorum on an F3-finalized tipset (chain/bootstrap), and #79 added
@@ -16,7 +16,7 @@
 // tip, one or more Lotus-compatible RPC endpoints, user --peer
 // endpoints) "what epoch is the head at?" and checks that they agree
 // within a small look-back tolerance (default 3 blocks, matching the
-// snadrus#85 ask). When the local gossip head drifts outside that
+// #85 ask). When the local gossip head drifts outside that
 // tolerance from the diversity of external sources, headcheck raises a
 // divergence signal so the daemon can log loudly / surface it on the
 // dashboard / (optionally) refuse to serve a head it can't corroborate.
@@ -50,7 +50,7 @@ import (
 	"github.com/Reiers/lantern/chain/bootstrap"
 )
 
-// DefaultLookback is the head-agreement tolerance in epochs. snadrus#85
+// DefaultLookback is the head-agreement tolerance in epochs. #85
 // asks for a 3-block look-back: a source up to 3 epochs behind our head
 // (or ahead of it) still counts as "agreeing", since gossip propagation
 // and null rounds routinely put honest observers a couple epochs apart.
