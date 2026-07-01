@@ -21,6 +21,15 @@ All notable changes to Lantern.
   lotus). TRUST-MODEL.md section 2.7 documents what it does and does NOT
   guarantee.
 
+- **Wallet import/export + import-from-Lotus** ([#93](https://github.com/Reiers/lantern/issues/93)).
+  `lantern wallet export <addr>` / `wallet import [hex|-]` speak Lotus's
+  hex-KeyInfo wire format, so keys round-trip between Lotus and Lantern
+  in either direction (pipe `lotus wallet export` straight in). `lantern
+  wallet import-lotus <repo>` bulk-imports every `wallet-*` key from a
+  Lotus repo keystore (base32 filenames, KeyInfo JSON). Everything lands
+  in Lantern's passphrase-protected keystore; nothing is written to disk
+  unencrypted.
+
 ### Security / head-path hardening
 
 - **Head-source corroboration** ([#80](https://github.com/Reiers/lantern/issues/80) part 2).
