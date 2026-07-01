@@ -259,12 +259,12 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		// FullValidationFatal is set. nil on Light/PDP (zero cost).
 		if d.cfg.FullValidation && chainAPI != nil {
 			sv := chainAPI.FullValidateView()
+			hsForBeacon := store
 			sync.SetBlockValidator(func(ctx context.Context, bh *types.BlockHeader) error {
-				// prevBeacon is only needed for blocks that carry no beacon
-				// entries of their own; passing nil means such blocks are
-				// reported (observe mode) rather than hard-failed. The
-				// common case (block carries its own entries) validates fully.
-				_, err := fullvalidate.ValidateBlockConsensus(ctx, bh, nil, sv)
+				// Resolve prevBeacon from the store so entry-less blocks
+				// validate fully (nil only if none found within the walk).
+				prevBeacon, _ := hsForBeacon.LatestBeaconEntry(bh)
+				_, err := fullvalidate.ValidateBlockConsensus(ctx, bh, prevBeacon, sv)
 				return err
 			}, d.cfg.FullValidationFatal)
 			log.Infow("full-node block validation wired (#90)",

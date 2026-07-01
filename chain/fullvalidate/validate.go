@@ -38,6 +38,7 @@ type Result struct {
 	SignatureOK         bool
 	ElectionVRFOK       bool
 	TicketVRFOK         bool
+	EligibilityOK       bool
 	WinCountOK          bool
 	WinningPoStVerified bool // #88: pure-Go SNARK verify (not yet)
 	StateReExecuted     bool // #89: pure-Go FVM (not yet)

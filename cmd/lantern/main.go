@@ -931,8 +931,10 @@ func cmdDaemon(args []string) error {
 		// calibration before the pipeline gates ingest. nil on Light/PDP.
 		if profile.FullValidation() && chainAPI != nil {
 			sv := chainAPI.FullValidateView()
+			hsForBeacon := store
 			sync.SetBlockValidator(func(ctx context.Context, bh *types.BlockHeader) error {
-				_, err := fullvalidate.ValidateBlockConsensus(ctx, bh, nil, sv)
+				prevBeacon, _ := hsForBeacon.LatestBeaconEntry(bh)
+				_, err := fullvalidate.ValidateBlockConsensus(ctx, bh, prevBeacon, sv)
 				return err
 			}, false)
 			fmt.Printf("  node tier:    full block validation ON (observe mode, #90)\n")

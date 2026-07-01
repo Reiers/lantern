@@ -5,6 +5,7 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
+	gsbig "github.com/filecoin-project/go-state-types/big"
 
 	"github.com/Reiers/lantern/chain/fullvalidate"
 	"github.com/Reiers/lantern/chain/types"
@@ -40,6 +41,41 @@ func (v chainAPIStateView) MinerQAPower(ctx context.Context, miner address.Addre
 		return abi.NewStoragePower(0), abi.NewStoragePower(0), err
 	}
 	return mp.MinerPower.QualityAdjPower, mp.TotalPower.QualityAdjPower, nil
+}
+
+// MinerEligible mirrors Lotus stmgr.MinerEligibleToMine (post-v3 actors):
+// non-empty QA-power claim, no fee debt, no active consensus fault. Reads are
+// against the current-head accessor (the parent state for an ingested block).
+func (v chainAPIStateView) MinerEligible(ctx context.Context, miner address.Address) (bool, error) {
+	// (1) Non-empty QA-power claim.
+	mp, err := v.c.StateMinerPower(ctx, miner, types.EmptyTSK)
+	if err != nil {
+		return false, err
+	}
+	if mp.MinerPower.QualityAdjPower.LessThanEqual(gsbig.Zero()) {
+		return false, nil
+	}
+
+	// (2)+(3) Fee debt + consensus fault: load miner state directly.
+	ms, _, err := v.c.accForReads().LoadMiner(ctx, miner)
+	if err != nil {
+		return false, err
+	}
+	if debt := ms.FeeDebt(); !debt.IsZero() {
+		return false, nil
+	}
+	info, err := ms.Info(ctx)
+	if err != nil {
+		return false, err
+	}
+	head, err := v.c.ChainHead(ctx)
+	if err != nil {
+		return false, err
+	}
+	if head.Height() <= info.ConsensusFaultElapsed {
+		return false, nil
+	}
+	return true, nil
 }
 
 var _ fullvalidate.StateView = chainAPIStateView{}

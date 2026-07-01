@@ -288,6 +288,38 @@ func (s *Store) loadTipSet(tsk ltypes.TipSetKey) (*ltypes.TipSet, error) {
 	return ltypes.NewTipSet(blocks)
 }
 
+// LatestBeaconEntry returns the most recent beacon entry at or before block
+// bh: if bh carries entries, the last one; else walk parents (bounded) until a
+// tipset with entries is found. Mirrors Lotus StateManager.GetLatestBeaconEntry,
+// used by chain/fullvalidate to supply prevBeacon for entry-less blocks (#90).
+// Returns ErrNotFound if none is found within the walk budget.
+func (s *Store) LatestBeaconEntry(bh *ltypes.BlockHeader) (*ltypes.BeaconEntry, error) {
+	if bh == nil {
+		return nil, ErrNotFound
+	}
+	if n := len(bh.BeaconEntries); n > 0 {
+		e := bh.BeaconEntries[n-1]
+		return &e, nil
+	}
+	// Walk parents up to ~20 tipsets back (Lotus uses the same bound).
+	cur := bh
+	for i := 0; i < 20; i++ {
+		if len(cur.Parents) == 0 {
+			break
+		}
+		parent, err := s.Get(cur.Parents[0])
+		if err != nil {
+			return nil, fmt.Errorf("LatestBeaconEntry: parent %s: %w", cur.Parents[0], err)
+		}
+		if n := len(parent.BeaconEntries); n > 0 {
+			e := parent.BeaconEntries[n-1]
+			return &e, nil
+		}
+		cur = parent
+	}
+	return nil, ErrNotFound
+}
+
 // Head returns the current canonical head tipset, or nil if the store is
 // empty.
 func (s *Store) Head() *ltypes.TipSet {
