@@ -1200,6 +1200,9 @@ func cmdDaemon(args []string) error {
 				gatewayURL:   *gw,
 				hello:        helloSvc,
 				xchg:         xchgSvc,
+				// #96: observed-data EC finality (FRC-0089). Nil-safe in
+				// the handler; store==nil (no header store) leaves it off.
+				ecfin: newECFinality(store),
 			}
 			dashboardURL = fmt.Sprintf("http://%s/dashboard/", *metricsListen)
 		}

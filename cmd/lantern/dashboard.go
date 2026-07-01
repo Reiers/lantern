@@ -31,6 +31,7 @@ import (
 
 	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/bootstrap"
+	"github.com/Reiers/lantern/chain/ecfinality"
 	"github.com/Reiers/lantern/chain/header/store"
 	"github.com/Reiers/lantern/chain/trustedroot"
 	"github.com/Reiers/lantern/internal/buildinfo"
@@ -75,6 +76,8 @@ type dashboardDeps struct {
 	hello *hello.Service
 	// Issue #17: ChainExchange responder activity (received / rejected).
 	xchg *chainxchg.Service
+	// #96: FRC-0089 EC finality calculator (observed-data finality depth).
+	ecfin *ecfinality.Cache
 }
 
 // registerDashboard attaches /dashboard and /api/dashboard/* to the mux.
@@ -365,6 +368,21 @@ func (d *dashboardDeps) syncSnapshot() map[string]any {
 			"backfilled":         s.Backfilled,
 			"backfill_failed":    s.BackfillFailed,
 			"last_install_epoch": int64(s.LastInstallEpoch),
+		}
+	}
+	if d.ecfin != nil {
+		// #96: on-demand + cached per head, so the dev page is the only
+		// thing that pays the (small) Skellam cost.
+		if st, err := d.ecfin.Status(); err == nil {
+			calls, comps := d.ecfin.Stats()
+			out["ec_finality"] = map[string]any{
+				"threshold_depth": st.ThresholdDepth,
+				"finalized_epoch": int64(st.FinalizedEpoch),
+				"head_epoch":      int64(st.HeadEpoch),
+				"window_epochs":   st.WindowEpochs,
+				"calls":           calls,
+				"recomputes":      comps,
+			}
 		}
 	}
 	if d.host != nil {

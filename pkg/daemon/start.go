@@ -47,6 +47,7 @@ import (
 
 	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/bootstrap"
+	"github.com/Reiers/lantern/chain/ecfinality"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
 	"github.com/Reiers/lantern/chain/fullvalidate"
 	"github.com/Reiers/lantern/chain/headcheck"
@@ -280,6 +281,9 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		d.headerStore = store
 		d.headerSync = sync
 		d.headNotify = dist
+		// #96: observed-data EC finality over the header store (FRC-0089).
+		// 900 = Filecoin ChainFinality (mainnet + calibration).
+		d.ecFinality = ecfinality.NewCache(store, 900)
 		d.mu.Unlock()
 
 		log.Infow("header store wired",

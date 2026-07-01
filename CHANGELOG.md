@@ -4,6 +4,23 @@ All notable changes to Lantern.
 
 ## Unreleased (v1.9.0)
 
+### Added
+
+- **FRC-0089 EC finality calculator** ([#96](https://github.com/Reiers/lantern/issues/96)).
+  New `chain/ecfinality` package (ported from lotus, math verbatim so the
+  reference test vectors apply unchanged) computes an upper bound on reorg
+  probability from **observed** block counts per epoch: on a healthy chain
+  the 2^-30 guarantee is met around depth ~30 (~15 min) instead of the
+  static worst-case 900 epochs. On-demand + cached per head (an idle node
+  pays nothing). Windowed-store aware: a node with a shallow observed
+  window reports "not computable" instead of an over-confident number.
+  Surfaced on the dashboard dev page (new "EC finality" card) and via
+  `Daemon.ECFinality()` for embedded consumers. Semantics for consumers:
+  `finalized = max(ec-finalized, f3-finalized)` (matches lotus v2 API).
+  New dep: `github.com/rvagg/go-skellam-pmf` (tiny, pure Go, same as
+  lotus). TRUST-MODEL.md section 2.7 documents what it does and does NOT
+  guarantee.
+
 ### Security / head-path hardening
 
 - **Head-source corroboration** ([#80](https://github.com/Reiers/lantern/issues/80) part 2).
