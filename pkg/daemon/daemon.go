@@ -40,6 +40,7 @@ import (
 
 	lapi "github.com/Reiers/lantern/api"
 	"github.com/Reiers/lantern/build"
+	"github.com/Reiers/lantern/chain/ecfinality"
 	"github.com/Reiers/lantern/chain/headcheck"
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	"github.com/Reiers/lantern/chain/headnotify"
@@ -335,6 +336,10 @@ type Daemon struct {
 	headerSync  *hstore.Sync
 	headNotify  *headnotify.Distributor
 
+	// #96: FRC-0089 EC finality calculator over the header store.
+	// Populated with headerStore; on-demand + cached per head.
+	ecFinality *ecfinality.Cache
+
 	// fevmPrefetch is the on-head-advance state-block warmer
 	// (lantern#44). Populated when Config.FEVMPrefetchAddrs is set.
 	// Nil-able; Stats() on a nil-receiver returns zero values.
@@ -521,6 +526,26 @@ func (d *Daemon) BlockCacheStats() (statecache.Stats, bool) {
 		return statecache.Stats{}, false
 	}
 	return bc.Stats(), true
+}
+
+// ECFinality returns the current FRC-0089 observed-data finality status
+// (#96): the shallowest depth at which reorg probability drops below
+// 2^-30 given the observed block counts, the finalized epoch at that
+// depth, and how many epochs of history the calculator had. Returns
+// (nil, false) when no header store is configured. Computation is
+// on-demand and cached per head.
+func (d *Daemon) ECFinality() (*ecfinality.Status, bool) {
+	d.mu.Lock()
+	c := d.ecFinality
+	d.mu.Unlock()
+	if c == nil {
+		return nil, false
+	}
+	st, err := c.Status()
+	if err != nil {
+		return nil, false
+	}
+	return st, true
 }
 
 func (d *Daemon) HeadCorroboration() (headcheck.Result, bool) {

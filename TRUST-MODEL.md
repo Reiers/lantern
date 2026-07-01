@@ -119,6 +119,21 @@ eclipse/fork-selection exposure on the un-finalized tip is documented in
 
 ---
 
+### 2.7 Observed-data EC finality (FRC-0089) — a computed bound, not a proof
+
+`chain/ecfinality` (#96) computes an upper bound on the probability that
+a tipset at depth D could be reorged, from the OBSERVED block counts per
+epoch in the local header store. Under healthy conditions the 2^-30
+bound is met around depth ~30 (~15 min) instead of the static worst-case
+900. Lantern uses it as an honesty instrument (dashboard, stats) and as
+an input for retention decisions - NOT as a substitute for F3: the
+calculation assumes the observed chain is the honest heavy chain, so its
+guarantees are only as good as the head path that observed it (see 3.3).
+Where F3 finality is available it always takes precedence; the useful
+semantics for consumers is `finalized = max(ec-finalized, f3-finalized)`.
+A node with a shallow observed window (< 30 epochs of history) reports
+"not computable" rather than an over-confident number.
+
 ## 3. What Lantern does NOT trust
 
 These are deliberately untrusted. A Lantern node treats responses from any
@@ -142,6 +157,18 @@ use. A malicious peer can DoS (refuse to serve) but cannot lie.
 Inbound block + message gossip is decoded then validated by the consumer
 (`chain/header.ValidateBlock` for blocks; `crypto/sigs.Verify` for
 messages). Malformed traffic is dropped.
+
+Head adoption additionally applies (v1.9.0): heaviest-ParentWeight fork
+choice, the divergence gate (independent-source head monitor), and
+optional head-source corroboration (#80): a head advance requires
+forwarding by N distinct peers or one trusted floor peer. Peers earn
+score through first-delivery history on the blocks/msgs topics (#97) and
+lose it for invalid messages and IP-colocation; the trusted floor
+(bootstrap/beacon/direct peers) is connmgr-protected and cannot be
+evicted by a dial flood. Honest boundary: peer IDs are Sybil-cheap, so
+corroboration raises eclipse cost only in combination with scoring and
+the floor. It is hardening, not finality; finality comes from F3
+(section 2.2) and the observed-data EC finality bound (section 2.7).
 
 ### 3.4 Forest / Lotus nodes that are NOT the wired bridge
 

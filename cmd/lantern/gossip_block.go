@@ -25,6 +25,7 @@ import (
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 
+	"github.com/Reiers/lantern/chain/ecfinality"
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	"github.com/Reiers/lantern/net/blockingest"
 	"github.com/Reiers/lantern/net/blockpub"
@@ -47,4 +48,14 @@ func startGossipBlocks(ctx context.Context, ps *pubsub.PubSub, store *hstore.Sto
 	go blockingest.StatsLogger(ctx, ing, pub, 60*time.Second,
 		func(format string, args ...any) { fmt.Fprintf(os.Stderr, format, args...) })
 	return ing, pub, nil
+}
+
+// newECFinality builds the #96 FRC-0089 EC finality cache over the header
+// store, or nil when no store is configured. The 900-epoch lookback is
+// Filecoin's ChainFinality (same on mainnet + calibration).
+func newECFinality(store ecfinality.HeaderSource) *ecfinality.Cache {
+	if store == nil {
+		return nil
+	}
+	return ecfinality.NewCache(store, 900)
 }

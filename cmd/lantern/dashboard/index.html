@@ -446,6 +446,19 @@ body[data-mode="dev"]    [data-show~="dev"].flex-show { display: flex; }
       <div class="stat"><div class="stat-label">Skipped</div><div class="stat-value small" id="d-g-skip">—</div></div>
       <div class="stat"><div class="stat-label">Backfilled</div><div class="stat-value small" id="d-g-back">—</div></div>
       <div class="stat"><div class="stat-label">Backfill fail</div><div class="stat-value small" id="d-g-backfail">—</div></div>
+      <div class="stat"><div class="stat-label">Held (uncorrob.)</div><div class="stat-value small" id="d-g-helduc">—</div></div>
+      <div class="stat"><div class="stat-label">Held (diverged)</div><div class="stat-value small" id="d-g-helddiv">—</div></div>
+      <div class="stat"><div class="stat-label">Rejected (lighter fork)</div><div class="stat-value small" id="d-g-rejlight">—</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h2 class="card-title">EC finality (FRC-0089, observed)</h2></div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-label">2⁻³⁰ depth</div><div class="stat-value small" id="d-ef-depth">—</div></div>
+      <div class="stat"><div class="stat-label">EC-finalized epoch</div><div class="stat-value small" id="d-ef-final">—</div></div>
+      <div class="stat"><div class="stat-label">Observed window</div><div class="stat-value small" id="d-ef-window">—</div></div>
+      <div class="stat"><div class="stat-label">Recomputes</div><div class="stat-value small" id="d-ef-comps">—</div></div>
     </div>
   </div>
 
@@ -897,6 +910,18 @@ function renderDev(o, s, peers, fetcher) {
   $("d-g-skip").textContent = fmt.int(g.skipped);
   $("d-g-back").textContent = fmt.int(g.backfilled);
   $("d-g-backfail").textContent = fmt.int(g.backfill_failed);
+  $("d-g-helduc").textContent = fmt.int(g.held_uncorrob);
+  $("d-g-helddiv").textContent = fmt.int(g.held_diverged);
+  $("d-g-rejlight").textContent = fmt.int(g.rejected_lighter);
+
+  // #96: FRC-0089 observed-data EC finality.
+  const ef = s.ec_finality || {};
+  if (ef.head_epoch != null) {
+    $("d-ef-depth").textContent = ef.threshold_depth >= 0 ? ef.threshold_depth + " epochs" : "not met";
+    $("d-ef-final").textContent = ef.finalized_epoch >= 0 ? fmt.int(ef.finalized_epoch) : "—";
+    $("d-ef-window").textContent = fmt.int(ef.window_epochs);
+    $("d-ef-comps").textContent = fmt.int(ef.recomputes);
+  }
 
   $("d-q-epoch").textContent = fmt.int(o.epoch);
   $("d-q-f3i").textContent = (o.f3_instance && o.f3_instance > 0) ? fmt.int(o.f3_instance) : "awaiting finality";
