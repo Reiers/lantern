@@ -45,6 +45,7 @@ import (
 	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/anchorverify"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
+	"github.com/Reiers/lantern/chain/fullvalidate"
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	headnotify "github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
@@ -924,6 +925,18 @@ func cmdDaemon(args []string) error {
 					storeHead, liveHead-storeHead, float64(liveHead-storeHead)/2880.0, liveHead)
 			},
 		})
+		// Full tier (#90): re-verify each ingested block's signature / VRF /
+		// win-count against resident F3-anchored state. Observe-only (logs,
+		// does not reject) so a Full node can be brought up + watched on
+		// calibration before the pipeline gates ingest. nil on Light/PDP.
+		if profile.FullValidation() && chainAPI != nil {
+			sv := chainAPI.FullValidateView()
+			sync.SetBlockValidator(func(ctx context.Context, bh *types.BlockHeader) error {
+				_, err := fullvalidate.ValidateBlockConsensus(ctx, bh, nil, sv)
+				return err
+			}, false)
+			fmt.Printf("  node tier:    full block validation ON (observe mode, #90)\n")
+		}
 		if err := sync.Start(ctx); err != nil {
 			return fmt.Errorf("start header sync: %w", err)
 		}

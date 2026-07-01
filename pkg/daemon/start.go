@@ -48,6 +48,7 @@ import (
 	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/bootstrap"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
+	"github.com/Reiers/lantern/chain/fullvalidate"
 	"github.com/Reiers/lantern/chain/headcheck"
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	"github.com/Reiers/lantern/chain/headnotify"
@@ -252,6 +253,23 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 					"store_head", storeHead, "live_head", liveHead, "lag", liveHead-storeHead)
 			},
 		})
+		// Full tier (#90): wire the pure-Go per-block consensus validator so
+		// each ingested block's signature / VRF / win-count is re-verified
+		// against resident F3-anchored state. Observe-only unless
+		// FullValidationFatal is set. nil on Light/PDP (zero cost).
+		if d.cfg.FullValidation && chainAPI != nil {
+			sv := chainAPI.FullValidateView()
+			sync.SetBlockValidator(func(ctx context.Context, bh *types.BlockHeader) error {
+				// prevBeacon is only needed for blocks that carry no beacon
+				// entries of their own; passing nil means such blocks are
+				// reported (observe mode) rather than hard-failed. The
+				// common case (block carries its own entries) validates fully.
+				_, err := fullvalidate.ValidateBlockConsensus(ctx, bh, nil, sv)
+				return err
+			}, d.cfg.FullValidationFatal)
+			log.Infow("full-node block validation wired (#90)",
+				"fatal", d.cfg.FullValidationFatal)
+		}
 		if err := sync.Start(ctx); err != nil {
 			_ = store.Close()
 			return fmt.Errorf("start header sync: %w", err)

@@ -114,6 +114,18 @@ type Config struct {
 	// unpinned blocks; pinned warm-set subtrees are never evicted.
 	PersistentCacheBytes int64
 
+	// FullValidation enables the Full-tier per-block consensus pipeline
+	// (chain/fullvalidate, #90): signature / VRF / win-count re-verified
+	// against resident F3-anchored state on every ingested block. Light/PDP
+	// leave this false. Requires an accessor-backed ChainAPI.
+	FullValidation bool
+
+	// FullValidationFatal decides whether a FullValidation failure rejects
+	// the tipset (true) or is only logged (false = observe mode). Defaults
+	// to observe so a Full node can be brought up + watched on calibration
+	// before the pipeline is trusted to gate ingest.
+	FullValidationFatal bool
+
 	// StaleResetThreshold is the number of epochs behind live head past
 	// which a persisted header store re-anchors near live head instead of
 	// trying (and failing) to backfill an un-connectable gap (#51). This is

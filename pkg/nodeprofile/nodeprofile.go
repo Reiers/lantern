@@ -78,6 +78,14 @@ func (p Profile) UsesPersistentCache() bool {
 	return p.Tier == TierPDP || p.Tier == TierFull
 }
 
+// FullValidation reports whether this tier runs the pure-Go full-node
+// per-block consensus pipeline (chain/fullvalidate, #90). Only the Full tier
+// does; Light/PDP rely on the F3-anchored trusted root without re-verifying
+// every block's VRF/signature/win-count.
+func (p Profile) FullValidation() bool {
+	return p.Tier == TierFull
+}
+
 // CacheBytes returns the effective persistent-cache budget for the tier
 // (falling back to the tier default when unset).
 func (p Profile) CacheBytes() int64 {

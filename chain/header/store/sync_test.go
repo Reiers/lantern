@@ -109,6 +109,63 @@ func TestSyncLinearAdvance(t *testing.T) {
 	require.Equal(t, abi.ChainEpoch(6), s.HeadEpoch())
 }
 
+// TestSyncBlockValidatorObserveMode: a validator that always errors must NOT
+// reject the tipset in observe mode (fatal=false); the head still advances and
+// the validator is invoked per block. (#90)
+func TestSyncBlockValidatorObserveMode(t *testing.T) {
+	s, _ := newStore(t, false)
+	src := newFakeSource()
+	g := mkBlock(t, 0, nil, 1000, "g")
+	src.put(g)
+	parents := []cid.Cid{g.Cid()}
+	for h := abi.ChainEpoch(1); h <= 3; h++ {
+		b := mkBlock(t, h, parents, 1000, "")
+		src.put(b)
+		parents = []cid.Cid{b.Cid()}
+	}
+
+	var calls int
+	sync := hstore.NewSync(s, src, hstore.SyncOptions{MaxBacktrack: 10})
+	sync.SetBlockValidator(func(_ context.Context, _ *ltypes.BlockHeader) error {
+		calls++
+		return errors.New("always fail")
+	}, false) // observe mode
+
+	require.NoError(t, sync.PollOnce(context.Background()))
+	require.Equal(t, abi.ChainEpoch(3), s.HeadEpoch(), "observe mode must not block head advance")
+	require.Greater(t, calls, 0, "validator must be invoked")
+}
+
+// TestSyncBlockValidatorFatalMode: a validator that errors in fatal mode turns
+// the block into a fetch "hole" (fetchAndPersistTipset returns an error, which
+// pollAndApply records + skips per the #33 non-stall design). The net,
+// correct, safe behavior is that a rejected block does NOT become head. (#90)
+func TestSyncBlockValidatorFatalMode(t *testing.T) {
+	s, _ := newStore(t, false)
+	src := newFakeSource()
+	g := mkBlock(t, 0, nil, 1000, "g")
+	src.put(g)
+	parents := []cid.Cid{g.Cid()}
+	for h := abi.ChainEpoch(1); h <= 3; h++ {
+		b := mkBlock(t, h, parents, 1000, "")
+		src.put(b)
+		parents = []cid.Cid{b.Cid()}
+	}
+
+	// Reject everything at height >= 2, accept 0 and 1.
+	sync := hstore.NewSync(s, src, hstore.SyncOptions{MaxBacktrack: 10})
+	sync.SetBlockValidator(func(_ context.Context, bh *ltypes.BlockHeader) error {
+		if bh.Height >= 2 {
+			return errors.New("reject h>=2")
+		}
+		return nil
+	}, true) // fatal mode: rejected block becomes a hole
+
+	_ = sync.PollOnce(context.Background())
+	// Head must not advance to the rejected block (h=2); it stops at h<=1.
+	require.Less(t, int(s.HeadEpoch()), 2, "fatal mode must not advance head to a rejected block")
+}
+
 func TestSyncReorgDetected(t *testing.T) {
 	s, _ := newStore(t, false)
 	src := newFakeSource()
