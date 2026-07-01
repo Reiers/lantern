@@ -31,6 +31,7 @@ import (
 
 	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/bootstrap"
+	"github.com/Reiers/lantern/chain/crosscheck"
 	"github.com/Reiers/lantern/chain/ecfinality"
 	"github.com/Reiers/lantern/chain/header/store"
 	"github.com/Reiers/lantern/chain/trustedroot"
@@ -78,6 +79,8 @@ type dashboardDeps struct {
 	xchg *chainxchg.Service
 	// #96: FRC-0089 EC finality calculator (observed-data finality depth).
 	ecfin *ecfinality.Cache
+	// #98: VM-bridge cross-check auditor (nil when --vm-crosscheck off).
+	xcheck *crosscheck.Checker
 }
 
 // registerDashboard attaches /dashboard and /api/dashboard/* to the mux.
@@ -383,6 +386,18 @@ func (d *dashboardDeps) syncSnapshot() map[string]any {
 				"calls":           calls,
 				"recomputes":      comps,
 			}
+		}
+	}
+	if d.xcheck != nil {
+		xs := d.xcheck.Stats()
+		out["crosscheck"] = map[string]any{
+			"checks":     xs.Checks,
+			"agrees":     xs.Agrees,
+			"diverges":   xs.Diverges,
+			"skipped":    xs.Skipped,
+			"last_epoch": int64(xs.LastCheckedEpoch),
+			"last":       xs.LastResult,
+			"provenance": xs.Provenance,
 		}
 	}
 	if d.host != nil {

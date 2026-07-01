@@ -453,6 +453,18 @@ body[data-mode="dev"]    [data-show~="dev"].flex-show { display: flex; }
   </div>
 
   <div class="card">
+    <div class="card-header"><h2 class="card-title">VM-bridge cross-check (auditor)</h2></div>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-label">Checks</div><div class="stat-value small" id="d-xc-checks">—</div></div>
+      <div class="stat"><div class="stat-label">Agrees</div><div class="stat-value small" id="d-xc-agrees">—</div></div>
+      <div class="stat"><div class="stat-label">Diverges</div><div class="stat-value small" id="d-xc-div">—</div></div>
+      <div class="stat"><div class="stat-label">Skipped</div><div class="stat-value small" id="d-xc-skip">—</div></div>
+      <div class="stat"><div class="stat-label">Last epoch</div><div class="stat-value small" id="d-xc-epoch">—</div></div>
+      <div class="stat"><div class="stat-label">Last result</div><div class="stat-value small" id="d-xc-last">—</div></div>
+    </div>
+  </div>
+
+  <div class="card">
     <div class="card-header"><h2 class="card-title">EC finality (FRC-0089, observed)</h2></div>
     <div class="stat-grid">
       <div class="stat"><div class="stat-label">2⁻³⁰ depth</div><div class="stat-value small" id="d-ef-depth">—</div></div>
@@ -913,6 +925,17 @@ function renderDev(o, s, peers, fetcher) {
   $("d-g-helduc").textContent = fmt.int(g.held_uncorrob);
   $("d-g-helddiv").textContent = fmt.int(g.held_diverged);
   $("d-g-rejlight").textContent = fmt.int(g.rejected_lighter);
+
+  // #98: VM-bridge cross-check auditor (card only populated when on).
+  const xc = s.crosscheck || {};
+  if (xc.provenance) {
+    $("d-xc-checks").textContent = fmt.int(xc.checks);
+    $("d-xc-agrees").textContent = fmt.int(xc.agrees);
+    $("d-xc-div").textContent = fmt.int(xc.diverges);
+    $("d-xc-skip").textContent = fmt.int(xc.skipped);
+    $("d-xc-epoch").textContent = fmt.int(xc.last_epoch);
+    $("d-xc-last").textContent = xc.last || "—";
+  }
 
   // #96: FRC-0089 observed-data EC finality.
   const ef = s.ec_finality || {};
