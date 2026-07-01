@@ -97,6 +97,19 @@ type Config struct {
 	// SyncInterval is the header-store poll cadence. Default 6s.
 	SyncInterval time.Duration
 
+	// StaleResetThreshold is the number of epochs behind live head past
+	// which a persisted header store re-anchors near live head instead of
+	// trying (and failing) to backfill an un-connectable gap (#51). This is
+	// the "down for a maintenance window / crash / long proving gap"
+	// auto-heal: without it, an embedded node that falls further than
+	// MaxBacktrack (~900 epochs) behind wedges its head forever and needs a
+	// manual `lantern reset --chain-state`. Chain-state pointers only are
+	// discarded on re-anchor; keys/wallets/tokens live in separate files and
+	// are never touched. 0 = use the default; a negative value disables.
+	// Default (when 0): 2880 epochs (~1 day at 30s blocks), matching the
+	// standalone cmd/lantern daemon.
+	StaleResetThreshold abi.ChainEpoch
+
 	// NotifyBufSize is the ChainNotify per-subscriber buffer. Default 64.
 	NotifyBufSize int
 

@@ -203,11 +203,27 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		// the rest next poll rather than aborting). MaxBacktrack is raised
 		// so reorg/backfill depth comfortably exceeds the deepest realistic
 		// single-wait lag.
+		// #51 "down for a maintenance window" auto-heal: if the persisted
+		// store is more than staleReset epochs behind live head, re-anchor
+		// near live head instead of trying (and failing) to backfill an
+		// un-connectable gap. Without this the embedded daemon wedges its
+		// head after any downtime longer than MaxBacktrack and needs a manual
+		// `lantern reset --chain-state` (this is what forced that workaround
+		// for embedded testers). The standalone cmd/lantern daemon already
+		// wires this; pkg/daemon (the embedded path curio-core / maxboom use)
+		// previously did not. Chain state only — keys are never touched.
+		// Config.StaleResetThreshold: 0 => default 2880 (~1 day); <0 => off.
+		staleReset := resolveStaleResetThreshold(d.cfg.StaleResetThreshold)
 		sync := hstore.NewSync(store, syncSrc, hstore.SyncOptions{
-			Interval:       syncInterval,
-			MaxBacktrack:   900, // ~7.5h at 30s blocks; covers long proving waits
-			BootstrapDepth: 3,
-			CatchUpChunk:   200, // bounded per-poll catch-up work
+			Interval:            syncInterval,
+			MaxBacktrack:        900, // ~7.5h at 30s blocks; covers long proving waits
+			BootstrapDepth:      3,
+			CatchUpChunk:        200, // bounded per-poll catch-up work
+			StaleResetThreshold: staleReset,
+			OnStaleReset: func(storeHead, liveHead abi.ChainEpoch) {
+				log.Warnw("header store too stale to backfill contiguously; re-anchoring near live head (chain state only, keys untouched)",
+					"store_head", storeHead, "live_head", liveHead, "lag", liveHead-storeHead)
+			},
 		})
 		if err := sync.Start(ctx); err != nil {
 			_ = store.Close()
@@ -586,6 +602,30 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 			network.GossipTopicBlocks(), host.ID())
 	}
 	return nil
+}
+
+// defaultStaleResetThreshold is the epochs-behind-live-head auto-heal
+// threshold used by the embedded daemon when Config.StaleResetThreshold
+// is left at 0. 2880 epochs ~= 1 day at 30s blocks, matching the
+// standalone cmd/lantern daemon's default.
+const defaultStaleResetThreshold = abi.ChainEpoch(2880)
+
+// resolveStaleResetThreshold maps the Config knob to the effective
+// SyncOptions value: 0 => default (2880), a negative value => 0
+// (disabled), any positive value => itself. This is the #51 "down for a
+// maintenance window" auto-heal that the embedded pkg/daemon path
+// previously never set (only the standalone CLI did), which is what
+// forced embedded testers to manually `lantern reset --chain-state`
+// after downtime.
+func resolveStaleResetThreshold(cfg abi.ChainEpoch) abi.ChainEpoch {
+	switch {
+	case cfg == 0:
+		return defaultStaleResetThreshold
+	case cfg < 0:
+		return 0 // disabled
+	default:
+		return cfg
+	}
 }
 
 // splitCSV splits a comma-separated string, trimming spaces and dropping

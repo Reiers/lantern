@@ -329,12 +329,18 @@ func TestEthSubscribeLogs_TransientBridgeErrorKeepsSubAlive(t *testing.T) {
 	require.GreaterOrEqual(t, br.callCount(), 2)
 }
 
-func TestEthSubscribeLogs_RequiresBridge(t *testing.T) {
+// TestEthSubscribeLogs_RequiresLogSource: with neither a header store
+// (local getLogs, lantern#73) nor a VM bridge, log subscriptions have no
+// source and must be refused. (Previously this required a bridge outright;
+// lantern#76 made EthGetLogs local-first, so a header store alone now
+// suffices — see the bridge-off positive test below.)
+func TestEthSubscribeLogs_RequiresLogSource(t *testing.T) {
 	c, _ := newSubTestCAPI()
 	c.Bridge = nil
+	c.HeaderStore = nil
 	_, err := c.subscribeLogs(context.Background(), (&captureSubscriber{}).methods(), nil)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "bridge")
+	require.Contains(t, err.Error(), "log source")
 }
 
 func mustRaw(t *testing.T, v any) json.RawMessage {
