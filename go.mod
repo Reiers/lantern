@@ -2,6 +2,8 @@ module github.com/Reiers/lantern
 
 go 1.25.7
 
+toolchain go1.26.4
+
 require (
 	github.com/consensys/gnark-crypto v0.20.1
 	github.com/dgraph-io/badger/v4 v4.5.1
