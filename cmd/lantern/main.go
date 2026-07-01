@@ -10,6 +10,9 @@
 //	lantern wallet list
 //	lantern wallet balance <addr>
 //	lantern wallet send <to> <amount>
+//	lantern wallet export <addr>    — Lotus-hex KeyInfo
+//	lantern wallet import [hex|-]
+//	lantern wallet import-lotus ~/.lotus
 //	lantern chain head
 //	lantern state get-actor <addr>
 //	lantern info                    — print FULLNODE_API_INFO + status
@@ -161,6 +164,9 @@ COMMANDS
   wallet list
   wallet balance <addr>
   wallet send <to> <amount-FIL>                 (DRY-RUN — message preview)
+  wallet export <addr>                          (Lotus-hex KeyInfo to stdout)
+  wallet import [hex|-]                         (Lotus-hex KeyInfo from arg or stdin)
+  wallet import-lotus <repo-path>               (bulk import from a Lotus repo keystore)
   chain head
   state get-actor <addr>
   info                                          Show daemon status + FULLNODE_API_INFO
@@ -1307,7 +1313,7 @@ func logSyncStats(ctx context.Context, s *hstore.Sync, d *headnotify.Distributor
 
 func cmdWallet(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("wallet: subcommand required (new|list|balance|send)")
+		return fmt.Errorf("wallet: subcommand required (new|list|balance|send|export|import|import-lotus)")
 	}
 	sub := args[0]
 	rest := args[1:]
@@ -1322,6 +1328,15 @@ func cmdWallet(args []string) error {
 		return walletSend(rest)
 	case "default":
 		return walletDefault(rest)
+	case "export":
+		// #93: Lotus-hex KeyInfo to stdout.
+		return walletExport(rest)
+	case "import":
+		// #93: Lotus-hex KeyInfo from arg or stdin.
+		return walletImport(rest)
+	case "import-lotus":
+		// #93: bulk import wallet keys from a Lotus repo keystore.
+		return walletImportLotus(rest)
 	}
 	return fmt.Errorf("wallet: unknown subcommand %q", sub)
 }
