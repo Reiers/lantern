@@ -15,7 +15,10 @@
 #     LANTERN_PREFIX        Where to symlink the binary (default: auto-detect)
 #     LANTERN_REINSTALL=1   Force re-download even if binary exists
 #     LANTERN_REANCHOR=1    Force re-run of the bootstrap quorum
-#     LANTERN_YES=1         Non-interactive; assume defaults (background service)
+#     LANTERN_YES=1         Non-interactive; assume defaults (light node, background service)
+#     LANTERN_NODE_TYPE     Node tier: light | pdp | full (default: light; asked interactively)
+#     LANTERN_PDP_CACHE_GB  PDP/Full persistent-cache budget in GB (default: 3)
+#     LANTERN_ALLOW_BLOCK_SUBMIT=1  Record PDP/Full block-submit opt-in (needs --vm-bridge-rpc at run)
 #     LANTERN_NO_SERVICE=1  Skip the OS service installation step
 #     LANTERN_BOOTSTRAP_QUORUM   Sources required to agree (default: 5)
 #     LANTERN_BOOTSTRAP_TIMEOUT  How long to wait for quorum (default: 90s)
@@ -408,6 +411,66 @@ check_path() {
   fi
 }
 
+# ─── node type ───────────────────────────────────────────────────────────
+#
+# The node CLASS is chosen at install time, not via a runtime flag, so the
+# light node genuinely stays light: only the tier the user picks provisions
+# the larger footprint. The choice is persisted (lantern node-type) and the
+# daemon reads it on start.
+#
+#   Light  — ~1 GB, wallet / deal-client / SP chain reads. In-memory cache.
+#   PDP    — mid node: persistent 2-5 GB cache (warm PDP/payments/registry/
+#            USDFC state survives restart) + full write surface incl. block
+#            production, so it can prove/settle PDP and double as a backup
+#            block producer. (Block production needs a VM bridge.)
+#   Full   — reserved; native full validation needs a VM bridge today
+#            (no-CGo constraint). Recorded, behaves like PDP for now.
+
+node_type_setup() {
+  step "Node type"
+
+  local bin="${LANTERN_HOME}/lantern"
+
+  # Honor a non-interactive / pre-set choice.
+  local choice="${LANTERN_NODE_TYPE:-}"
+  if [[ -z "$choice" ]]; then
+    info "  ${BOLD}l${RESET}  Light  ${DIM}— ~1 GB, wallet / reads. Smallest footprint. (default)${RESET}"
+    info "  ${BOLD}p${RESET}  PDP    ${DIM}— persistent 2-5 GB cache + prove/settle + backup block producer${RESET}"
+    info "  ${BOLD}f${RESET}  Full   ${DIM}— reserved; behaves like PDP until the full-node track lands${RESET}"
+    echo
+    if [[ "${LANTERN_YES:-}" == "1" ]] || [[ ! -r /dev/tty ]]; then
+      choice="l"
+    else
+      choice="$(choose 'Which node type?' l)"
+    fi
+  fi
+
+  local tier=""
+  case "$choice" in
+    l|L|light) tier="light" ;;
+    p|P|pdp)   tier="pdp" ;;
+    f|F|full)  tier="full" ;;
+    *) warn "Unrecognized choice '$choice'; defaulting to light."; tier="light" ;;
+  esac
+
+  local extra=""
+  if [[ "$tier" != "light" ]]; then
+    # Optional PDP knobs from env (installer stays non-interactive-friendly).
+    [[ -n "${LANTERN_PDP_CACHE_GB:-}" ]] && extra+=" --cache-gb ${LANTERN_PDP_CACHE_GB}"
+    [[ "${LANTERN_ALLOW_BLOCK_SUBMIT:-}" == "1" ]] && extra+=" --allow-block-submit"
+  fi
+
+  if env LANTERN_HOME="$LANTERN_HOME" "$bin" node-type "$tier" $extra >/dev/null 2>&1; then
+    case "$tier" in
+      light) ok "Node type: ${BOLD}Light${RESET} ${DIM}(in-memory cache, ~1 GB)${RESET}" ;;
+      pdp)   ok "Node type: ${BOLD}PDP${RESET} ${DIM}(persistent cache; run with --vm-bridge-rpc to submit blocks)${RESET}" ;;
+      full)  ok "Node type: ${BOLD}Full${RESET} ${DIM}(recorded; behaves like PDP for now)${RESET}" ;;
+    esac
+  else
+    warn "Could not persist node type; defaulting to light at run time."
+  fi
+}
+
 # ─── trust bootstrap ─────────────────────────────────────────────────────
 
 trust_bootstrap() {
@@ -595,6 +658,7 @@ closing() {
 
 main() {
   download_binary
+  node_type_setup
   trust_bootstrap
   wallet_setup
   service_setup

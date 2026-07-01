@@ -57,8 +57,10 @@ import (
 	"github.com/Reiers/lantern/net/hello"
 	"github.com/Reiers/lantern/net/hsync"
 	llibp2p "github.com/Reiers/lantern/net/libp2p"
+	"github.com/Reiers/lantern/pkg/nodeprofile"
 	"github.com/Reiers/lantern/rpc/handlers"
 	"github.com/Reiers/lantern/rpc/server"
+	statecache "github.com/Reiers/lantern/state/cache"
 	"github.com/Reiers/lantern/state/hamt"
 	"github.com/Reiers/lantern/vm/bridge"
 	"github.com/Reiers/lantern/wallet"
@@ -118,6 +120,8 @@ func main() {
 		err = cmdInfo(rest)
 	case "auth":
 		err = cmdAuth(rest)
+	case "node-type":
+		err = cmdNodeType(rest)
 	case "version", "--version", "-v":
 		fmt.Printf("lantern %s Lantern+%s (Phase 11 — installer + quorum bootstrap)\n",
 			buildinfo.BuildVersion(), buildinfo.Network())
@@ -795,14 +799,44 @@ func cmdDaemon(args []string) error {
 		return fmt.Errorf("open wallet: %w", err)
 	}
 
+	// Node tier (install-time choice, persisted by the installer). Light =
+	// in-memory cache (small footprint). PDP/Full = a persistent, bounded
+	// (2-5 GB) block cache so the warm contract set survives restart - the
+	// mid/PDP node's footprint, provisioned only for the tier that chose it.
+	profile, perr := nodeprofile.Load(dataDir(), network.String())
+	if perr != nil {
+		return fmt.Errorf("load node profile: %w", perr)
+	}
+
 	// gatewayBG + fetcher is the cache+http chain. Bitswap, when enabled,
 	// is inserted between cache and HTTP gateway later in this function
 	// once the libp2p host is up.
-	cache := hamt.NewMemBlockStore()
+	var cache combined.Cache
+	var persistentCache *statecache.Store
+	if profile.UsesPersistentCache() {
+		bcPath := filepath.Join(netDir, "blockcache")
+		if err := os.MkdirAll(bcPath, 0o700); err != nil {
+			return fmt.Errorf("create block cache dir: %w", err)
+		}
+		bc, err := statecache.Open(bcPath, statecache.Options{SoftCapBytes: profile.CacheBytes()})
+		if err != nil {
+			return fmt.Errorf("open persistent block cache: %w", err)
+		}
+		persistentCache = bc
+		cache = bc
+		fmt.Printf("  node tier:    %s  (persistent cache %s, soft cap %d MiB)\n",
+			profile.Tier, bcPath, profile.CacheBytes()>>20)
+	} else {
+		cache = hamt.NewMemBlockStore()
+		fmt.Printf("  node tier:    %s  (in-memory cache)\n", profile.Tier)
+	}
 	fetcher := combined.New(cache,
 		combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
 		combined.Source{Name: "glif", Getter: glif.New(glifURLForNetwork(network), 20*time.Second), Timeout: 20 * time.Second},
 	)
+	if persistentCache != nil {
+		defer persistentCache.Close()
+	}
 	chainAPI := handlers.New(tr, fetcher, w, nil, network.String())
 
 	// Issue #4: wire optional VM bridge for block production. Refuse to
@@ -810,8 +844,11 @@ func cmdDaemon(args []string) error {
 	// silently publishing blocks with the parent stateRoot copied
 	// verbatim would be rejected by the network and would consume the
 	// miner's winning ticket. Failing loud here protects the SP.
-	if *allowBlockSubmit && *vmBridgeRPC == "" {
-		return fmt.Errorf("--allow-block-submit requires --vm-bridge-rpc to be set (see issue #4 in repo)")
+	// PDP/backup tier can opt into block submission at install time; the
+	// runtime flag still overrides/forces it. Either way it needs a bridge.
+	effAllowBlockSubmit := *allowBlockSubmit || profile.AllowBlockSubmit
+	if effAllowBlockSubmit && *vmBridgeRPC == "" {
+		return fmt.Errorf("block submission (tier=%s or --allow-block-submit) requires --vm-bridge-rpc to be set (see issue #4 in repo)", profile.Tier)
 	}
 	if *vmBridgeRPC != "" {
 		token := *vmBridgeToken
@@ -820,9 +857,9 @@ func cmdDaemon(args []string) error {
 		}
 		vmBr := bridge.NewForestBridge(*vmBridgeRPC, token, *vmBridgeTimeout)
 		chainAPI.WithBridge(vmBr)
-		chainAPI.AllowBlockSubmit = *allowBlockSubmit
+		chainAPI.AllowBlockSubmit = effAllowBlockSubmit
 		fmt.Printf("  vm-bridge:    %s", vmBr.Provenance())
-		if *allowBlockSubmit {
+		if effAllowBlockSubmit {
 			fmt.Printf("  (allow-block-submit=true)")
 		}
 		fmt.Println()
@@ -998,10 +1035,16 @@ func cmdDaemon(args []string) error {
 		// node despite live blocks arriving fine over gossipsub.
 		if store != nil && p2pHost.PubSub != nil {
 			gossipSrc := newBitswapBackedSource(glif.New(glifURLForNetwork(network), 8*time.Second), func() blockGetter { return fetcher })
-			if ing, _, gerr := startGossipBlocks(ctx, p2pHost.PubSub, store, gossipSrc, network.GossipTopicBlocks()); gerr != nil {
+			if ing, blockPub, gerr := startGossipBlocks(ctx, p2pHost.PubSub, store, gossipSrc, network.GossipTopicBlocks()); gerr != nil {
 				fmt.Printf("  gossipsub-blocks: failed to start: %v (continuing without)\n", gerr)
 			} else {
 				gossipIngestor = ing
+				// Wire the /fil/blocks publisher so SyncSubmitBlock can
+				// actually publish (PDP/backup tier). SyncSubmitBlock still
+				// gates on AllowBlockSubmit, so this is safe on any tier.
+				if blockPub != nil {
+					chainAPI.SetBlockPublisher(blockPub)
+				}
 				fmt.Printf("  gossipsub-blocks: subscribed to %s (ingestor active, inline backfill on)\n", network.GossipTopicBlocks())
 				// #71: let the polling Sync skip its Glif HeadEpoch() poll while
 				// gossip is keeping the store head fresh, so a healthy node stops
