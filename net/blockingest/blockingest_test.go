@@ -311,6 +311,67 @@ func TestIngestor_ForkChoiceRejectsLighterFork(t *testing.T) {
 		"head must stay on the heavier canonical chain")
 }
 
+// TestIngestor_DivergenceGateHoldsHead covers #79 item 2: while the head
+// divergence gate is closed (headcheck reports the running head is
+// uncorroborated / diverging), a valid heavier next block must NOT be adopted
+// as head - the ingestor holds where it is and counts the hold.
+func TestIngestor_DivergenceGateHoldsHead(t *testing.T) {
+	s, head := withStore(t, 10)
+	ing := New(s, nil)
+	ctx := context.Background()
+
+	// Gate CLOSED (diverged): predicate returns false.
+	ing.SetHeadAdoptionGate(func() bool { return false })
+
+	// A perfectly valid heavier descendant (weight 11 > 10).
+	next := mkBlock(t, head.Height()+1, []cid.Cid{head.Blocks()[0].Cid()}, 1000, "next")
+	ing.process(ctx, &ltypes.BlockMsg{Header: next})
+
+	require.Equal(t, uint64(0), ing.installed.Load(),
+		"gate closed: even a valid heavier head must be held")
+	require.Equal(t, uint64(1), ing.Stats().HeldDiverged,
+		"hold must be counted")
+	require.Equal(t, head.Height(), s.HeadEpoch(),
+		"head must stay put while diverged")
+}
+
+// TestIngestor_DivergenceGateReopensAdopts: once the gate reopens
+// (re-corroborated), the same heavier head is adopted normally.
+func TestIngestor_DivergenceGateReopensAdopts(t *testing.T) {
+	s, head := withStore(t, 10)
+	ing := New(s, nil)
+	ctx := context.Background()
+
+	open := false
+	ing.SetHeadAdoptionGate(func() bool { return open })
+
+	next := mkBlock(t, head.Height()+1, []cid.Cid{head.Blocks()[0].Cid()}, 1000, "next")
+	ing.process(ctx, &ltypes.BlockMsg{Header: next})
+	require.Equal(t, uint64(0), ing.installed.Load(), "held while closed")
+
+	// Reopen and feed a further heavier head (dedup blocks re-processing the
+	// exact same CID, so use the next height).
+	open = true
+	next2 := mkBlock(t, head.Height()+2, []cid.Cid{next.Cid()}, 1000, "next2")
+	// Ensure parent present so linkage passes.
+	require.NoError(t, s.Put(next))
+	ing.process(ctx, &ltypes.BlockMsg{Header: next2})
+	require.Equal(t, uint64(1), ing.installed.Load(),
+		"gate reopened: heavier head must be adopted")
+	require.Equal(t, next2.Height, s.HeadEpoch(),
+		"head advances once corroborated")
+}
+
+// A nil gate (Light/PDP, or no corroborating sources) must always adopt.
+func TestIngestor_NilGateAlwaysAdopts(t *testing.T) {
+	s, head := withStore(t, 10)
+	ing := New(s, nil) // no gate set
+	ctx := context.Background()
+	next := mkBlock(t, head.Height()+1, []cid.Cid{head.Blocks()[0].Cid()}, 1000, "next")
+	ing.process(ctx, &ltypes.BlockMsg{Header: next})
+	require.Equal(t, uint64(1), ing.installed.Load(), "nil gate = always adopt")
+}
+
 // TestIngestor_ForkChoiceAcceptsHeavierAdvance is the companion: a normal
 // descendant (higher height, strictly greater weight) must still be adopted.
 func TestIngestor_ForkChoiceAcceptsHeavierAdvance(t *testing.T) {

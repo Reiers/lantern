@@ -619,16 +619,32 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 			hcSources = append(hcSources, headcheck.NewRPCHeadSource("glif", bootstrap.KindForest, hcFallback, "", 0))
 		}
 		if len(hcSources) > 0 {
+			// #79 item 2: feed the divergence verdict back to the ingestor
+			// as a head-adoption gate. While the running head diverges from
+			// the independent-source quorum, hold head (no-adopt) instead of
+			// only logging. StatusInsufficient does NOT close the gate: a
+			// node the operator gave too few sources must not freeze head.
+			var hcDiverged atomic.Bool
+			ing.SetHeadAdoptionGate(func() bool { return !hcDiverged.Load() })
 			mon := headcheck.New(headcheck.Config{
 				Local:   func() abi.ChainEpoch { return ing.ObservedHead() },
 				Sources: hcSources,
 				OnResult: func(r headcheck.Result) {
 					switch r.Status {
 					case headcheck.StatusDiverge:
-						log.Warnw("headcheck: running head DIVERGES from independent sources (possible eclipse/fork)",
+						hcDiverged.Store(true)
+						log.Warnw("headcheck: running head DIVERGES from independent sources (possible eclipse/fork); HOLDING head adoption",
 							"localHead", r.LocalHead, "medianExtHead", r.MedianExtHead,
 							"agreeing", r.Agreeing, "disagreeing", r.Disagreeing, "reachable", r.Reachable)
+					case headcheck.StatusAgree:
+						if hcDiverged.Swap(false) {
+							log.Infow("headcheck: running head re-corroborated; resuming head adoption",
+								"localHead", r.LocalHead, "agreeing", r.Agreeing)
+						}
 					case headcheck.StatusInsufficient:
+						// Too few reachable sources to judge: do not close the
+						// gate (avoid freezing a lightly-corroborated node).
+						hcDiverged.Store(false)
 						log.Debugw("headcheck: head uncorroborated (too few reachable sources)",
 							"localHead", r.LocalHead, "reachable", r.Reachable)
 					}

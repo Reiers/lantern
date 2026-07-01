@@ -77,16 +77,40 @@ type Ingestor struct {
 	seenOrder []cid.Cid
 	seenCap   int
 
+	// headAdoptionGate, when set, must return true for the ingestor to
+	// adopt a new gossip head. The daemon wires this to the headcheck
+	// divergence monitor: while the running head DIVERGES from the
+	// independent-source quorum (possible eclipse/fork), the gate returns
+	// false and the ingestor holds - it keeps receiving/backfilling blocks
+	// but does not move head onto an uncorroborated tip. nil = always open
+	// (Light/PDP, or no corroborating sources). (#79 item 2)
+	headAdoptionGate atomic.Pointer[func() bool]
+
 	received         atomic.Uint64
 	dedup            atomic.Uint64
 	installed        atomic.Uint64
 	skipped          atomic.Uint64
 	rejected         atomic.Uint64
 	rejectedLighter  atomic.Uint64 // #79: candidates rejected by heaviest-weight fork choice
+	heldDiverged     atomic.Uint64 // #79: head adoptions held while the divergence gate was closed
 	backfilled       atomic.Uint64
 	backfillFailed   atomic.Uint64
 	lastInstallEpoch atomic.Int64
 	lastInstallNanos atomic.Int64 // wall-clock UnixNano of the last successful install (#71)
+}
+
+// SetHeadAdoptionGate wires a predicate consulted before each head
+// adoption. While it returns false (e.g. headcheck reports the running head
+// DIVERGES from the independent-source quorum), the ingestor holds head
+// where it is: incoming blocks are still received and backfilled, but head
+// is not advanced onto an uncorroborated tip. Passing nil re-opens the gate
+// (always adopt). Safe to call before or after Run. (#79 item 2)
+func (g *Ingestor) SetHeadAdoptionGate(fn func() bool) {
+	if fn == nil {
+		g.headAdoptionGate.Store(nil)
+		return
+	}
+	g.headAdoptionGate.Store(&fn)
 }
 
 // New builds an ingestor wired to the header store. src may be nil; when
@@ -202,6 +226,20 @@ func (g *Ingestor) process(ctx context.Context, blk *ltypes.BlockMsg) {
 		nw := ts.ParentWeight()
 		if !cw.Nil() && !nw.Nil() && nw.LessThanEqual(cw) {
 			g.rejectedLighter.Add(1)
+			return
+		}
+	}
+
+	// #79 item 2: divergence gate. If the headcheck monitor reports the
+	// running head is uncorroborated by the independent-source quorum, do
+	// NOT adopt this new tip - hold head where it is until corroboration
+	// returns. The block is still seen + backfilled (state stays warm); we
+	// just refuse to walk head onto a possibly-eclipsed fork. A heavier,
+	// corroborated head will be adopted on a later round once the gate
+	// reopens.
+	if gp := g.headAdoptionGate.Load(); gp != nil {
+		if open := (*gp)(); !open {
+			g.heldDiverged.Add(1)
 			return
 		}
 	}
@@ -329,6 +367,7 @@ type Stats struct {
 	Skipped          uint64
 	Rejected         uint64
 	RejectedLighter  uint64 // #79: rejected by heaviest-ParentWeight fork choice
+	HeldDiverged     uint64 // #79: head adoptions held while divergence gate closed
 	Backfilled       uint64
 	BackfillFailed   uint64
 	LastInstallEpoch abi.ChainEpoch
@@ -343,6 +382,7 @@ func (g *Ingestor) Stats() Stats {
 		Skipped:          g.skipped.Load(),
 		Rejected:         g.rejected.Load(),
 		RejectedLighter:  g.rejectedLighter.Load(),
+		HeldDiverged:     g.heldDiverged.Load(),
 		Backfilled:       g.backfilled.Load(),
 		BackfillFailed:   g.backfillFailed.Load(),
 		LastInstallEpoch: abi.ChainEpoch(g.lastInstallEpoch.Load()),
