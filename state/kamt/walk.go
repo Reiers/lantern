@@ -54,6 +54,14 @@ type WalkOptions struct {
 	// attempt n waits n*RetryBackoff). Zero defaults to 150ms when
 	// FetchRetries > 0.
 	RetryBackoff time.Duration
+
+	// OnNode, if set, is called once for each successfully fetched and
+	// CID-verified node in the subtree (root included). The PDP tier uses
+	// this to PIN the walked contract-state nodes in the persistent block
+	// cache, so the warm set the node proves/settles against is never
+	// LRU-evicted. Must be cheap and non-blocking; it runs inline on the
+	// walk goroutine. Nil disables (light-node behaviour).
+	OnNode func(cid.Cid)
 }
 
 // WalkSubtree walks the KAMT rooted at `root` breadth-first through bg,
@@ -113,6 +121,9 @@ func WalkSubtree(ctx context.Context, root cid.Cid, bg hamt.BlockGetter, opts Wa
 		}
 		stats.NodesFetched++
 		stats.BytesFetched += int64(len(raw))
+		if opts.OnNode != nil {
+			opts.OnNode(cur)
+		}
 
 		n, err := decodeNode(raw)
 		if err != nil {

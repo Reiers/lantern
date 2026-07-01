@@ -305,6 +305,17 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 				PerAddrTimeout:   d.cfg.FEVMPrefetchPerAddrTimeout,
 				MinInterval:      d.cfg.FEVMPrefetchMinInterval,
 			}, fetcher)
+			// PDP tier: pin the warmed static-contract subtrees in the
+			// persistent cache so the warm set survives restart un-evicted.
+			if d.cfg.PersistentCache {
+				d.mu.Lock()
+				bc := d.blockCache
+				d.mu.Unlock()
+				if bc != nil {
+					pf.SetPinner(bc)
+					log.Infow("prefetcher pinning enabled (PDP warm set persists)")
+				}
+			}
 			store.OnHeadChange(func(ts *types.TipSet) {
 				pf.Trigger(ctx, ts)
 			})
