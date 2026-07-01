@@ -50,6 +50,7 @@ import (
 	"github.com/Reiers/lantern/net/mpool"
 	"github.com/Reiers/lantern/rpc/handlers"
 	rpcserver "github.com/Reiers/lantern/rpc/server"
+	statecache "github.com/Reiers/lantern/state/cache"
 	"github.com/Reiers/lantern/state/prefetch"
 	"github.com/Reiers/lantern/wallet"
 )
@@ -97,6 +98,21 @@ type Config struct {
 
 	// SyncInterval is the header-store poll cadence. Default 6s.
 	SyncInterval time.Duration
+
+	// PersistentCache enables the on-disk (Badger) block cache instead of
+	// the in-memory MemBlockStore. This is the PDP / mid-node tier: the warm
+	// contract subtrees (PDP/payments/registry/USDFC) SURVIVE restart, so a
+	// restarted node doesn't cold-fetch its whole warm set from the gateway
+	// on the first head advance (which for a PDP node could stall inside a
+	// proving window). The light node leaves this false and stays
+	// memory-cached. Cache lives at <DataDir>/<network>/blockcache.
+	PersistentCache bool
+
+	// PersistentCacheBytes is the soft byte budget for the persistent block
+	// cache (only used when PersistentCache=true). 0 => default 3 GiB (the
+	// middle of the 2-5 GB PDP-tier target). Eviction is sampled-LRU over
+	// unpinned blocks; pinned warm-set subtrees are never evicted.
+	PersistentCacheBytes int64
 
 	// StaleResetThreshold is the number of epochs behind live head past
 	// which a persisted header store re-anchors near live head instead of
@@ -314,11 +330,12 @@ type Daemon struct {
 	// When present, gossipsub is the primary head source (0-1 epoch
 	// latency) and headerSync runs at a relaxed cadence as the catch-up
 	// fallback. See lantern#40.
-	p2pHost   *llibp2p.Host
-	ingestor  *blockingest.Ingestor
-	mpool     *mpool.Pool        // gossipsub mempool publisher (#45 Stage 4)
-	headcheck *headcheck.Monitor // running-head divergence monitor (#85)
-	bitswap   *bitswap.Client    // libp2p block source on the embedded fetcher (#50)
+	p2pHost    *llibp2p.Host
+	ingestor   *blockingest.Ingestor
+	mpool      *mpool.Pool        // gossipsub mempool publisher (#45 Stage 4)
+	headcheck  *headcheck.Monitor // running-head divergence monitor (#85)
+	bitswap    *bitswap.Client    // libp2p block source on the embedded fetcher (#50)
+	blockCache *statecache.Store  // persistent block cache (PDP tier); nil when memory-cached
 
 	// sendWarmer pre-warms a sent tx's message/receipt blocks into the
 	// Bitswap cache in the background so the receipt poll resolves locally
@@ -470,6 +487,20 @@ func (d *Daemon) GossipStats() (blockingest.Stats, bool) {
 // (head-source diversity) is about making the running head continuously,
 // visibly corroborated; the head itself still advances on gossip + the
 // #79 heaviest-weight fork choice.
+// BlockCacheStats returns the persistent block-cache counters (live bytes,
+// soft cap, hits/misses/puts/evictions) and true when the PDP-tier
+// persistent cache is enabled. Returns (zero, false) for the memory-cached
+// light node. Lets the dashboard show the warm-set footprint + hit rate.
+func (d *Daemon) BlockCacheStats() (statecache.Stats, bool) {
+	d.mu.Lock()
+	bc := d.blockCache
+	d.mu.Unlock()
+	if bc == nil {
+		return statecache.Stats{}, false
+	}
+	return bc.Stats(), true
+}
+
 func (d *Daemon) HeadCorroboration() (headcheck.Result, bool) {
 	d.mu.Lock()
 	mon := d.headcheck

@@ -62,6 +62,7 @@ import (
 	"github.com/Reiers/lantern/net/mpool"
 	"github.com/Reiers/lantern/rpc/handlers"
 	rpcserver "github.com/Reiers/lantern/rpc/server"
+	statecache "github.com/Reiers/lantern/state/cache"
 	"github.com/Reiers/lantern/state/hamt"
 	"github.com/Reiers/lantern/state/prefetch"
 	"github.com/Reiers/lantern/vm/bridge"
@@ -99,7 +100,31 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 	// Combined fetcher: gateway race + glif fallback. Matches the
 	// cmd/lantern wiring (without bitswap, since libp2p isn't mounted
 	// here yet — the gateway+glif pair covers cold state-tree reads).
-	cache := hamt.NewMemBlockStore()
+	//
+	// Cache tier selection: the PDP / mid-node tier uses a PERSISTENT
+	// (Badger) block cache so the warm contract set survives restart; the
+	// light node stays in-memory. Both satisfy combined.Cache.
+	var cache combined.Cache
+	if d.cfg.PersistentCache {
+		bcPath := filepath.Join(d.cfg.DataDir, network.String(), "blockcache")
+		if err := os.MkdirAll(bcPath, 0o700); err != nil {
+			return fmt.Errorf("create block cache dir: %w", err)
+		}
+		bc, err := statecache.Open(bcPath, statecache.Options{SoftCapBytes: d.cfg.PersistentCacheBytes})
+		if err != nil {
+			return fmt.Errorf("open persistent block cache: %w", err)
+		}
+		d.mu.Lock()
+		d.blockCache = bc
+		d.mu.Unlock()
+		cache = bc
+		if !d.cfg.EmbeddedMode {
+			fmt.Printf("daemon: persistent block cache %s (soft cap %d bytes)\n", bcPath, bc.Stats().SoftCapBytes)
+		}
+		log.Infow("persistent block cache enabled (PDP tier)", "path", bcPath, "soft_cap", bc.Stats().SoftCapBytes)
+	} else {
+		cache = hamt.NewMemBlockStore()
+	}
 	// fallbackRPC is the Lotus-compatible RPC used as the polling Sync head
 	// source AND the gossipsub ingestor's head+N backfill source AND the
 	// last-resort cold state-block fetcher. Gossipsub is the PRIMARY
@@ -387,6 +412,7 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 	store := d.headerStore
 	host := d.p2pHost
 	bsClient := d.bitswap
+	blockCache := d.blockCache
 	d.rpcServer = nil
 	d.auth = nil
 	d.headerSync = nil
@@ -395,6 +421,7 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 	d.p2pHost = nil
 	d.ingestor = nil
 	d.bitswap = nil
+	d.blockCache = nil
 	d.started = false
 	d.mu.Unlock()
 
@@ -422,6 +449,12 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 	if store != nil {
 		if err := store.Close(); err != nil {
 			return fmt.Errorf("close header store: %w", err)
+		}
+	}
+	// Close the persistent block cache last (nothing else rides on it).
+	if blockCache != nil {
+		if err := blockCache.Close(); err != nil {
+			return fmt.Errorf("close block cache: %w", err)
 		}
 	}
 	return nil
