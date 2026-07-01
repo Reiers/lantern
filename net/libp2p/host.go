@@ -68,6 +68,10 @@ type HostConfig struct {
 	// new heads propagate at the same speed they do for those nodes.
 	// Defaults to BootstrapPeers when empty.
 	GossipSubDirectPeers []string
+	// PubSubTracer, when set, is registered as gossipsub's RawTracer at
+	// construction. Used by the head-corroboration tracker (#80 part 2)
+	// so duplicate block deliveries are counted per source peer.
+	PubSubTracer pubsub.RawTracer
 }
 
 // Host wraps a libp2p Host + GossipSub PubSub instance.
@@ -214,7 +218,7 @@ func New(ctx context.Context, cfg HostConfig) (*Host, error) {
 	if len(directPeers) == 0 {
 		directPeers = cfg.BootstrapPeers
 	}
-	ps, err := newFilecoinPubSub(ctx, h, directPeers)
+	ps, err := newFilecoinPubSub(ctx, h, directPeers, cfg.PubSubTracer)
 	if err != nil {
 		_ = h.Close()
 		return nil, fmt.Errorf("pubsub.NewGossipSub: %w", err)
@@ -250,7 +254,7 @@ func New(ctx context.Context, cfg HostConfig) (*Host, error) {
 	if len(floor) == 0 {
 		floor = cfg.BootstrapPeers
 	}
-	out.ProtectPeers(floor, "lantern-trusted-floor")
+	out.ProtectPeers(floor, trustedFloorTag)
 
 	// Background dial of bootstrap peers (non-blocking).
 	if len(cfg.BootstrapPeers) > 0 {
@@ -259,6 +263,10 @@ func New(ctx context.Context, cfg HostConfig) (*Host, error) {
 
 	return out, nil
 }
+
+// trustedFloorTag is the connmgr protection tag for the trusted
+// bootstrap/beacon/direct-peer floor (#80).
+const trustedFloorTag = "lantern-trusted-floor"
 
 // ProtectPeers marks the given multiaddr peers as connmgr-protected under
 // tag, making them an un-evictable floor the connection-manager trim path
@@ -288,6 +296,21 @@ func (h *Host) ProtectPeers(peers []string, tag string) int {
 		n++
 	}
 	return n
+}
+
+// IsTrustedPeer reports whether p is part of the protected trusted floor
+// (bootstrap/beacon/direct peers pinned via ProtectPeers, #80). The head
+// corroboration gate uses this as the super-vote: a head forwarded by a
+// trusted floor peer is corroborated regardless of source count.
+func (h *Host) IsTrustedPeer(p peer.ID) bool {
+	if h == nil || h.H == nil || p == "" {
+		return false
+	}
+	cm := h.H.ConnManager()
+	if cm == nil {
+		return false
+	}
+	return cm.IsProtected(p, trustedFloorTag)
 }
 
 // consumeReachability mirrors EvtLocalReachabilityChanged into the cached
