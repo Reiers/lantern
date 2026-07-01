@@ -147,6 +147,9 @@ type ChainAPI struct {
 	mu          sync.Mutex
 	sessionUUID string
 	notifySubs  []chan []api.HeadChange
+	// blockPub is the /fil/blocks publisher for SyncSubmitBlock (PDP/backup
+	// tier). Wired via SetBlockPublisher; guarded by mu.
+	blockPub BlockPublisher
 
 	// HeadNotify, when non-nil, takes over from the legacy notifySubs
 	// slice. ChainNotify subscribers route through the Distributor
@@ -1307,19 +1310,37 @@ func (c *ChainAPI) SyncSubmitBlock(ctx context.Context, blk *types.BlockMsg) err
 		return ErrNotImpl("SyncSubmitBlock",
 			"block submission requires ChainAPI.AllowBlockSubmit=true (operator opt-in)")
 	}
-	if c.Mpool == nil {
-		return ErrMpoolNotWired
+	// Prefer an explicitly-wired block publisher (net/blockpub on the
+	// /fil/blocks topic - what the embedded PDP/backup daemon wires). Fall
+	// back to the mpool if it happens to also publish blocks. The message
+	// mpool (net/mpool) publishes on /fil/msgs and is NOT a block publisher,
+	// so without the explicit one, block submit is correctly unavailable.
+	c.mu.Lock()
+	bp := c.blockPub
+	c.mu.Unlock()
+	if bp == nil {
+		if mbp, ok := c.Mpool.(BlockPublisher); ok && mbp != nil {
+			bp = mbp
+		}
 	}
-	bp, ok := c.Mpool.(BlockPublisher)
-	if !ok || bp == nil {
-		return errors.New("SyncSubmitBlock: mpool does not publish blocks")
+	if bp == nil {
+		return errors.New("SyncSubmitBlock: no block publisher wired (need libp2p /fil/blocks publisher)")
 	}
 	return bp.PublishBlock(ctx, blk)
 }
 
-// BlockPublisher is the optional mpool extension for /fil/blocks topic.
+// BlockPublisher is the /fil/blocks gossipsub publish capability. Satisfied
+// by *net/blockpub.Publisher.
 type BlockPublisher interface {
 	PublishBlock(ctx context.Context, blk *types.BlockMsg) error
+}
+
+// SetBlockPublisher wires the /fil/blocks publisher used by SyncSubmitBlock
+// (PDP/backup tier). Safe to call after construction; nil clears it.
+func (c *ChainAPI) SetBlockPublisher(bp BlockPublisher) {
+	c.mu.Lock()
+	c.blockPub = bp
+	c.mu.Unlock()
 }
 
 // MarketAddBalance composes+signs+pushes a market deposit message.

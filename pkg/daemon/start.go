@@ -433,6 +433,7 @@ func (d *Daemon) stopInternal(ctx context.Context) error {
 	d.ingestor = nil
 	d.bitswap = nil
 	d.blockCache = nil
+	d.blockPub = nil
 	d.started = false
 	d.mu.Unlock()
 
@@ -512,11 +513,26 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 		return fmt.Errorf("libp2p host has no pubsub instance")
 	}
 
-	ing, _, err := blockingest.Start(ctx, host.PubSub, store, src, network.GossipTopicBlocks())
+	ing, blockPub, err := blockingest.Start(ctx, host.PubSub, store, src, network.GossipTopicBlocks())
 	if err != nil {
 		_ = host.Close()
 		return fmt.Errorf("start gossipsub block ingestor: %w", err)
 	}
+	// Capture the /fil/blocks publisher so a PDP/backup-tier daemon can
+	// actually SUBMIT blocks (SyncSubmitBlock -> BlockPublisher). The CLI
+	// path already wired this; the embedded daemon previously discarded it,
+	// so an embedded node could create but never publish a block. It's only
+	// USED when AllowBlockSubmit=true (+ a VM bridge for a valid state
+	// root); otherwise it just sits idle as the block-topic subscriber.
+	// Always wire the publisher onto the ChainAPI; SyncSubmitBlock still
+	// independently gates on AllowBlockSubmit, so wiring it unconditionally
+	// is safe and means a later toggle needs no re-plumb.
+	d.mu.Lock()
+	d.blockPub = blockPub
+	if d.chainAPI != nil {
+		d.chainAPI.SetBlockPublisher(blockPub)
+	}
+	d.mu.Unlock()
 
 	// #71: now that the gossip ingestor exists, let the polling Sync skip
 	// its upstream-RPC HeadEpoch() poll whenever gossip installed a block

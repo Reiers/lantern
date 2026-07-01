@@ -332,10 +332,11 @@ type Daemon struct {
 	// fallback. See lantern#40.
 	p2pHost    *llibp2p.Host
 	ingestor   *blockingest.Ingestor
-	mpool      *mpool.Pool        // gossipsub mempool publisher (#45 Stage 4)
-	headcheck  *headcheck.Monitor // running-head divergence monitor (#85)
-	bitswap    *bitswap.Client    // libp2p block source on the embedded fetcher (#50)
-	blockCache *statecache.Store  // persistent block cache (PDP tier); nil when memory-cached
+	mpool      *mpool.Pool             // gossipsub mempool publisher (#45 Stage 4)
+	headcheck  *headcheck.Monitor      // running-head divergence monitor (#85)
+	bitswap    *bitswap.Client         // libp2p block source on the embedded fetcher (#50)
+	blockCache *statecache.Store       // persistent block cache (PDP tier); nil when memory-cached
+	blockPub   handlers.BlockPublisher // /fil/blocks publisher (PDP/backup tier block submit)
 
 	// sendWarmer pre-warms a sent tx's message/receipt blocks into the
 	// Bitswap cache in the background so the receipt poll resolves locally
