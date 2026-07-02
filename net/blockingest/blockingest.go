@@ -90,6 +90,13 @@ type Ingestor struct {
 	// Enabled by the daemon only when there is no upstream RPC source.
 	parentWalk bool
 
+	// chainFetcher, when set, is the preferred gap-resolution path in
+	// parent-walk mode (#91): ONE ChainExchange request pulls the whole
+	// verified header chain from a libp2p peer, instead of per-CID
+	// bitswap fetches. Falls back to the per-CID walk when nil or on
+	// error.
+	chainFetcher ChainFetcher
+
 	incoming chan *ltypes.BlockMsg
 
 	seen      map[cid.Cid]struct{}
@@ -450,6 +457,17 @@ func (g *Ingestor) markSeen(c cid.Cid) {
 // construction time before Run.
 func (g *Ingestor) SetParentWalkBackfill(on bool) { g.parentWalk = on }
 
+// ChainFetcher pulls a verified header chain (newest->oldest, level 0 =
+// the tipset whose block CIDs are head) from the p2p swarm. Implemented
+// by net/chainxchg.Client (#91).
+type ChainFetcher interface {
+	FetchTipsetChain(ctx context.Context, head []cid.Cid, length int) ([][]*ltypes.BlockHeader, error)
+}
+
+// SetChainFetcher wires the ChainExchange client as the preferred
+// parent-walk gap resolver (#91). Call before Run.
+func (g *Ingestor) SetChainFetcher(f ChainFetcher) { g.chainFetcher = f }
+
 // parentWalkBackfill resolves a head+N (N>1) gap without any RPC by walking
 // the target block's Parents chain via CID-addressed FetchBlock (bitswap),
 // descending until every CID at a level is already in the store (the seeded
@@ -466,6 +484,21 @@ func (g *Ingestor) parentWalkBackfill(ctx context.Context, bh *ltypes.BlockHeade
 	}
 	if len(bh.Parents) == 0 {
 		return fmt.Errorf("bridge-off backfill: gossip block @ %d has no parents", bh.Height)
+	}
+
+	// Preferred path (#91): ONE ChainExchange request for the whole gap.
+	// The client CID-verifies the chain against bh.Parents, so a bad peer
+	// can only refuse, not splice. Fall back to the per-CID bitswap walk
+	// on any error.
+	if g.chainFetcher != nil {
+		if err := g.chainExchangeBackfill(ctx, bh); err == nil {
+			return nil
+		} else if g.src == nil {
+			// No per-CID fallback source either: surface the real error.
+			return fmt.Errorf("bridge-off chainxchg backfill: %w", err)
+		} else {
+			log.Debugw("chainxchg backfill failed; falling back to per-CID walk", "err", err)
+		}
 	}
 
 	bctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -523,6 +556,42 @@ func (g *Ingestor) parentWalkBackfill(ctx context.Context, bh *ltypes.BlockHeade
 		}
 		if err := g.store.SetHead(ctx, ts); err != nil {
 			return fmt.Errorf("bridge-off backfill set head @ %d: %w", h, err)
+		}
+	}
+	return nil
+}
+
+// chainExchangeBackfill fills [storeHead+1, bh.Height-1] with one
+// ChainExchange request rooted at bh.Parents (#91). The returned chain
+// is newest->oldest and already CID-verified; install oldest-first so
+// the store head lands on the newest backfilled tipset.
+func (g *Ingestor) chainExchangeBackfill(ctx context.Context, bh *ltypes.BlockHeader) error {
+	curHead := g.store.HeadEpoch()
+	// Number of tipsets between the store head and the gossip block,
+	// inclusive of null-round slack: ask for the full epoch gap; the
+	// response naturally contains only real tipsets.
+	gap := int(bh.Height - 1 - curHead)
+	if gap < 1 {
+		gap = 1
+	}
+	bctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	chain, err := g.chainFetcher.FetchTipsetChain(bctx, bh.Parents, gap)
+	if err != nil {
+		return err
+	}
+	// Install oldest-first, skipping tipsets at/below the store head.
+	for i := len(chain) - 1; i >= 0; i-- {
+		blocks := chain[i]
+		if blocks[0].Height <= curHead {
+			continue
+		}
+		ts, terr := ltypes.NewTipSet(blocks)
+		if terr != nil {
+			return fmt.Errorf("chainxchg backfill tipset @ %d: %w", blocks[0].Height, terr)
+		}
+		if serr := g.store.SetHead(ctx, ts); serr != nil {
+			return fmt.Errorf("chainxchg backfill set head @ %d: %w", blocks[0].Height, serr)
 		}
 	}
 	return nil
