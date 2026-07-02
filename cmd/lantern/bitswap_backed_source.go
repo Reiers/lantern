@@ -103,3 +103,14 @@ var (
 	_ blockingest.BackfillSource = (*bitswapBackedSource)(nil)
 	_ blockGetter                = (*combined.Fetcher)(nil)
 )
+
+// nilRPCSource / nilBackfillSource return TRULY-NIL interfaces (not a
+// typed-nil *bitswapBackedSource) for the bridge-off path (#76,
+// --no-fallback-rpc). A typed-nil wrapped in an interface is non-nil and
+// would nil-panic on first method call; returning the untyped nil through
+// the interface return type makes the nil guards in hstore.Sync
+// (src == nil) and net/blockingest (g.src == nil) fire correctly, so no
+// Glif client is ever constructed and the polling Sync + gossip inline
+// backfill become no-ops (gossipsub is the sole head source).
+func nilRPCSource() hstore.RPCSource                { return nil }
+func nilBackfillSource() blockingest.BackfillSource { return nil }

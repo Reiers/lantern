@@ -727,6 +727,15 @@ func cmdDaemon(args []string) error {
 	// alarms on divergence. Requires --vm-bridge-rpc.
 	vmCrossCheck := fs.Bool("vm-crosscheck", false, "Audit the local chain against the VM bridge node (observe-only divergence alarm). Requires --vm-bridge-rpc.")
 	vmCrossCheckInterval := fs.Duration("vm-crosscheck-interval", crosscheck.DefaultInterval, "Interval between VM-bridge cross-checks.")
+	// #76 bridge-off: wire NO upstream RPC (Glif) as a runtime fallback.
+	// Head comes ONLY from gossipsub; cold blocks ONLY from gateway+Bitswap;
+	// the polling Sync + gossip inline-backfill become no-ops. A gossip stall
+	// then surfaces as an observable stalled head instead of a silent Glif
+	// fetch. Requires libp2p/gossipsub (it is the sole head source). Mirrors
+	// pkg/daemon Config.NoFallbackRPC for the standalone CLI. The one-time
+	// boot anchor (#54) still uses multi-source agreement (gateway+Glif) and
+	// is separate from runtime fetch counters.
+	noFallbackRPC := fs.Bool("no-fallback-rpc", false, "#76 bridge-off: wire no upstream RPC (Glif) fallback. Head=gossipsub-only, cold-blocks=gateway+bitswap. Requires libp2p/gossipsub.")
 	fs.Parse(args)
 
 	// #58: --allow-empty-passphrase is sugar for the env the keystore guard
@@ -752,6 +761,13 @@ func cmdDaemon(args []string) error {
 	// libp2p UserAgent, and other identity surfaces reflect the actual
 	// network instead of the package default ('mainnet').
 	buildinfo.SetNetwork(network.String())
+
+	// #76 bridge-off guard: with no RPC fallback, gossipsub is the ONLY head
+	// source. Refuse to start without libp2p rather than silently freeze the
+	// head (mirrors pkg/daemon/start.go).
+	if *noFallbackRPC && (*noLibp2p || *p2pListen == "") {
+		return fmt.Errorf("--no-fallback-rpc requires libp2p/gossipsub enabled (it is the only head source); set --p2p-listen and do not pass --no-libp2p")
+	}
 
 	// V1.3 per-network data dir: migrate any legacy mainnet-only state
 	// at dataDir() to dataDir()/mainnet/ on first boot. Idempotent for
@@ -848,10 +864,16 @@ func cmdDaemon(args []string) error {
 		cache = hamt.NewMemBlockStore()
 		fmt.Printf("  node tier:    %s  (in-memory cache)\n", profile.Tier)
 	}
-	fetcher := combined.New(cache,
-		combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
-		combined.Source{Name: "glif", Getter: glif.New(glifURLForNetwork(network), 20*time.Second), Timeout: 20 * time.Second},
-	)
+	fetcherSources := []combined.Source{
+		{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
+	}
+	if !*noFallbackRPC {
+		fetcherSources = append(fetcherSources,
+			combined.Source{Name: "glif", Getter: glif.New(glifURLForNetwork(network), 20*time.Second), Timeout: 20 * time.Second})
+	} else {
+		fmt.Printf("  bridge-off:   no upstream RPC fallback wired (#76); head=gossipsub-only, cold-blocks=gateway+bitswap\n")
+	}
+	fetcher := combined.New(cache, fetcherSources...)
 	if persistentCache != nil {
 		defer persistentCache.Close()
 	}
@@ -915,7 +937,14 @@ func cmdDaemon(args []string) error {
 		// mainnet daemon pulls from mainnet Glif. Without the network split
 		// the header store fills with the wrong chain's headers (silent
 		// corruption).
-		src := newBitswapBackedSource(glif.New(glifURLForNetwork(network), 8*time.Second), func() blockGetter { return fetcher })
+		// #76: bridge-off => no Glif Sync source (truly-nil interface so the
+		// hstore.Sync nil-guard fires and the polling Sync is a no-op; head is
+		// gossipsub-only). Otherwise the bitswap-backed adapter (Glif head +
+		// content-addressed backfill).
+		src := nilRPCSource()
+		if !*noFallbackRPC {
+			src = newBitswapBackedSource(glif.New(glifURLForNetwork(network), 8*time.Second), func() blockGetter { return fetcher })
+		}
 		// #71: when libp2p/gossipsub is enabled it is the PRIMARY head source
 		// (0-1 epoch latency, no Glif), so relax the polling-Sync cadence to
 		// 30s as a catch-up fallback instead of polling Glif's ChainHead every
@@ -1084,7 +1113,13 @@ func cmdDaemon(args []string) error {
 		// Glif client, so a slow Glif drove backfillFail up and desynced the
 		// node despite live blocks arriving fine over gossipsub.
 		if store != nil && p2pHost.PubSub != nil {
-			gossipSrc := newBitswapBackedSource(glif.New(glifURLForNetwork(network), 8*time.Second), func() blockGetter { return fetcher })
+			// #76: bridge-off => no Glif inline-backfill source (truly-nil
+			// interface so the ingestor nil-guard fires; parent backfill is
+			// served from the content-addressed fetcher / bitswap only).
+			gossipSrc := nilBackfillSource()
+			if !*noFallbackRPC {
+				gossipSrc = newBitswapBackedSource(glif.New(glifURLForNetwork(network), 8*time.Second), func() blockGetter { return fetcher })
+			}
 			if ing, blockPub, gerr := startGossipBlocks(ctx, p2pHost.PubSub, store, gossipSrc, network.GossipTopicBlocks()); gerr != nil {
 				fmt.Printf("  gossipsub-blocks: failed to start: %v (continuing without)\n", gerr)
 			} else {
@@ -1157,11 +1192,15 @@ func cmdDaemon(args []string) error {
 		// falling through to the gateway) now complete in low seconds.
 		// Glif stays as the sequential last-resort fallback (different
 		// shape, slower, public-service rate-limited).
-		fetcher = combined.New(cache,
-			combined.Source{Name: "bitswap", Getter: bsClient, Timeout: *bitswapFullDL, Race: true},
-			combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
-			combined.Source{Name: "glif", Getter: glif.New(glifURLForNetwork(network), 20*time.Second), Timeout: 20 * time.Second},
-		)
+		rebuiltSources := []combined.Source{
+			{Name: "bitswap", Getter: bsClient, Timeout: *bitswapFullDL, Race: true},
+			{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
+		}
+		if !*noFallbackRPC {
+			rebuiltSources = append(rebuiltSources,
+				combined.Source{Name: "glif", Getter: glif.New(glifURLForNetwork(network), 20*time.Second), Timeout: 20 * time.Second})
+		}
+		fetcher = combined.New(cache, rebuiltSources...)
 		rebindBlockGetter(chainAPI, fetcher)
 		fmt.Printf("  bitswap:  enabled (preferred=%d, fast=%s, full=%s)\n",
 			len(preferred), bitswapFastDL.String(), bitswapFullDL.String())
