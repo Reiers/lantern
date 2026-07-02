@@ -28,6 +28,7 @@ package blockingest
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -82,6 +83,12 @@ type Ingestor struct {
 	// cycle. May be nil.
 	src         BackfillSource
 	backfillCap abi.ChainEpoch
+
+	// parentWalk selects the bridge-off backfill strategy (#76): resolve a
+	// gap by walking the gossip block's own Parents chain via CID-addressed
+	// FetchBlock (bitswap), instead of the RPC-shaped height->CID lookup.
+	// Enabled by the daemon only when there is no upstream RPC source.
+	parentWalk bool
 
 	incoming chan *ltypes.BlockMsg
 
@@ -382,6 +389,9 @@ func (g *Ingestor) allParentsPresent(parents []cid.Cid) bool {
 // bh.Height, fetching missing tipsets via the RPC source and installing
 // each. Bounded by backfillCap (epoch-depth).
 func (g *Ingestor) inlineBackfill(ctx context.Context, bh *ltypes.BlockHeader) error {
+	if g.parentWalk {
+		return g.parentWalkBackfill(ctx, bh)
+	}
 	curHead := g.store.HeadEpoch()
 	needFrom := curHead + 1
 	needTo := bh.Height - 1
@@ -431,6 +441,114 @@ func (g *Ingestor) inlineBackfill(ctx context.Context, bh *ltypes.BlockHeader) e
 
 // markSeen inserts the CID into the dedupe set with simple LRU eviction.
 func (g *Ingestor) markSeen(c cid.Cid) {
+	g.markSeenImpl(c)
+}
+
+// SetParentWalkBackfill enables the #76 bridge-off backfill strategy, where
+// a gap is filled by CID-walking the gossip block's Parents via bitswap
+// FetchBlock instead of the RPC-shaped height->CID lookup. Call once at
+// construction time before Run.
+func (g *Ingestor) SetParentWalkBackfill(on bool) { g.parentWalk = on }
+
+// parentWalkBackfill resolves a head+N (N>1) gap without any RPC by walking
+// the target block's Parents chain via CID-addressed FetchBlock (bitswap),
+// descending until every CID at a level is already in the store (the seeded
+// anchor / current head), then installing the collected tipsets oldest-first
+// so the head ends at the highest backfilled tipset. Bounded by backfillCap.
+func (g *Ingestor) parentWalkBackfill(ctx context.Context, bh *ltypes.BlockHeader) error {
+	curHead := g.store.HeadEpoch()
+	needTo := bh.Height - 1
+	if curHead >= needTo {
+		return nil
+	}
+	if gap := needTo - curHead; gap > g.backfillCap {
+		return fmt.Errorf("bridge-off backfill gap %d > cap %d", gap, g.backfillCap)
+	}
+	if len(bh.Parents) == 0 {
+		return fmt.Errorf("bridge-off backfill: gossip block @ %d has no parents", bh.Height)
+	}
+
+	bctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	collected := map[abi.ChainEpoch][]*ltypes.BlockHeader{}
+	seen := map[cid.Cid]struct{}{}
+	frontier := append([]cid.Cid(nil), bh.Parents...)
+	for len(frontier) > 0 {
+		if abi.ChainEpoch(len(collected)) > g.backfillCap {
+			return fmt.Errorf("bridge-off backfill exceeded cap %d", g.backfillCap)
+		}
+		var next []cid.Cid
+		levelAllPresent := true
+		for _, c := range frontier {
+			if _, ok := seen[c]; ok {
+				continue
+			}
+			seen[c] = struct{}{}
+			if _, err := g.store.Get(c); err == nil {
+				continue // already present: reached the store head / seeded anchor
+			}
+			levelAllPresent = false
+			b, ferr := g.src.FetchBlock(bctx, c)
+			if ferr != nil {
+				return fmt.Errorf("bridge-off backfill fetch %s: %w", c, ferr)
+			}
+			if verr := header.VerifyBlockHeaderCID(b, c); verr != nil {
+				return fmt.Errorf("bridge-off backfill cid verify %s: %w", c, verr)
+			}
+			if b.Height <= curHead {
+				continue // walked below the store head on this branch; stop it
+			}
+			collected[b.Height] = append(collected[b.Height], b)
+			next = append(next, b.Parents...)
+		}
+		if levelAllPresent {
+			break
+		}
+		frontier = next
+	}
+	if len(collected) == 0 {
+		return nil
+	}
+
+	heights := make([]abi.ChainEpoch, 0, len(collected))
+	for h := range collected {
+		heights = append(heights, h)
+	}
+	sort.Slice(heights, func(i, j int) bool { return heights[i] < heights[j] })
+	for _, h := range heights {
+		ts, err := ltypes.NewTipSet(dedupBlocksByCID(collected[h]))
+		if err != nil {
+			return fmt.Errorf("bridge-off backfill tipset @ %d: %w", h, err)
+		}
+		if err := g.store.SetHead(ctx, ts); err != nil {
+			return fmt.Errorf("bridge-off backfill set head @ %d: %w", h, err)
+		}
+	}
+	return nil
+}
+
+// dedupBlocksByCID removes duplicate block headers (same CID reached via
+// multiple parent paths) while preserving order.
+func dedupBlocksByCID(in []*ltypes.BlockHeader) []*ltypes.BlockHeader {
+	if len(in) < 2 {
+		return in
+	}
+	seen := make(map[cid.Cid]struct{}, len(in))
+	out := in[:0:0]
+	for _, b := range in {
+		c := b.Cid()
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		out = append(out, b)
+	}
+	return out
+}
+
+// markSeenImpl inserts the CID into the dedupe set with simple LRU eviction.
+func (g *Ingestor) markSeenImpl(c cid.Cid) {
 	g.seen[c] = struct{}{}
 	g.seenOrder = append(g.seenOrder, c)
 	if len(g.seenOrder) > g.seenCap {

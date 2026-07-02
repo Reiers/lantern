@@ -671,6 +671,52 @@ func fetchVerifiedTrustedHead(ctx context.Context, gw string, network build.Netw
 	return tr, nil
 }
 
+// loadBootstrapAnchorForNetwork reads the persisted quorum anchor
+// (bootstrap-anchor.json, written by `lantern init` / `lantern repair`)
+// and enforces that it matches the running network. Returns (nil, nil)
+// when no anchor file exists.
+func loadBootstrapAnchorForNetwork(dir string, network build.Network) (*BootstrapAnchor, error) {
+	a, err := ReadBootstrapAnchor(dir)
+	if err != nil || a == nil {
+		return a, err
+	}
+	if a.Network != "" && a.Network != string(network) {
+		return nil, fmt.Errorf("persisted anchor network mismatch: file=%s runtime=%s", a.Network, network)
+	}
+	return a, nil
+}
+
+// trustedRootFromBootstrapAnchor builds a TrustedRoot from a persisted
+// quorum anchor so the daemon can boot off the multi-source anchor
+// (#76: gateway/RPC last resort) instead of re-probing on every start.
+func trustedRootFromBootstrapAnchor(a *BootstrapAnchor) (*trustedroot.TrustedRoot, error) {
+	if a == nil {
+		return nil, fmt.Errorf("nil bootstrap anchor")
+	}
+	tskCids := make([]cid.Cid, 0, len(a.TipSetKey))
+	for _, s := range a.TipSetKey {
+		c, err := cid.Parse(s)
+		if err != nil {
+			return nil, fmt.Errorf("parse anchor tipset cid %q: %w", s, err)
+		}
+		tskCids = append(tskCids, c)
+	}
+	if len(tskCids) == 0 {
+		return nil, fmt.Errorf("anchor has no tipset CIDs")
+	}
+	sr, err := cid.Parse(a.StateRoot)
+	if err != nil {
+		return nil, fmt.Errorf("parse anchor state root %q: %w", a.StateRoot, err)
+	}
+	return &trustedroot.TrustedRoot{
+		Epoch:      abi.ChainEpoch(a.Epoch),
+		TipSetKey:  types.NewTipSetKey(tskCids...),
+		StateRoot:  sr,
+		AcceptedAt: a.CapturedAt,
+		F3Instance: a.Instance,
+	}, nil
+}
+
 // --- daemon ---
 
 func cmdDaemon(args []string) error {
@@ -822,9 +868,32 @@ func cmdDaemon(args []string) error {
 	fmt.Printf("Lantern daemon — Lotus-compatible RPC (network: %s)\n", network)
 	fmt.Printf("  data dir:    %s\n", netDir)
 	fmt.Println("Fetching trusted head from", *gw)
-	tr, err := fetchVerifiedTrustedHead(ctx, *gw, network, *insecureAnchor)
-	if err != nil {
-		return err
+	// #76: prefer the persisted multi-source quorum anchor (written by
+	// `lantern init` / `lantern repair`) so a normal boot needs no gateway
+	// or RPC. Bridge-off refuses to fall back to a re-probe; a normal node
+	// still falls back to the verified gateway+Glif anchor when there is no
+	// persisted anchor yet.
+	var tr *trustedroot.TrustedRoot
+	var err error
+	if a, aerr := loadBootstrapAnchorForNetwork(netDir, network); aerr != nil {
+		fmt.Fprintf(os.Stderr, "  warn: persisted anchor: %v\n", aerr)
+	} else if a != nil {
+		if parsed, perr := trustedRootFromBootstrapAnchor(a); perr != nil {
+			fmt.Fprintf(os.Stderr, "  warn: persisted anchor unusable: %v\n", perr)
+		} else {
+			tr = parsed
+			fmt.Printf("  anchor:   persisted quorum anchor (epoch %d, captured %s) — gateway/RPC last resort (#76)\n",
+				tr.Epoch, a.CapturedAt.Format("2006-01-02T15:04:05Z"))
+		}
+	}
+	if tr == nil {
+		if *noFallbackRPC {
+			return fmt.Errorf("--no-fallback-rpc: no usable persisted quorum anchor at %s; run `lantern init` or `lantern repair --bootstrap-quorum` first (bridge-off has no gateway/RPC anchor fallback)", filepath.Join(netDir, "bootstrap-anchor.json"))
+		}
+		tr, err = fetchVerifiedTrustedHead(ctx, *gw, network, *insecureAnchor)
+		if err != nil {
+			return err
+		}
 	}
 	fmt.Printf("  head epoch:  %d\n  state root:  %s\n", tr.Epoch, tr.StateRoot)
 
@@ -1113,17 +1182,24 @@ func cmdDaemon(args []string) error {
 		// Glif client, so a slow Glif drove backfillFail up and desynced the
 		// node despite live blocks arriving fine over gossipsub.
 		if store != nil && p2pHost.PubSub != nil {
-			// #76: bridge-off => no Glif inline-backfill source (truly-nil
-			// interface so the ingestor nil-guard fires; parent backfill is
-			// served from the content-addressed fetcher / bitswap only).
-			gossipSrc := nilBackfillSource()
-			if !*noFallbackRPC {
-				gossipSrc = newBitswapBackedSource(glif.New(glifURLForNetwork(network), 8*time.Second), func() blockGetter { return fetcher })
+			// #76: bridge-off keeps a bitswap-backed backfill source (no Glif)
+			// so the ingestor can parent-walk gaps via CID-addressed fetches;
+			// the RPC-shaped HeadEpoch/TipsetCIDsByHeight are never called on
+			// this path (parent-walk mode enabled below).
+			gossipSrc := newBitswapBackedSource(glif.New(glifURLForNetwork(network), 8*time.Second), func() blockGetter { return fetcher })
+			if *noFallbackRPC {
+				gossipSrc = newBitswapBackedSource(nil, func() blockGetter { return fetcher })
 			}
 			if ing, blockPub, gerr := startGossipBlocks(ctx, p2pHost.PubSub, store, gossipSrc, network.GossipTopicBlocks()); gerr != nil {
 				fmt.Printf("  gossipsub-blocks: failed to start: %v (continuing without)\n", gerr)
 			} else {
 				gossipIngestor = ing
+				// #76: with no upstream RPC, resolve head+N gaps by walking
+				// the gossip block's Parents via bitswap instead of a
+				// height->CID RPC lookup.
+				if *noFallbackRPC {
+					ing.SetParentWalkBackfill(true)
+				}
 				// #80 part 2: head adoption requires corroboration from
 				// distinct scored peers (trusted floor peers super-vote;
 				// requirement clamps to connected-peer count so a small
@@ -1204,6 +1280,43 @@ func cmdDaemon(args []string) error {
 		rebindBlockGetter(chainAPI, fetcher)
 		fmt.Printf("  bitswap:  enabled (preferred=%d, fast=%s, full=%s)\n",
 			len(preferred), bitswapFastDL.String(), bitswapFullDL.String())
+
+		// #76: bridge-off has no polling Sync to seed the store from the
+		// anchor (the polling src is a no-op). The header store boots with a
+		// SYNTHETIC head at the anchor epoch (Miner f00, ticket "lantern-synth")
+		// so ChainHead answers immediately - but its block CIDs are fake, so
+		// real gossip blocks (whose Parents point at the REAL anchor block CIDs)
+		// can never connect to it and every parent-walk runs to the cap. Replace
+		// the synthetic head with the REAL anchor tipset fetched via bitswap so
+		// gossip has a genuine, content-addressed base to parent-walk onto.
+		// Only when the store hasn't already advanced past the anchor (fresh /
+		// synthetic boot); fail loud if the anchor blocks aren't retrievable.
+		if *noFallbackRPC && store != nil && store.HeadEpoch() <= tr.Epoch {
+			seedSrc := newBitswapBackedSource(nil, func() blockGetter { return fetcher })
+			anchorCids := tr.TipSetKey.Cids()
+			if len(anchorCids) == 0 {
+				return fmt.Errorf("bridge-off seed: anchor has no tipset CIDs")
+			}
+			sctx, scancel := context.WithTimeout(ctx, 45*time.Second)
+			seedBlocks := make([]*types.BlockHeader, 0, len(anchorCids))
+			for _, c := range anchorCids {
+				b, ferr := seedSrc.FetchBlock(sctx, c)
+				if ferr != nil {
+					scancel()
+					return fmt.Errorf("bridge-off seed: fetch anchor block %s via bitswap: %w", c, ferr)
+				}
+				seedBlocks = append(seedBlocks, b)
+			}
+			scancel()
+			seedTS, terr := types.NewTipSet(seedBlocks)
+			if terr != nil {
+				return fmt.Errorf("bridge-off seed: build anchor tipset: %w", terr)
+			}
+			if serr := store.SetHead(ctx, seedTS); serr != nil {
+				return fmt.Errorf("bridge-off seed: set store head: %w", serr)
+			}
+			fmt.Printf("  seed:     store head seeded from anchor @ %d (%d blocks) via bitswap (#76)\n", tr.Epoch, len(seedBlocks))
+		}
 	}
 
 	// Phase 10 Part B: /metrics endpoint exposes per-source hit counts so
