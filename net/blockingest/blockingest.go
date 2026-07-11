@@ -95,9 +95,9 @@ type Ingestor struct {
 	// head+N>1 blocks land immediately via a bounded backfill burst
 	// (capped by backfillCap) instead of waiting for the polling Sync's
 	// cycle. May be nil.
-	src            BackfillSource
-	backfillCap    abi.ChainEpoch
-	parentWalkCap  abi.ChainEpoch
+	src           BackfillSource
+	backfillCap   abi.ChainEpoch
+	parentWalkCap abi.ChainEpoch
 
 	// parentWalk selects the bridge-off backfill strategy (#76): resolve a
 	// gap by walking the gossip block's own Parents chain via CID-addressed
@@ -193,15 +193,15 @@ func (g *Ingestor) SetHeadCorroboration(fn func(cid.Cid) bool) {
 // path handles them on its next cycle.
 func New(store *hstore.Store, src BackfillSource) *Ingestor {
 	return &Ingestor{
-		store:        store,
-		src:          src,
+		store:         store,
+		src:           src,
 		backfillCap:   DefaultBackfillCap,
 		parentWalkCap: DefaultParentWalkCap,
-		incoming:     make(chan *ltypes.BlockMsg, 64),
-		seen:         make(map[cid.Cid]struct{}, 256),
-		seenCap:      512,
-		corroRetries: make(map[cid.Cid]int, 8),
-		corroPending: make(map[cid.Cid]struct{}, 8),
+		incoming:      make(chan *ltypes.BlockMsg, 64),
+		seen:          make(map[cid.Cid]struct{}, 256),
+		seenCap:       512,
+		corroRetries:  make(map[cid.Cid]int, 8),
+		corroPending:  make(map[cid.Cid]struct{}, 8),
 	}
 }
 
