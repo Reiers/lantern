@@ -28,12 +28,20 @@ const (
 	// "calibrationnet". DRAND chain: Quicknet only (Calibration was
 	// launched post-FIP-0063).
 	Calibration Network = "calibration"
+
+	// Devnet targets a locally-hosted Curio devnet (curio-fork/docker,
+	// `make devnet/up`). The wire-name, genesis CID, gossip topics, and
+	// bootstrap peers are supplied at runtime via ConfigureDevnet (see
+	// build/devnet.go), populated by `lantern devnet-init --lotus-rpc
+	// <URL>`. Trust posture: single-source (the operator's own lotus);
+	// F3 is not required.
+	Devnet Network = "devnet"
 )
 
 // Valid reports whether n is a recognized network identifier.
 func (n Network) Valid() bool {
 	switch n {
-	case Mainnet, Calibration:
+	case Mainnet, Calibration, Devnet:
 		return true
 	default:
 		return false
@@ -49,6 +57,8 @@ func (n Network) BootstrapPeers() []string {
 	switch n {
 	case Calibration:
 		return CalibnetBootstrapPeers
+	case Devnet:
+		return devnetCfgOrDie("BootstrapPeers").BootstrapPeers
 	default:
 		return MainnetBootstrapPeers
 	}
@@ -62,6 +72,8 @@ func (n Network) NetworkName() string {
 	switch n {
 	case Calibration:
 		return CalibnetNetworkName
+	case Devnet:
+		return devnetCfgOrDie("NetworkName").NetworkName
 	default:
 		return MainnetNetworkName
 	}
@@ -74,6 +86,8 @@ func (n Network) GenesisCID() string {
 	switch n {
 	case Calibration:
 		return CalibnetGenesisCID
+	case Devnet:
+		return devnetCfgOrDie("GenesisCID").GenesisCID
 	default:
 		return MainnetGenesisCID
 	}
@@ -85,6 +99,8 @@ func (n Network) GossipTopicMessages() string {
 	switch n {
 	case Calibration:
 		return CalibnetGossipTopicMessages
+	case Devnet:
+		return "/fil/msgs/" + devnetCfgOrDie("GossipTopicMessages").NetworkName
 	default:
 		return MainnetGossipTopicMessages
 	}
@@ -96,6 +112,8 @@ func (n Network) GossipTopicBlocks() string {
 	switch n {
 	case Calibration:
 		return CalibnetGossipTopicBlocks
+	case Devnet:
+		return "/fil/blocks/" + devnetCfgOrDie("GossipTopicBlocks").NetworkName
 	default:
 		return MainnetGossipTopicBlocks
 	}
@@ -120,6 +138,11 @@ func (n Network) F3Manifest() []byte {
 	switch n {
 	case Calibration:
 		return F3ManifestCalibnetJSON
+	case Devnet:
+		// Devnet does not run F3 by default. Return nil; F3 subsystems
+		// (beacon cert-exchange) are best-effort and skip when the
+		// manifest is empty.
+		return nil
 	default:
 		return F3ManifestMainnetJSON
 	}
