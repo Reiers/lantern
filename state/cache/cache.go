@@ -66,6 +66,16 @@ type Store struct {
 	puts        atomic.Uint64
 	evictions   atomic.Uint64
 	evictionSem chan struct{}
+
+	// Background goroutine lifecycle. spawnMu guards the atomic
+	// (closed.Load, bg.Add) ordering so a background job spawned right
+	// before Close is always counted in bg before Close waits on it. Close
+	// flips closed under spawnMu, then bg.Wait()s outside the lock, then
+	// calls db.Close(). This prevents async touch()/evictToTarget()
+	// goroutines from executing a Badger transaction against a torn-down
+	// DB (nil-deref in memTable.IncrRef). Fixes #114.
+	spawnMu sync.Mutex
+	bg      sync.WaitGroup
 }
 
 // Options configures the persistent cache.
@@ -103,12 +113,37 @@ func Open(path string, opts Options) (*Store, error) {
 	return s, nil
 }
 
-// Close flushes and closes the underlying Badger DB.
+// Close flushes and closes the underlying Badger DB. Safe to call from
+// any goroutine; concurrent Get/Put in flight when Close is entered are
+// allowed to finish, and any background touch/eviction goroutines already
+// spawned pre-Close are waited on before the DB is torn down.
 func (s *Store) Close() error {
+	s.spawnMu.Lock()
 	if s.closed.Swap(true) {
+		s.spawnMu.Unlock()
 		return nil
 	}
+	s.spawnMu.Unlock()
+	// From here, spawnBG() sees closed=true under spawnMu and refuses to
+	// register new background jobs, so bg is monotonically decreasing.
+	s.bg.Wait()
 	return s.db.Close()
+}
+
+// spawnBG registers a background goroutine (touch / eviction) with the
+// Store lifecycle. Returns nil if the Store is closing/closed; the
+// caller then does nothing. Otherwise returns a done func the caller MUST
+// call exactly once (defer) when the goroutine exits. spawnBG is O(1)
+// and takes a short mutex, matching the pre-existing atomic-check cost
+// of the goroutines it gates.
+func (s *Store) spawnBG() func() {
+	s.spawnMu.Lock()
+	defer s.spawnMu.Unlock()
+	if s.closed.Load() {
+		return nil
+	}
+	s.bg.Add(1)
+	return s.bg.Done
 }
 
 // --- combined.Cache surface (hamt.BlockGetter + Put) ---
@@ -131,7 +166,14 @@ func (s *Store) Get(_ context.Context, c cid.Cid) ([]byte, error) {
 	}
 	s.hits.Add(1)
 	// Touch lastAccess asynchronously; never block a read on the LRU bump.
-	go s.touch(c)
+	// spawnBG gates against a concurrent Close so touch never runs against
+	// a torn-down DB (see #114).
+	if done := s.spawnBG(); done != nil {
+		go func() {
+			defer done()
+			s.touch(c)
+		}()
+	}
 	return out, nil
 }
 
@@ -252,8 +294,15 @@ func (s *Store) put(c cid.Cid, raw []byte, forcePin bool) error {
 	}
 	s.puts.Add(1)
 	// Trigger eviction opportunistically when over cap (non-blocking).
+	// spawnBG gates against a concurrent Close so the goroutine never runs
+	// against a torn-down DB (see #114).
 	if s.sizeBytes.Load() > s.softCap {
-		go s.evictToTarget()
+		if done := s.spawnBG(); done != nil {
+			go func() {
+				defer done()
+				s.evictToTarget()
+			}()
+		}
 	}
 	return nil
 }
