@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"errors"
 
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/ipfs/go-cid"
@@ -61,15 +62,29 @@ func newBitswapBackedSource(g rpcBlockSource, getFetcher func() blockGetter) *bi
 	return &bitswapBackedSource{glif: g, getFetcher: getFetcher}
 }
 
+// errBridgeOffNoRPC is returned by the RPC-shaped methods when the adapter
+// is constructed with a nil Glif client (the #76 bridge-off path). Head
+// comes from gossipsub and blocks come from bitswap, so these two calls
+// simply have no source — returning a sentinel (instead of nil-panicking)
+// lets callers that only need FetchBlock (the gossip parent-walk backfill)
+// use the adapter safely.
+var errBridgeOffNoRPC = errors.New("bitswap-backed source: no upstream RPC (bridge-off #76): head=gossipsub, blocks=bitswap")
+
 // HeadEpoch delegates to Glif (live head also arrives via gossipsub, so in
 // steady state this is rarely the limiting call).
 func (s *bitswapBackedSource) HeadEpoch(ctx context.Context) (abi.ChainEpoch, error) {
+	if s.glif == nil {
+		return 0, errBridgeOffNoRPC
+	}
 	return s.glif.HeadEpoch(ctx)
 }
 
 // TipsetCIDsByHeight delegates to Glif (RPC-shaped: maps height -> the
 // canonical tipset's block CIDs).
 func (s *bitswapBackedSource) TipsetCIDsByHeight(ctx context.Context, h abi.ChainEpoch) ([]cid.Cid, error) {
+	if s.glif == nil {
+		return nil, errBridgeOffNoRPC
+	}
 	return s.glif.TipsetCIDsByHeight(ctx, h)
 }
 
@@ -92,6 +107,9 @@ func (s *bitswapBackedSource) FetchBlock(ctx context.Context, k cid.Cid) (*types
 			// Glif rather than fail the backfill outright.
 		}
 	}
+	if s.glif == nil {
+		return nil, errBridgeOffNoRPC
+	}
 	return s.glif.FetchBlock(ctx, k)
 }
 
@@ -103,3 +121,14 @@ var (
 	_ blockingest.BackfillSource = (*bitswapBackedSource)(nil)
 	_ blockGetter                = (*combined.Fetcher)(nil)
 )
+
+// nilRPCSource / nilBackfillSource return TRULY-NIL interfaces (not a
+// typed-nil *bitswapBackedSource) for the bridge-off path (#76,
+// --no-fallback-rpc). A typed-nil wrapped in an interface is non-nil and
+// would nil-panic on first method call; returning the untyped nil through
+// the interface return type makes the nil guards in hstore.Sync
+// (src == nil) and net/blockingest (g.src == nil) fire correctly, so no
+// Glif client is ever constructed and the polling Sync + gossip inline
+// backfill become no-ops (gossipsub is the sole head source).
+func nilRPCSource() hstore.RPCSource                { return nil }
+func nilBackfillSource() blockingest.BackfillSource { return nil }
