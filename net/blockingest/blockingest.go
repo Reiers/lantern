@@ -561,28 +561,59 @@ func (g *Ingestor) parentWalkBackfill(ctx context.Context, bh *ltypes.BlockHeade
 	return nil
 }
 
-// chainExchangeBackfill fills [storeHead+1, bh.Height-1] with one
-// ChainExchange request rooted at bh.Parents (#91). The returned chain
-// is newest->oldest and already CID-verified; install oldest-first so
-// the store head lands on the newest backfilled tipset.
+// maxBackfillTipsets bounds a single catch-up so a stale anchor (or a
+// misbehaving peer) can't drive unbounded memory. ~20k tipsets of
+// headers is a few hundred MiB worst case and covers ~7 days of
+// calibration epochs - well beyond any healthy quorum-anchor age.
+const maxBackfillTipsets = 20000
+
+// chainExchangeBackfill fills [storeHead+1, bh.Height-1] via ChainExchange
+// (#91), rooted at bh.Parents. A single request is capped at
+// MaxRequestLength (900) tipsets, but a snapshot-free boot from a stale
+// quorum anchor can be thousands of epochs behind live head - so we LOOP,
+// rooting each successive request at the previous batch's oldest tipset's
+// parents, until we reach the store head. Each returned chain is
+// newest->oldest and already CID-verified (a peer can only refuse, never
+// splice); we install the whole gap oldest-first so the store head walks
+// contiguously up to the gossip block.
 func (g *Ingestor) chainExchangeBackfill(ctx context.Context, bh *ltypes.BlockHeader) error {
 	curHead := g.store.HeadEpoch()
-	// Number of tipsets between the store head and the gossip block,
-	// inclusive of null-round slack: ask for the full epoch gap; the
-	// response naturally contains only real tipsets.
-	gap := int(bh.Height - 1 - curHead)
-	if gap < 1 {
-		gap = 1
-	}
-	bctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	bctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	chain, err := g.chainFetcher.FetchTipsetChain(bctx, bh.Parents, gap)
-	if err != nil {
-		return err
+
+	var full [][]*ltypes.BlockHeader
+	nextHead := bh.Parents
+	oldest := bh.Height
+	for oldest > curHead+1 {
+		if len(full) >= maxBackfillTipsets {
+			return fmt.Errorf("chainxchg backfill: gap exceeds %d tipsets (store head %d, target %d) - anchor too stale", maxBackfillTipsets, curHead, bh.Height)
+		}
+		gap := int(oldest - 1 - curHead)
+		if gap < 1 {
+			gap = 1
+		}
+		chain, err := g.chainFetcher.FetchTipsetChain(bctx, nextHead, gap)
+		if err != nil {
+			return err
+		}
+		if len(chain) == 0 {
+			return fmt.Errorf("chainxchg backfill: peer returned empty chain at height %d", oldest)
+		}
+		full = append(full, chain...)
+		last := chain[len(chain)-1]
+		newOldest := last[0].Height
+		if newOldest >= oldest {
+			// No downward progress: guard against a peer that echoes the
+			// same level forever.
+			return fmt.Errorf("chainxchg backfill: no progress at height %d", oldest)
+		}
+		oldest = newOldest
+		nextHead = last[0].Parents
 	}
+
 	// Install oldest-first, skipping tipsets at/below the store head.
-	for i := len(chain) - 1; i >= 0; i-- {
-		blocks := chain[i]
+	for i := len(full) - 1; i >= 0; i-- {
+		blocks := full[i]
 		if blocks[0].Height <= curHead {
 			continue
 		}

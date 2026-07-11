@@ -44,6 +44,7 @@ import (
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/ipfs/go-cid"
+	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/anchorverify"
@@ -782,6 +783,7 @@ func cmdDaemon(args []string) error {
 	// boot anchor (#54) still uses multi-source agreement (gateway+Glif) and
 	// is separate from runtime fetch counters.
 	noFallbackRPC := fs.Bool("no-fallback-rpc", false, "#76 bridge-off: wire no upstream RPC (Glif) fallback. Head=gossipsub-only, cold-blocks=gateway+bitswap. Requires libp2p/gossipsub.")
+	seedPeerWait := fs.Duration("seed-peer-wait", 120*time.Second, "#91/#109 bridge-off: max time to wait for ChainExchange peers to seed the boot anchor tipset before failing loud.")
 	fs.Parse(args)
 
 	// #58: --allow-empty-passphrase is sugar for the env the keystore guard
@@ -1072,8 +1074,10 @@ func cmdDaemon(args []string) error {
 	var gossipIngestor *gossipBlockIngestor
 	var helloSvc *hello.Service
 	var xchgSvc *chainxchg.Service
+	var xchgClient *chainxchg.Client
 	_ = helloSvc // kept around for future stats wiring; lifecycle is goroutine-managed
 	_ = xchgSvc
+	_ = xchgClient
 	if !*noLibp2p && *p2pListen != "" {
 		listeners := splitCSV(*p2pListen)
 		// Peer count sizing for issue #16/#18 follow-up:
@@ -1166,7 +1170,25 @@ func cmdDaemon(args []string) error {
 		// connmgr trim passes.
 		xchgSvc = chainxchg.NewService(p2pHost.H)
 		xchgSvc.Register()
-		fmt.Printf("  chainxchg: /fil/chain/xchg/0.0.1 active (NotFound responder)\n")
+		// #91: the requesting half - fetch verified header chains from real
+		// Filecoin peers over the SAME standard protocol, so a bridge-off
+		// node seeds its boot anchor + backfills gossip gaps with zero Glif
+		// and zero gateway. Calibration/mainnet Lotus + Forest peers already
+		// serve /fil/chain/xchg/0.0.1; a malicious peer can only refuse, never
+		// splice (the client verifies Chain[0] == the quorum-anchor CIDs).
+		xchgClient = chainxchg.NewClient(p2pHost.H)
+		// Trusted-floor / bootstrap peers are tried first for the anchor seed.
+		hostRefX := p2pHost
+		xchgClient.SetPreferredPeers(func() []peer.ID {
+			var out []peer.ID
+			for _, p := range hostRefX.H.Network().Peers() {
+				if hostRefX.IsTrustedPeer(p) {
+					out = append(out, p)
+				}
+			}
+			return out
+		})
+		fmt.Printf("  chainxchg: /fil/chain/xchg/0.0.1 active (responder + peer-fetch client, #91)\n")
 
 		// Issue #1: subscribe to /fil/blocks/<network> on gossipsub so
 		// new heads land in the header store within ~1-3s of network
@@ -1199,6 +1221,12 @@ func cmdDaemon(args []string) error {
 				// height->CID RPC lookup.
 				if *noFallbackRPC {
 					ing.SetParentWalkBackfill(true)
+				}
+				// #91: prefer peer-sourced ChainExchange for parent-walk gap
+				// backfill (verified headers from real Filecoin peers, no Glif,
+				// no gateway) over the per-CID bitswap walk.
+				if xchgClient != nil {
+					ing.SetChainFetcher(xchgClient)
 				}
 				// #80 part 2: head adoption requires corroboration from
 				// distinct scored peers (trusted floor peers super-vote;
@@ -1281,33 +1309,49 @@ func cmdDaemon(args []string) error {
 		fmt.Printf("  bitswap:  enabled (preferred=%d, fast=%s, full=%s)\n",
 			len(preferred), bitswapFastDL.String(), bitswapFullDL.String())
 
-		// #76: bridge-off has no polling Sync to seed the store from the
-		// anchor (the polling src is a no-op). The header store boots with a
+		// #76/#91/#109: bridge-off has no polling Sync to seed the store from
+		// the anchor (the polling src is a no-op). The header store boots with a
 		// SYNTHETIC head at the anchor epoch (Miner f00, ticket "lantern-synth")
 		// so ChainHead answers immediately - but its block CIDs are fake, so
 		// real gossip blocks (whose Parents point at the REAL anchor block CIDs)
 		// can never connect to it and every parent-walk runs to the cap. Replace
-		// the synthetic head with the REAL anchor tipset fetched via bitswap so
-		// gossip has a genuine, content-addressed base to parent-walk onto.
-		// Only when the store hasn't already advanced past the anchor (fresh /
-		// synthetic boot); fail loud if the anchor blocks aren't retrievable.
+		// the synthetic head with the REAL anchor tipset, fetched from live
+		// Filecoin peers over ChainExchange (#91) - headers only, CID-verified
+		// against the multi-source quorum anchor. This is the gateway-free,
+		// Glif-free boot path (#109): a malicious peer can only refuse, never
+		// splice, because the client requires Chain[0] == the anchor CIDs.
+		// The seed runs moments after libp2p start, so wait (bounded) for enough
+		// peers to connect + advertise the protocol. Fail loud on timeout - we
+		// never silently fall back to a gateway/RPC in bridge-off mode.
 		if *noFallbackRPC && store != nil && store.HeadEpoch() <= tr.Epoch {
-			seedSrc := newBitswapBackedSource(nil, func() blockGetter { return fetcher })
 			anchorCids := tr.TipSetKey.Cids()
 			if len(anchorCids) == 0 {
 				return fmt.Errorf("bridge-off seed: anchor has no tipset CIDs")
 			}
-			sctx, scancel := context.WithTimeout(ctx, 45*time.Second)
-			seedBlocks := make([]*types.BlockHeader, 0, len(anchorCids))
-			for _, c := range anchorCids {
-				b, ferr := seedSrc.FetchBlock(sctx, c)
-				if ferr != nil {
-					scancel()
-					return fmt.Errorf("bridge-off seed: fetch anchor block %s via bitswap: %w", c, ferr)
-				}
-				seedBlocks = append(seedBlocks, b)
+			if xchgClient == nil {
+				return fmt.Errorf("bridge-off seed: no ChainExchange client (libp2p is required as the sole peer-seed source in bridge-off mode)")
 			}
-			scancel()
+			var seedBlocks []*types.BlockHeader
+			seedDeadline := time.Now().Add(*seedPeerWait)
+			var lastErr error
+			for {
+				fctx, fcancel := context.WithTimeout(ctx, 30*time.Second)
+				chain, ferr := xchgClient.FetchTipsetChain(fctx, anchorCids, 1)
+				fcancel()
+				if ferr == nil && len(chain) > 0 && len(chain[0]) > 0 {
+					seedBlocks = chain[0]
+					break
+				}
+				lastErr = ferr
+				if time.Now().After(seedDeadline) {
+					return fmt.Errorf("bridge-off seed: no ChainExchange peer served the anchor tipset @ %d within %s (#91/#109): %w", tr.Epoch, (*seedPeerWait).String(), lastErr)
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(3 * time.Second):
+				}
+			}
 			seedTS, terr := types.NewTipSet(seedBlocks)
 			if terr != nil {
 				return fmt.Errorf("bridge-off seed: build anchor tipset: %w", terr)
@@ -1315,7 +1359,7 @@ func cmdDaemon(args []string) error {
 			if serr := store.SetHead(ctx, seedTS); serr != nil {
 				return fmt.Errorf("bridge-off seed: set store head: %w", serr)
 			}
-			fmt.Printf("  seed:     store head seeded from anchor @ %d (%d blocks) via bitswap (#76)\n", tr.Epoch, len(seedBlocks))
+			fmt.Printf("  seed:     store head seeded from anchor @ %d (%d blocks) via chainxchg peers - gateway-free, Glif-free (#91/#109)\n", tr.Epoch, len(seedBlocks))
 		}
 	}
 
