@@ -269,3 +269,32 @@ func (c *Client) Get(ctx context.Context, k cid.Cid) ([]byte, error) {
 
 // Compile check.
 var _ hamt.BlockGetter = (*Client)(nil)
+
+// StateNetworkName queries Filecoin.StateNetworkName so a Lantern client
+// pointed at an unknown network (devnet, forkline, ...) can discover the
+// wire-name string libp2p protocols expect (gossipsub topics, DHT prefix).
+func (c *Client) StateNetworkName(ctx context.Context) (string, error) {
+	var name string
+	if err := c.rpcCall(ctx, "Filecoin.StateNetworkName", []any{}, &name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// FetchGenesis queries Filecoin.ChainGetGenesis and returns block 0's CID.
+// The devnet-init path uses this to bind the local devnet's genesis into
+// the Lantern config so /fil/hello/1.0.0 identifies the correct chain.
+func (c *Client) FetchGenesis(ctx context.Context) (cid.Cid, error) {
+	var raw struct {
+		Cids []struct {
+			Slash string `json:"/"`
+		} `json:"Cids"`
+	}
+	if err := c.rpcCall(ctx, "Filecoin.ChainGetGenesis", []any{}, &raw); err != nil {
+		return cid.Undef, err
+	}
+	if len(raw.Cids) == 0 {
+		return cid.Undef, errors.New("ChainGetGenesis returned empty tipset")
+	}
+	return cid.Parse(raw.Cids[0].Slash)
+}

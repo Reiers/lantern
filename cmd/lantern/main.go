@@ -103,6 +103,8 @@ func main() {
 	switch cmd {
 	case "init":
 		err = cmdInit(rest)
+	case "devnet-init":
+		err = cmdDevnetInit(rest)
 	case "daemon":
 		err = cmdDaemon(rest)
 	case "beacon":
@@ -155,6 +157,7 @@ USAGE
 
 COMMANDS
   init [--bootstrap-quorum N] [--peer URL]...   Setup wizard with multi-source quorum bootstrap
+  devnet-init --lotus-rpc <URL>                 Setup wizard for a local Curio docker devnet (see docker-devnet.md)
   daemon [--gateway <url>]                      Run RPC server (default 127.0.0.1:1234)
   beacon [--cache-dir <p>]                      Run a Lantern beacon (Bitswap-only, no RPC)
   doctor [--bootstrap-quorum N]                 Re-run the quorum probe (read-only)
@@ -470,6 +473,9 @@ func glifURLForNetwork(n build.Network) string {
 	if n == build.Calibration {
 		return "https://api.calibration.node.glif.io/rpc/v1"
 	}
+	if n == build.Devnet && build.IsDevnetConfigured() {
+		return build.GetDevnetConfig().LotusRPC
+	}
 	return "" // empty -> glif.New uses its DefaultURL (mainnet)
 }
 
@@ -724,7 +730,7 @@ func trustedRootFromBootstrapAnchor(a *BootstrapAnchor) (*trustedroot.TrustedRoo
 
 func cmdDaemon(args []string) error {
 	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
-	networkFlag := fs.String("network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration")
+	networkFlag := fs.String("network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration | devnet (run `lantern devnet-init` first for devnet)")
 	gw := fs.String("gateway", defaultGateway, "Lantern gateway base URL")
 	listen := fs.String("listen", defaultListen, "RPC listen address")
 	noHS := fs.Bool("no-header-store", false, "Disable the persistent header store (legacy synthetic-head mode)")
@@ -844,6 +850,48 @@ func cmdDaemon(args []string) error {
 	if err := os.MkdirAll(netDir, 0o700); err != nil {
 		return fmt.Errorf("create network data dir: %w", err)
 	}
+
+	// Devnet: load the operator-supplied runtime config (network wire-name,
+	// genesis CID, gossip topics, bootstrap peers) that `lantern devnet-init`
+	// wrote by querying a local lotus. Every Network method dispatch after
+	// this point picks up the devnet values instead of panicking.
+	if network == build.Devnet {
+		cfgPath := filepath.Join(netDir, "devnet-config.json")
+		dcfg, derr := build.LoadDevnetConfig(cfgPath)
+		if derr != nil {
+			return fmt.Errorf("load devnet config: %w", derr)
+		}
+		if dcfg == nil {
+			return fmt.Errorf("no devnet config at %s; run `lantern devnet-init --lotus-rpc <URL>` first", cfgPath)
+		}
+		build.ConfigureDevnet(dcfg)
+		fmt.Printf("  devnet:      network=%q genesis=%s lotus-rpc=%s\n", dcfg.NetworkName, dcfg.GenesisCID, dcfg.LotusRPC)
+		// Devnet is single-endpoint by construction: skip multi-source
+		// anchor verification. `--insecure-anchor` is implicit.
+		if !*insecureAnchor {
+			*insecureAnchor = true
+			fmt.Printf("  devnet:      --insecure-anchor implicit (single-endpoint trust)\n")
+		}
+		// Route the daemon's "gateway" at the devnet lotus so cold
+		// state reads have a working fallback. The devnet has no Lantern
+		// gateway.
+		if *gw == defaultGateway && dcfg.LotusRPC != "" {
+			*gw = dcfg.LotusRPC
+			fmt.Printf("  devnet:      routing --gateway to %s\n", dcfg.LotusRPC)
+		}
+		// Devnet does not run F3; the auto-stale-reset multi-source probe
+		// would only be pointing at the same single endpoint. Silence it.
+		if *autoStaleReset {
+			*autoStaleReset = false
+			fmt.Printf("  devnet:      --auto-stale-reset disabled (single-endpoint quorum probe is meaningless)\n")
+		}
+		// Devnet uses http for lotus; suppress the insecure-gateway warn.
+		if *gw != "" && strings.HasPrefix(*gw, "http://") && !*insecureGateway {
+			*insecureGateway = true
+			fmt.Printf("  devnet:      --insecure-gateway implicit (devnet lotus speaks http)\n")
+		}
+	}
+
 	// Stage 2 (#51): rolling backup of secrets/ on every start. Best-effort
 	// — a backup failure must never stop the daemon. Gives a same-machine
 	// recovery path even against a hand `rm -rf` of the data dir.
@@ -885,15 +933,22 @@ func cmdDaemon(args []string) error {
 	// #118: bridge-off auto-stale-reset. Runs BEFORE the anchor is loaded
 	// so a stale anchor is refreshed on disk first and the load below picks
 	// up the fresh finality. No-op outside bridge-off (RPC path uses the
-	// polling Sync's StaleResetThreshold, #51).
+	// polling Sync's StaleResetThreshold, #51). Also skipped for devnet
+	// (the flag is flipped to false in the devnet block above).
 	{
 		quorum := 5
 		if network == build.Calibration {
 			quorum = 3
 		}
+		if network == build.Devnet {
+			quorum = 1
+		}
 		networkName := "filecoin"
 		if network == build.Calibration {
 			networkName = "calibrationnet2"
+		}
+		if network == build.Devnet && build.IsDevnetConfigured() {
+			networkName = build.GetDevnetConfig().NetworkName
 		}
 		probeParams := bootstrapParams{
 			Quorum:       quorum,
