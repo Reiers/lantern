@@ -266,6 +266,73 @@ func TestIngestor_InlineBackfillRespectsCapsToSkip(t *testing.T) {
 	require.Equal(t, uint64(1), ing.skipped.Load(), "and the head block itself is skipped")
 }
 
+// fakeChainFetcher returns pre-built parent chains keyed by requested head
+// CIDs. Matches the (net/chainxchg).Client.FetchTipsetChain surface used by
+// Ingestor.chainExchangeBackfill: newest->oldest, level 0 == the requested
+// head, each deeper level's block CIDs equal the previous level's Parents.
+type fakeChainFetcher struct {
+	byHead map[cid.Cid][][]*ltypes.BlockHeader
+	calls  int
+}
+
+func newFakeChainFetcher() *fakeChainFetcher {
+	return &fakeChainFetcher{byHead: map[cid.Cid][][]*ltypes.BlockHeader{}}
+}
+
+func (f *fakeChainFetcher) FetchTipsetChain(_ context.Context, head []cid.Cid, _ int) ([][]*ltypes.BlockHeader, error) {
+	f.calls++
+	if len(head) == 0 {
+		return nil, fmt.Errorf("fake chainxchg: empty head")
+	}
+	if chain, ok := f.byHead[head[0]]; ok {
+		return chain, nil
+	}
+	return nil, fmt.Errorf("fake chainxchg: no chain registered for head %s", head[0])
+}
+
+// TestIngestor_ParentWalkAcceptsGapAboveRPCCap is the regression test for
+// #116. In bridge-off mode (parentWalk=true) with a ChainFetcher wired, the
+// gap ceiling is `parentWalkCap`, not `backfillCap`, so a realistic
+// anchor->live gap (dozens to hundreds of epochs) succeeds via a single
+// chainxchg backfill instead of returning "bridge-off backfill gap > cap".
+func TestIngestor_ParentWalkAcceptsGapAboveRPCCap(t *testing.T) {
+	s, head := withStore(t, 10)
+	src := newFakeBackfillSource() // required so parentWalkBackfill's per-CID fallback branch has a non-nil src to fall back to (unused here since chainxchg succeeds)
+
+	// Build a chain of 50 tipsets from epoch 11 up to gossip target at 60,
+	// each linking to its predecessor. Gap = 60 - 10 - 1 = 49 epochs.
+	// 49 > DefaultBackfillCap (3), 49 < DefaultParentWalkCap (2880).
+	parents := []cid.Cid{head.Blocks()[0].Cid()}
+	chainOldestFirst := make([]*ltypes.BlockHeader, 0, 49)
+	for h := abi.ChainEpoch(11); h <= 59; h++ {
+		b := mkBlock(t, h, parents, 1000, fmt.Sprintf("pw-%d", h))
+		chainOldestFirst = append(chainOldestFirst, b)
+		parents = []cid.Cid{b.Cid()}
+	}
+	gossipTarget := mkBlock(t, 60, parents, 1000, "pw-60")
+
+	// Fake chainxchg returns newest-first (level 0 == gossipTarget.Parents
+	// tipset == block at epoch 59, then deeper each level down to 11).
+	fetcher := newFakeChainFetcher()
+	newestFirst := make([][]*ltypes.BlockHeader, 0, len(chainOldestFirst))
+	for i := len(chainOldestFirst) - 1; i >= 0; i-- {
+		newestFirst = append(newestFirst, []*ltypes.BlockHeader{chainOldestFirst[i]})
+	}
+	fetcher.byHead[gossipTarget.Parents[0]] = newestFirst
+
+	ing := New(s, src)
+	ing.SetParentWalkBackfill(true)
+	ing.SetChainFetcher(fetcher)
+
+	ing.process(context.Background(), &ltypes.BlockMsg{Header: gossipTarget})
+
+	require.Equal(t, uint64(0), ing.backfillFailed.Load(), "49-epoch gap must NOT fail cap (#116: parent-walk cap is DefaultParentWalkCap, not DefaultBackfillCap)")
+	require.Equal(t, uint64(1), ing.backfilled.Load(), "one backfill pass should fire")
+	require.Equal(t, uint64(1), ing.installed.Load(), "gossip block must install after chainxchg backfill")
+	require.Equal(t, abi.ChainEpoch(60), s.HeadEpoch(), "head should advance to gossip block height")
+	require.Equal(t, 1, fetcher.calls, "exactly one chainxchg request for the whole gap")
+}
+
 // TestIngestor_Fresh: Fresh() is false before any install and true right
 // after one, within the window (#71).
 func TestIngestor_Fresh(t *testing.T) {
