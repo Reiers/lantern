@@ -45,9 +45,23 @@ import (
 
 var log = logging.Logger("lantern/blockingest")
 
-// DefaultBackfillCap bounds inline backfill depth (in epochs) per
-// gossipsub event before deferring to the polling Sync agent.
+// DefaultBackfillCap bounds RPC-based inline backfill depth (in epochs)
+// per gossipsub event before deferring to the polling Sync agent. The RPC
+// path (glif) does one round-trip per epoch, so this stays small to avoid
+// hammering the upstream on a single stale gossip arrival.
 const DefaultBackfillCap abi.ChainEpoch = 3
+
+// DefaultParentWalkCap bounds parent-walk (bridge-off, #76) inline
+// backfill depth in epochs. In bridge-off mode there is NO polling Sync
+// catch-up (the polling src is a no-op without an upstream RPC), so this
+// cap is the only path that stitches a cold-booted head from the seeded
+// anchor to the live tip. It has to accommodate the natural anchor→live
+// gap that accrues during init + daemon startup + peer discovery (easily
+// 30-120 epochs on calibration; more if the anchor sat on disk overnight).
+// The chainxchg path handles this efficiently (one iterative request per
+// 900-tipset chunk, capped internally at maxBackfillTipsets); the
+// per-CID bitswap fallback pays a linear FetchBlock cost, still bounded.
+const DefaultParentWalkCap abi.ChainEpoch = 2880
 
 // Corroboration retry tuning (#80 part 2). Gossipsub delivers a block to
 // the subscriber on FIRST receipt; the duplicate copies that serve as
@@ -81,8 +95,9 @@ type Ingestor struct {
 	// head+N>1 blocks land immediately via a bounded backfill burst
 	// (capped by backfillCap) instead of waiting for the polling Sync's
 	// cycle. May be nil.
-	src         BackfillSource
-	backfillCap abi.ChainEpoch
+	src           BackfillSource
+	backfillCap   abi.ChainEpoch
+	parentWalkCap abi.ChainEpoch
 
 	// parentWalk selects the bridge-off backfill strategy (#76): resolve a
 	// gap by walking the gossip block's own Parents chain via CID-addressed
@@ -178,14 +193,15 @@ func (g *Ingestor) SetHeadCorroboration(fn func(cid.Cid) bool) {
 // path handles them on its next cycle.
 func New(store *hstore.Store, src BackfillSource) *Ingestor {
 	return &Ingestor{
-		store:        store,
-		src:          src,
-		backfillCap:  DefaultBackfillCap,
-		incoming:     make(chan *ltypes.BlockMsg, 64),
-		seen:         make(map[cid.Cid]struct{}, 256),
-		seenCap:      512,
-		corroRetries: make(map[cid.Cid]int, 8),
-		corroPending: make(map[cid.Cid]struct{}, 8),
+		store:         store,
+		src:           src,
+		backfillCap:   DefaultBackfillCap,
+		parentWalkCap: DefaultParentWalkCap,
+		incoming:      make(chan *ltypes.BlockMsg, 64),
+		seen:          make(map[cid.Cid]struct{}, 256),
+		seenCap:       512,
+		corroRetries:  make(map[cid.Cid]int, 8),
+		corroPending:  make(map[cid.Cid]struct{}, 8),
 	}
 }
 
@@ -254,6 +270,15 @@ func (g *Ingestor) process(ctx context.Context, blk *ltypes.BlockMsg) {
 			return
 		}
 		if err := g.inlineBackfill(ctx, bh); err != nil {
+			// A stalled sync stems from these failures; log so operators
+			// don't have to enable debug on every subsystem to see why
+			// backfillFailed is incrementing (#116).
+			log.Warnw("gossip inline-backfill failed",
+				"err", err,
+				"block_epoch", bh.Height,
+				"cur_head", curHead,
+				"parent_walk", g.parentWalk,
+				"chain_fetcher", g.chainFetcher != nil)
 			g.backfillFailed.Add(1)
 			g.skipped.Add(1)
 			return
@@ -479,8 +504,8 @@ func (g *Ingestor) parentWalkBackfill(ctx context.Context, bh *ltypes.BlockHeade
 	if curHead >= needTo {
 		return nil
 	}
-	if gap := needTo - curHead; gap > g.backfillCap {
-		return fmt.Errorf("bridge-off backfill gap %d > cap %d", gap, g.backfillCap)
+	if gap := needTo - curHead; gap > g.parentWalkCap {
+		return fmt.Errorf("bridge-off backfill gap %d > cap %d", gap, g.parentWalkCap)
 	}
 	if len(bh.Parents) == 0 {
 		return fmt.Errorf("bridge-off backfill: gossip block @ %d has no parents", bh.Height)
@@ -497,7 +522,10 @@ func (g *Ingestor) parentWalkBackfill(ctx context.Context, bh *ltypes.BlockHeade
 			// No per-CID fallback source either: surface the real error.
 			return fmt.Errorf("bridge-off chainxchg backfill: %w", err)
 		} else {
-			log.Debugw("chainxchg backfill failed; falling back to per-CID walk", "err", err)
+			log.Infow("chainxchg backfill failed; falling back to per-CID walk",
+				"err", err,
+				"block_epoch", bh.Height,
+				"cur_head", curHead)
 		}
 	}
 
@@ -508,8 +536,8 @@ func (g *Ingestor) parentWalkBackfill(ctx context.Context, bh *ltypes.BlockHeade
 	seen := map[cid.Cid]struct{}{}
 	frontier := append([]cid.Cid(nil), bh.Parents...)
 	for len(frontier) > 0 {
-		if abi.ChainEpoch(len(collected)) > g.backfillCap {
-			return fmt.Errorf("bridge-off backfill exceeded cap %d", g.backfillCap)
+		if abi.ChainEpoch(len(collected)) > g.parentWalkCap {
+			return fmt.Errorf("bridge-off backfill exceeded cap %d", g.parentWalkCap)
 		}
 		var next []cid.Cid
 		levelAllPresent := true
