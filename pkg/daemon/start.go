@@ -688,8 +688,20 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 	// Best-effort: a mpool wiring failure must not sink head-tracking, it
 	// just leaves eth_sendRawTransaction on the bridge fallback.
 	if chainAPI != nil {
+		// #119: derive the durable persist path. Default is
+		// <DataDir>/<Network>/mpool/pending.jsonl unless the caller passed
+		// an override, or MpoolPersistDisabled=true (empty path = memory-only).
+		persistPath := ""
+		if !d.cfg.MpoolPersistDisabled {
+			if d.cfg.MpoolPersistPath != "" {
+				persistPath = d.cfg.MpoolPersistPath
+			} else {
+				persistPath = filepath.Join(d.cfg.DataDir, network.String(), "mpool", "pending.jsonl")
+			}
+		}
 		mp, mperr := mpool.New(ctx, host.PubSub, mpool.Config{
-			Topic: network.GossipTopicMessages(),
+			Topic:       network.GossipTopicMessages(),
+			PersistPath: persistPath,
 		})
 		if mperr != nil {
 			log.Warnw("mpool publisher unavailable; eth_sendRawTransaction stays on bridge", "err", mperr)
@@ -698,7 +710,7 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 			d.mu.Lock()
 			d.mpool = mp
 			d.mu.Unlock()
-			log.Infow("gossipsub mempool publisher wired", "topic", network.GossipTopicMessages())
+			log.Infow("gossipsub mempool publisher wired", "topic", network.GossipTopicMessages(), "persistPath", persistPath, "restored", mp.Stats().Restored)
 
 			// lantern#47: drive the mpool's pending -> confirm -> rebroadcast
 			// loop on every head advance. StateSearchMsg is local + zero-Glif

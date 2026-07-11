@@ -250,6 +250,18 @@ type Config struct {
 	// (2 retries / 8s total). Set FEVMFetchRetries < 0 to disable.
 	FEVMFetchRetries int
 	FEVMFetchTimeout time.Duration
+
+	// MpoolPersistDisabled turns OFF the durable pending-message store
+	// (#119). Zero value = enabled: user pushed messages survive daemon
+	// restart, and the sender's next nonce stays consistent because
+	// MpoolGetNonce reads the restored pending set. Set to true only for
+	// stateless embedded uses (CI, ephemeral tests) that don't want the
+	// per-network mpool directory.
+	MpoolPersistDisabled bool
+
+	// MpoolPersistPath overrides the default persist journal path
+	// (<DataDir>/<Network>/mpool/pending.jsonl). Empty uses the default.
+	MpoolPersistPath string
 }
 
 // applyDefaults populates zero-value fields with the same defaults
@@ -482,6 +494,21 @@ func (d *Daemon) LocalEthCallStats() (handlers.LocalEthCallStatsView, bool) {
 		return handlers.LocalEthCallStatsView{}, false
 	}
 	return ch.LocalEthCallStatsView(), true
+}
+
+// MpoolStats returns a snapshot of gossipsub-mempool counters (including
+// #119 Restored + PersistPath) and true when the mempool is wired.
+// Returns (zero, false) when the pool wasn't wired (e.g. libp2p disabled
+// or mpool init failure). Useful for verifying restart-persistence
+// behavior after a soft restart.
+func (d *Daemon) MpoolStats() (mpool.Stats, bool) {
+	d.mu.Lock()
+	mp := d.mpool
+	d.mu.Unlock()
+	if mp == nil {
+		return mpool.Stats{}, false
+	}
+	return mp.Stats(), true
 }
 
 // GossipStats returns a snapshot of gossipsub block-ingestor counters

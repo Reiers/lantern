@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
@@ -59,6 +60,28 @@ type Config struct {
 	// (max retries exhausted). The message is also moved to a failed set
 	// observable via Stats.Failed. Never silently stuck.
 	OnFailed func(*ltypes.SignedMessage, string)
+
+	// --- #119: durable pending-message store ---
+	//
+	// PersistPath is the on-disk JSONL journal Lantern uses to keep the
+	// pending set alive across daemon restart. When empty (the historical
+	// default), the pool is memory-only and behaves like pre-#119.
+	//
+	// When set:
+	//   - New() opens the file, replays the journal, and re-registers every
+	//     live entry into the in-memory pending set. Nonce derivation
+	//     (MpoolGetNonce) reads Pending() so a restart transparently keeps
+	//     each account's next nonce correct.
+	//   - Publish() fsyncs an "add" line before returning success.
+	//   - Reconcile confirm/fail branches fsync a "tombstone" line.
+	//   - Rebroadcast fsyncs a "retry" line with the bumped counter.
+	//
+	// The file lives at <home>/<network>/mpool/pending.jsonl. It is chain-
+	// side of the secrets boundary (never in keystore/, secrets/, or
+	// backups/), but `lantern reset --chain-state` deliberately does NOT
+	// wipe it: user-signed pending messages are user state, not rebuildable
+	// chain state.
+	PersistPath string
 }
 
 // pendingMsg tracks a locally published message for the confirm/retry loop.
@@ -85,6 +108,12 @@ type Pool struct {
 	rebroad  uint64                  // total rebroadcasts (#47)
 	confirmd uint64                  // total confirmed-on-chain (#47)
 	failed   uint64                  // total given up (#47)
+
+	// #119: durable pending-message journal. nil when PersistPath is empty.
+	persist *persistStore
+	// restored counts how many entries were re-registered from disk at
+	// startup (observable via Stats for smoke tests + dashboard).
+	restored uint64
 }
 
 // New starts a Pool: joins the topic, subscribes, and (if OnMessage is set)
@@ -115,14 +144,58 @@ func New(ctx context.Context, ps *pubsub.PubSub, cfg Config) (*Pool, error) {
 		cfg:     cfg,
 		pending: make(map[cid.Cid]*pendingMsg),
 	}
+
+	// #119: if PersistPath is set, open the journal + re-register any
+	// live entries. Failure to open the store is fatal (we'd otherwise
+	// silently regress to memory-only behaviour and lose the peace-of-mind
+	// contract on the very restart that motivated #119).
+	if cfg.PersistPath != "" {
+		store, perr := openPersistStore(cfg.PersistPath)
+		if perr != nil {
+			_ = sub.Cancel
+			_ = t.Close()
+			return nil, fmt.Errorf("open pending journal: %w", perr)
+		}
+		p.persist = store
+		// Re-register live entries. Counter resets on restart: the
+		// resurrection itself is not a rebroadcast, only actual re-gossip
+		// events on the next Reconcile bump the counter.
+		for _, e := range store.All() {
+			sm, derr := e.SignedMessage()
+			if derr != nil {
+				log.Warnw("mpool persist: dropping undecodable entry", "cid", e.CID, "err", derr)
+				_ = store.Remove(e.CID)
+				continue
+			}
+			p.pending[e.CID] = &pendingMsg{
+				sm:           sm,
+				raw:          e.Raw,
+				publishedAt:  e.PublishedAt,
+				retries:      e.Retries,
+				lastActivity: e.PublishedAt,
+			}
+			p.restored++
+		}
+		if p.restored > 0 {
+			log.Infow("mpool persist: restored pending entries across restart", "count", p.restored, "path", cfg.PersistPath)
+		}
+	}
+
 	go p.readLoop(ctx)
 	return p, nil
 }
 
-// Close stops the subscription and topic.
+// Close stops the subscription and topic, and closes the persist journal
+// (when open).
 func (p *Pool) Close() error {
 	p.sub.Cancel()
-	return p.topic.Close()
+	topicErr := p.topic.Close()
+	if p.persist != nil {
+		if perr := p.persist.Close(); perr != nil && topicErr == nil {
+			return perr
+		}
+	}
+	return topicErr
 }
 
 func (p *Pool) readLoop(ctx context.Context) {
@@ -171,6 +244,18 @@ func (p *Pool) Publish(ctx context.Context, sm *ltypes.SignedMessage) (cid.Cid, 
 		p.mu.Lock()
 		p.pending[mcid] = &pendingMsg{sm: sm, raw: raw}
 		p.mu.Unlock()
+		// #119: persist even dry-run entries so tests exercise the same
+		// journal path production uses. A production caller with DryRun=true
+		// AND PersistPath set is unusual but consistent.
+		if p.persist != nil {
+			if perr := p.persist.Add(&PersistEntry{
+				CID:           mcid,
+				Raw:           raw,
+				FirstSeenWall: time.Now().UTC(),
+			}); perr != nil {
+				log.Warnw("mpool persist: add failed on dry-run publish", "cid", mcid, "err", perr)
+			}
+		}
 		log.Infof("mpool DRY-RUN: would publish %s (%d bytes) to %s", mcid, len(raw), p.cfg.Topic)
 		return mcid, ErrDryRun
 	}
@@ -182,6 +267,19 @@ func (p *Pool) Publish(ctx context.Context, sm *ltypes.SignedMessage) (cid.Cid, 
 	p.pending[mcid] = &pendingMsg{sm: sm, raw: raw}
 	p.publishd++
 	p.mu.Unlock()
+	// #119: fsync the entry to the journal AFTER the gossipsub push. If
+	// the fsync fails we surface as an error even though the message is
+	// already on the wire; the caller can decide whether to retry (which
+	// is idempotent: identical bytes, same nonce, same CID).
+	if p.persist != nil {
+		if perr := p.persist.Add(&PersistEntry{
+			CID:           mcid,
+			Raw:           raw,
+			FirstSeenWall: time.Now().UTC(),
+		}); perr != nil {
+			return mcid, fmt.Errorf("persist pending message (gossipsub push already sent, safe to retry): %w", perr)
+		}
+	}
 	return mcid, nil
 }
 
@@ -203,6 +301,11 @@ func (p *Pool) Forget(c cid.Cid) {
 	p.mu.Lock()
 	delete(p.pending, c)
 	p.mu.Unlock()
+	if p.persist != nil {
+		if err := p.persist.Remove(c); err != nil {
+			log.Warnw("mpool persist: remove on Forget failed", "cid", c, "err", err)
+		}
+	}
 }
 
 // Stats reports observable counters.
@@ -215,6 +318,8 @@ type Stats struct {
 	Failed       uint64 // #47
 	PendingCnt   int
 	Topic        string
+	Restored     uint64 // #119 — entries re-registered from persist journal on startup
+	PersistPath  string // #119 — empty when persistence is disabled
 }
 
 // Stats returns activity counters.
@@ -230,6 +335,8 @@ func (p *Pool) Stats() Stats {
 		Failed:       p.failed,
 		PendingCnt:   len(p.pending),
 		Topic:        p.cfg.Topic,
+		Restored:     p.restored,
+		PersistPath:  p.cfg.PersistPath,
 	}
 }
 
