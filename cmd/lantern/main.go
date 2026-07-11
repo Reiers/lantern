@@ -48,6 +48,7 @@ import (
 
 	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/anchorverify"
+	"github.com/Reiers/lantern/chain/bootstrap"
 	"github.com/Reiers/lantern/chain/crosscheck"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
 	"github.com/Reiers/lantern/chain/fullvalidate"
@@ -57,6 +58,7 @@ import (
 	"github.com/Reiers/lantern/chain/types"
 	"github.com/Reiers/lantern/internal/buildinfo"
 	lbitswap "github.com/Reiers/lantern/net/bitswap"
+	"github.com/Reiers/lantern/net/blockingest"
 	"github.com/Reiers/lantern/net/blockpub"
 	"github.com/Reiers/lantern/net/chainxchg"
 	"github.com/Reiers/lantern/net/combined"
@@ -784,6 +786,15 @@ func cmdDaemon(args []string) error {
 	// is separate from runtime fetch counters.
 	noFallbackRPC := fs.Bool("no-fallback-rpc", false, "#76 bridge-off: wire no upstream RPC (Glif) fallback. Head=gossipsub-only, cold-blocks=gateway+bitswap. Requires libp2p/gossipsub.")
 	seedPeerWait := fs.Duration("seed-peer-wait", 120*time.Second, "#91/#109 bridge-off: max time to wait for ChainExchange peers to seed the boot anchor tipset before failing loud.")
+	// #118: bridge-off boot auto-stale-reset. When --no-fallback-rpc is
+	// set there is no polling Sync stale-reset (that path lives on the RPC
+	// head-source), so a daemon that was stopped past parentWalkCap boots
+	// wedged. On boot, if the persisted anchor is older than --anchor-max-age,
+	// re-run the same multi-source quorum probe `lantern repair` uses and
+	// overwrite the anchor; then the existing ChainExchange seed re-seats
+	// the header store. Chain state only; keys are never touched.
+	anchorMaxAge := fs.Duration("anchor-max-age", 12*time.Hour, "#118: auto-refresh the persisted bootstrap anchor when it is older than this on boot (bridge-off only). 0 disables. Chain state only; keys are never touched.")
+	autoStaleReset := fs.Bool("auto-stale-reset", true, "#118: enable auto-refresh of stale anchor + drop of stale headerstore on boot in bridge-off mode. RPC mode is unaffected (polling Sync already handles it via --stale-reset-threshold).")
 	fs.Parse(args)
 
 	// #58: --allow-empty-passphrase is sugar for the env the keystore guard
@@ -870,6 +881,46 @@ func cmdDaemon(args []string) error {
 	fmt.Printf("Lantern daemon — Lotus-compatible RPC (network: %s)\n", network)
 	fmt.Printf("  data dir:    %s\n", netDir)
 	fmt.Println("Fetching trusted head from", *gw)
+
+	// #118: bridge-off auto-stale-reset. Runs BEFORE the anchor is loaded
+	// so a stale anchor is refreshed on disk first and the load below picks
+	// up the fresh finality. No-op outside bridge-off (RPC path uses the
+	// polling Sync's StaleResetThreshold, #51).
+	{
+		quorum := 5
+		if network == build.Calibration {
+			quorum = 3
+		}
+		networkName := "filecoin"
+		if network == build.Calibration {
+			networkName = "calibrationnet2"
+		}
+		probeParams := bootstrapParams{
+			Quorum:       quorum,
+			Timeout:      60 * time.Second,
+			Gateway:      *gw,
+			CountGateway: false,
+			NoLibp2p:     *noLibp2p,
+			Libp2pSettle: 8 * time.Second,
+			NetworkName:  networkName,
+			Network:      network,
+			Progress:     prettyProgress,
+		}
+		if _, rerr := maybeAutoRefreshAnchor(ctx, autoStaleResetOpts{
+			dir:       netDir,
+			network:   network,
+			enabled:   *autoStaleReset,
+			bridgeOff: *noFallbackRPC,
+			maxAge:    *anchorMaxAge,
+			probe: func(pctx context.Context) (bootstrap.Finality, error) {
+				return runBootstrapQuorum(pctx, probeParams)
+			},
+			write: writeBootstrapAnchor,
+		}); rerr != nil {
+			return fmt.Errorf("auto-stale-reset: %w", rerr)
+		}
+	}
+
 	// #76: prefer the persisted multi-source quorum anchor (written by
 	// `lantern init` / `lantern repair`) so a normal boot needs no gateway
 	// or RPC. Bridge-off refuses to fall back to a re-probe; a normal node
@@ -990,6 +1041,35 @@ func cmdDaemon(args []string) error {
 		store, err = hstore.Open(*hsPath, hstore.Options{})
 		if err != nil {
 			return fmt.Errorf("open header store: %w", err)
+		}
+
+		// #118: bridge-off + fresh anchor + persisted store head that is
+		// >= parentWalkCap behind the anchor → drop the header store and let
+		// the ChainExchange seed below re-seat it from the fresh anchor.
+		// The seed at store.HeadEpoch() <= tr.Epoch already handles the
+		// "store slightly behind" case; this drop covers the "store so far
+		// behind that no parent-walk can stitch it back" case that #51 solved
+		// in the polling-Sync path. Chain state only; keys/JWT/tokens are
+		// never referenced.
+		if *noFallbackRPC && *autoStaleReset && store.HeadEpoch() > 0 {
+			gap := tr.Epoch - store.HeadEpoch()
+			if gap > blockingest.DefaultParentWalkCap {
+				fmt.Printf("  auto-stale-reset: header store head %d is %d epochs (~%.1f days) behind fresh anchor %d, beyond parent-walk cap %d — dropping to re-seed via ChainExchange (chain state only; keys untouched, #118)\n",
+					store.HeadEpoch(), gap, float64(gap)/2880.0, tr.Epoch, blockingest.DefaultParentWalkCap)
+				if cerr := store.Close(); cerr != nil {
+					return fmt.Errorf("auto-stale-reset: close stale header store before drop: %w", cerr)
+				}
+				if rerr := os.RemoveAll(*hsPath); rerr != nil {
+					return fmt.Errorf("auto-stale-reset: drop stale header store dir: %w", rerr)
+				}
+				if merr := os.MkdirAll(*hsPath, 0o700); merr != nil {
+					return fmt.Errorf("auto-stale-reset: recreate header store dir: %w", merr)
+				}
+				store, err = hstore.Open(*hsPath, hstore.Options{})
+				if err != nil {
+					return fmt.Errorf("auto-stale-reset: reopen header store after drop: %w", err)
+				}
+			}
 		}
 		defer store.Close()
 		chainAPI.HeaderStore = store
