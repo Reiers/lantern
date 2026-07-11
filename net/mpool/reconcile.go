@@ -86,6 +86,13 @@ func (p *Pool) Reconcile(ctx context.Context, headEpoch int64, search SearchFunc
 				p.confirmd++
 			}
 			p.mu.Unlock()
+			// #119: drop from durable journal so a subsequent restart
+			// doesn't re-register a message that already landed.
+			if p.persist != nil {
+				if rerr := p.persist.Remove(it.cid); rerr != nil {
+					log.Warnw("mpool persist: remove on confirm failed", "cid", it.cid, "err", rerr)
+				}
+			}
 			log.Debugw("mpool: message confirmed on chain", "cid", it.cid)
 			continue
 		}
@@ -106,6 +113,15 @@ func (p *Pool) Reconcile(ctx context.Context, headEpoch int64, search SearchFunc
 				p.failed++
 			}
 			p.mu.Unlock()
+			// #119: drop from durable journal on give-up. OnFailed fires
+			// exactly once (before the tombstone hits disk, but the tombstone
+			// is idempotent so a crash-and-restart never re-fires OnFailed
+			// for the same cid: on load the entry is gone → no restore).
+			if ok && p.persist != nil {
+				if rerr := p.persist.Remove(it.cid); rerr != nil {
+					log.Warnw("mpool persist: remove on give-up failed", "cid", it.cid, "err", rerr)
+				}
+			}
 			if ok {
 				log.Warnw("mpool: message gave up (max retries) — surfacing as failed",
 					"cid", it.cid, "retries", pm.retries, "nonce", pm.sm.Message.Nonce)
@@ -125,14 +141,30 @@ func (p *Pool) Reconcile(ctx context.Context, headEpoch int64, search SearchFunc
 				continue
 			}
 		}
+		var (
+			newRetries int
+			anchor     int64
+			stillLive  bool
+		)
 		p.mu.Lock()
 		if pm, ok := p.pending[it.cid]; ok {
 			pm.retries++
 			pm.lastActivity = headEpoch
 			pm.publishedAt = it.pm.publishedAt // keep original anchor; window resets via lastActivity if desired
 			p.rebroad++
+			newRetries = pm.retries
+			anchor = pm.publishedAt
+			stillLive = true
 		}
 		p.mu.Unlock()
+		// #119: persist the bumped retry counter so a restart doesn't
+		// silently reset progress toward MaxRetries. Idempotent no-op if
+		// the entry was tombstoned concurrently.
+		if stillLive && p.persist != nil {
+			if uerr := p.persist.UpdateOnRebroadcast(it.cid, newRetries, anchor); uerr != nil {
+				log.Warnw("mpool persist: update on rebroadcast failed", "cid", it.cid, "err", uerr)
+			}
+		}
 		log.Debugw("mpool: rebroadcast pending message (identical bytes)", "cid", it.cid, "retries", it.pm.retries+1)
 	}
 }
