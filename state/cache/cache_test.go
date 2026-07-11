@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/ipfs/go-cid"
@@ -104,6 +105,59 @@ func TestPersistsAcrossReopen(t *testing.T) {
 	}
 	if s2.Stats().LiveBytes <= 0 {
 		t.Fatal("live-bytes not recovered on reopen")
+	}
+}
+
+// TestCloseWaitsForAsyncTouchAndEviction is the regression test for #114.
+// Before the fix, Store.Get spawned an async LRU-bump goroutine (touch)
+// and Store.Put spawned an async over-cap eviction goroutine; both
+// captured s.db and raced against Close, panicking with a nil-deref
+// inside badger's memTable traversal when the DB tore down under them.
+// After the fix, Close waits for any pre-Close background job to finish
+// before closing the DB. This test hammers the racy pattern many times
+// and asserts no goroutine escapes Close.
+func TestCloseWaitsForAsyncTouchAndEviction(t *testing.T) {
+	for iter := 0; iter < 32; iter++ {
+		// Tiny cap so every Put trips the over-cap eviction spawn path.
+		s, err := Open(t.TempDir(), Options{SoftCapBytes: 128})
+		if err != nil {
+			t.Fatalf("iter %d Open: %v", iter, err)
+		}
+
+		// Seed one CID that Get can find and touch async.
+		data := []byte("seed-" + fmt.Sprint(iter))
+		c := mkCID(t, data)
+		s.Put(c, data)
+
+		// Fan out concurrent Gets (each fires go s.touch) and Puts (each
+		// fires go s.evictToTarget once over cap). Close is called with
+		// touches/evictions likely still in flight.
+		var wg sync.WaitGroup
+		for i := 0; i < 24; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, _ = s.Get(context.Background(), c)
+			}()
+		}
+		for i := 0; i < 24; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				d := []byte(fmt.Sprintf("p-%d-%d", iter, i))
+				s.Put(mkCID(t, d), d)
+			}(i)
+		}
+		wg.Wait()
+
+		// Close must not panic and must return promptly even if async
+		// touch/evict goroutines are still executing at the moment of
+		// entry. If the fix regresses, badger's DB.Close will race and
+		// this call panics (or the async goroutines panic and crash the
+		// test binary).
+		if err := s.Close(); err != nil {
+			t.Fatalf("iter %d Close: %v", iter, err)
+		}
 	}
 }
 
