@@ -575,6 +575,16 @@ var errBridgeUnconfigured = xerrors.New("FEVM method requires --vm-bridge-rpc po
 // trust-anchored chain head (we don't speak the FEVM ourselves, but
 // we know which block to ask about).
 func (c *ChainAPI) EthCall(ctx context.Context, callObj any, blockParam any) (string, error) {
+	// Devnet bridge-first (lantern#123 finding 7): on a single-node docker
+	// devnet the local hamt walk always burns its full retry budget (no
+	// bitswap peers to fetch cold storage-trie blocks from), then falls
+	// through to the bridge anyway. The devnet lotus IS the source of
+	// truth for the devnet chain, so short-circuiting straight to it is
+	// both faster and semantically identical. Guarded on Bridge != nil so
+	// we still attempt local if the operator dropped the auto-wired bridge.
+	if c.NetworkName == "devnet" && c.Bridge != nil {
+		return c.bridgeEthCall(ctx, callObj, blockParam)
+	}
 	// Local FEVM execution first (lantern#43 Part B): run the call against
 	// our own verified state tree with the pure-Go EVM. A clean local
 	// result (including a definitive revert) is returned directly; a local
@@ -606,6 +616,13 @@ func (c *ChainAPI) EthCall(ctx context.Context, callObj any, blockParam any) (st
 		}
 	}
 
+	return c.bridgeEthCall(ctx, callObj, blockParam)
+}
+
+// bridgeEthCall forwards eth_call to the auto-wired VM bridge. Extracted
+// so the devnet bridge-first path and the mainnet/calibration local-miss
+// fallback share the same code.
+func (c *ChainAPI) bridgeEthCall(ctx context.Context, callObj any, blockParam any) (string, error) {
 	if c.Bridge == nil {
 		return "", errBridgeUnconfigured
 	}
@@ -893,6 +910,18 @@ func (c *ChainAPI) EthGetTransactionByBlockNumberAndIndex(ctx context.Context, b
 // without a VMBridge. Falls back to the bridge only when the address
 // can't be resolved locally (cold blocks during rollout).
 func (c *ChainAPI) EthGetCode(ctx context.Context, addr string, blockParam any) (string, error) {
+	// Devnet bridge-first (lantern#123 finding 7): see EthCall.
+	if c.NetworkName == "devnet" && c.Bridge != nil {
+		raw, err := c.forwardEth(ctx, "eth_getCode", []any{addr, blockParam})
+		if err != nil {
+			return "", err
+		}
+		s, ok := raw.(string)
+		if !ok {
+			return "", xerrors.Errorf("eth_getCode: unexpected result type %T", raw)
+		}
+		return s, nil
+	}
 	if out, served, err := c.localEthGetCode(ctx, addr); served {
 		return out, err
 	}
@@ -910,6 +939,18 @@ func (c *ChainAPI) EthGetCode(ctx context.Context, addr string, blockParam any) 
 // EthGetStorageAt returns the raw 32-byte storage slot value at the
 // given key on the given contract.
 func (c *ChainAPI) EthGetStorageAt(ctx context.Context, addr string, key string, blockParam any) (string, error) {
+	// Devnet bridge-first (lantern#123 finding 7): see EthCall.
+	if c.NetworkName == "devnet" && c.Bridge != nil {
+		raw, err := c.forwardEth(ctx, "eth_getStorageAt", []any{addr, key, blockParam})
+		if err != nil {
+			return "", err
+		}
+		s, ok := raw.(string)
+		if !ok {
+			return "", xerrors.Errorf("eth_getStorageAt: unexpected result type %T", raw)
+		}
+		return s, nil
+	}
 	// Local-first (lantern#75): read the storage slot from local state so a
 	// bridge-off node serves it without a VMBridge; fall back otherwise.
 	if out, served, err := c.localEthGetStorageAt(ctx, addr, key); served {
