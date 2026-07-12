@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/filecoin-project/go-state-types/abi"
@@ -297,4 +298,66 @@ func (c *Client) FetchGenesis(ctx context.Context) (cid.Cid, error) {
 		return cid.Undef, errors.New("ChainGetGenesis returned empty tipset")
 	}
 	return cid.Parse(raw.Cids[0].Slash)
+}
+
+// EthChainID queries eth_chainId and returns the decimal chain identifier.
+// The devnet-init path uses this to bind the devnet's EIP-155 chain ID
+// into the Lantern config so `eth_chainId` + `net_version` on the daemon
+// return the same value clients pass to `docker compose up` (Curio's
+// devnet defaults to 31415926 / 0x1df5e76).
+func (c *Client) EthChainID(ctx context.Context) (uint64, error) {
+	var hex string
+	if err := c.rpcCall(ctx, "eth_chainId", []any{}, &hex); err != nil {
+		return 0, err
+	}
+	s := hex
+	if len(s) >= 2 && s[:2] == "0x" {
+		s = s[2:]
+	}
+	v, err := strconv.ParseUint(s, 16, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse eth_chainId %q: %w", hex, err)
+	}
+	return v, nil
+}
+
+// BlockDelaySecs queries Filecoin.Version and returns the BlockDelay
+// field (block cadence in seconds). Mainnet = 30, calibration = 30,
+// curio-fork docker devnet = 4. Devnet setups may customize this via
+// the `//go:build 2k` variant, so we bind it at devnet-init time.
+func (c *Client) BlockDelaySecs(ctx context.Context) (uint64, error) {
+	var v struct {
+		BlockDelay uint64 `json:"BlockDelay"`
+	}
+	if err := c.rpcCall(ctx, "Filecoin.Version", []any{}, &v); err != nil {
+		return 0, err
+	}
+	return v.BlockDelay, nil
+}
+
+// MpoolPush pushes a signed message via the upstream lotus RPC's
+// Filecoin.MpoolPush method. Used by devnet mode (`--network devnet`)
+// as the send-path sink for the local mpool: a single-node docker devnet
+// can't form a gossipsub mesh, so the pubsub topic never propagates.
+// The devnet's lotus accepts signed messages directly via this JSON-RPC
+// method and does its own inclusion.
+//
+// Trust posture: unchanged from #122. Devnet is single-source by design
+// (operator owns the devnet). This method is NOT used on mainnet/
+// calibration; the gossipsub publisher path continues to be the only
+// producer of network traffic there.
+func (c *Client) MpoolPush(ctx context.Context, sm *types.SignedMessage) (cid.Cid, error) {
+	if sm == nil {
+		return cid.Undef, errors.New("glif: MpoolPush nil signed message")
+	}
+	var out struct {
+		Slash string `json:"/"`
+	}
+	if err := c.rpcCall(ctx, "Filecoin.MpoolPush", []any{sm}, &out); err != nil {
+		return cid.Undef, err
+	}
+	if out.Slash == "" {
+		return cid.Undef, fmt.Errorf("glif: MpoolPush returned empty CID; local CID would have been %s", sm.Cid())
+	}
+	return cid.Parse(out.Slash)
 }

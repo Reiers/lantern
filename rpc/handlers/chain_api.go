@@ -35,6 +35,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/Reiers/lantern/api"
+	"github.com/Reiers/lantern/build"
 	lbeacon "github.com/Reiers/lantern/chain/beacon"
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	headnotify "github.com/Reiers/lantern/chain/headnotify"
@@ -288,6 +289,16 @@ func (c *ChainAPI) AuthNew(_ context.Context, perms []auth.Permission) ([]byte, 
 // Untagged dev builds report "dev Lantern+mainnet". No "lotus-compat"
 // suffix: Curio and Lotus CLIs only gate on APIVersion's major/minor.
 func (c *ChainAPI) Version(_ context.Context) (api.Version, error) {
+	// BlockDelay is 30 on mainnet/calibration, 4 on the curio-fork docker
+	// devnet (`//go:build 2k`). Devnet consumers like curio's scheduler
+	// compute epoch-time from this, so use the runtime devnet config
+	// when we're on devnet. Fixes lantern#123.
+	blockDelay := uint64(30)
+	if c.NetworkName == "devnet" {
+		if cfg := build.GetDevnetConfig(); cfg != nil && cfg.BlockDelaySecs > 0 {
+			blockDelay = cfg.BlockDelaySecs
+		}
+	}
 	return api.Version{
 		Version: buildinfo.BuildVersion() + " Lantern+" + buildinfo.Network(),
 		// Lotus FullAPIVersion1 = newVer(2,3,0) = (2<<16)|(3<<8)|0 = 0x020300.
@@ -295,7 +306,7 @@ func (c *ChainAPI) Version(_ context.Context) (api.Version, error) {
 		// patch byte is free for us to bump as Lantern's RPC surface
 		// evolves; the 2.3.x major.minor is what's gated.
 		APIVersion: 0x00020300,
-		BlockDelay: 30,
+		BlockDelay: blockDelay,
 	}, nil
 }
 
@@ -637,6 +648,16 @@ func (c *ChainAPI) StateNetworkName(_ context.Context) (string, error) {
 		return "calibrationnet", nil
 	case "", "mainnet":
 		return "mainnet", nil
+	case "devnet":
+		// The devnet's wire-name is the localnet-uuid that was
+		// generated when its genesis was created. Read from the
+		// runtime config seeded by `lantern devnet-init`, not the
+		// literal string "devnet", so gossipsub topics + DHT
+		// protocol prefix line up with lotus. Fixes lantern#123.
+		if cfg := build.GetDevnetConfig(); cfg != nil && cfg.NetworkName != "" {
+			return cfg.NetworkName, nil
+		}
+		return "devnet", nil
 	default:
 		return c.NetworkName, nil
 	}
@@ -1291,6 +1312,28 @@ func (c *ChainAPI) MpoolPending(_ context.Context, _ []types.TipSetKey) ([]*type
 		return pl.Pending(), nil
 	}
 	return nil, nil
+}
+
+// MpoolGetConfig returns a static MpoolConfig snapshot. Lantern doesn't
+// maintain a full lotus-style mempool with priority-addr admission /
+// RBF / size-based pruning; we only track locally-published messages
+// for the #47 rebroadcast + #119 persist paths. But some consumers
+// (curio at boot) call MpoolGetConfig to size their own mempool tracking
+// caches. Returning sensible lotus-default values keeps those consumers
+// happy without pretending Lantern implements the full admission policy.
+// Fixes lantern#123 finding 6.
+func (c *ChainAPI) MpoolGetConfig(_ context.Context) (*types.MpoolConfig, error) {
+	return &types.MpoolConfig{
+		// nil slice marshals to JSON null, matching lotus's PriorityAddrs
+		// wire shape byte-for-byte. An empty slice would marshal as [] and
+		// break consumers that check == null (curio boot does this).
+		PriorityAddrs:          nil,
+		SizeLimitHigh:          30000,
+		SizeLimitLow:           20000,
+		ReplaceByFeeRatio:      types.Percent(125),
+		PruneCooldown:          time.Minute,
+		GasLimitOverestimation: 1.25,
+	}, nil
 }
 
 // ----------------- SP block production (Tier 4) -----------------

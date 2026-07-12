@@ -77,6 +77,15 @@ type DevnetConfig struct {
 	// //go:build 2k curio devnet; mainnet is 30s). Optional; the
 	// daemon uses build.BlockDelaySecs as fallback.
 	BlockDelaySecs uint64 `json:"blockDelaySecs,omitempty"`
+
+	// EthChainID is the EIP-155 chain identifier the devnet lotus
+	// reports via eth_chainId. Comes from eth_chainId on the devnet
+	// lotus at devnet-init time. Devnet lotus uses this to scope
+	// signatures + reject cross-chain replays. The curio-fork docker
+	// devnet defaults to 31415926 (0x1df5e76); custom setups may pick
+	// different values. Optional (older configs may lack the field);
+	// when missing, callers should re-run `lantern devnet-init --force`.
+	EthChainID uint64 `json:"ethChainID,omitempty"`
 }
 
 var (
@@ -151,6 +160,10 @@ func LoadDevnetConfig(path string) (*DevnetConfig, error) {
 	if c.NetworkName == "" || c.GenesisCID == "" {
 		return nil, fmt.Errorf("devnet config missing required fields (networkName, genesisCID); re-run `lantern devnet-init`")
 	}
+	// EthChainID may be zero on configs written before lantern#123.
+	// Handlers that need it should re-run devnet-init or fall back to
+	// querying lotus once at boot.
+
 	return &c, nil
 }
 

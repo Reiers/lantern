@@ -53,6 +53,20 @@ func (c *ChainAPI) ChainGetGenesis(_ context.Context) (*types.TipSet, error) {
 			return nil, fmt.Errorf("parse mainnet genesis cid: %w", err)
 		}
 		return chainGetGenesisStub(gc), nil
+	case "devnet":
+		// Devnet genesis is generated per-boot; read the CID from
+		// the runtime config seeded by `lantern devnet-init`.
+		// Fixes lantern#123.
+		cfg := build.GetDevnetConfig()
+		if cfg == nil || cfg.GenesisCID == "" {
+			return nil, ErrNotImpl("ChainGetGenesis",
+				"devnet config not loaded; re-run `lantern devnet-init --lotus-rpc <URL>`")
+		}
+		gc, err := cid.Parse(cfg.GenesisCID)
+		if err != nil {
+			return nil, fmt.Errorf("parse devnet genesis cid %q: %w", cfg.GenesisCID, err)
+		}
+		return chainGetGenesisStub(gc), nil
 	default:
 		return nil, ErrNotImpl("ChainGetGenesis",
 			"genesis CID for network "+c.NetworkName+" not embedded in build/")
@@ -256,6 +270,17 @@ func (c *ChainAPI) EthChainId(_ context.Context) (string, error) {
 	switch c.NetworkName {
 	case "calibration":
 		return "0x4cb2f", nil // 314159
+	case "devnet":
+		// Devnet chainId is per-config (curio-fork docker devnet
+		// defaults to 31415926, custom setups may differ). Read
+		// from the runtime config seeded by `lantern devnet-init`.
+		// Missing/zero chainId means an older devnet-config predates
+		// lantern#123; ask the operator to re-init.
+		cfg := build.GetDevnetConfig()
+		if cfg == nil || cfg.EthChainID == 0 {
+			return "", fmt.Errorf("devnet ethChainID missing from config; re-run `lantern devnet-init --force`")
+		}
+		return fmt.Sprintf("0x%x", cfg.EthChainID), nil
 	default:
 		return "0x13a", nil // 314
 	}

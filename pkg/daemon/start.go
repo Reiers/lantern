@@ -307,6 +307,57 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 			}
 		}
 
+		// lantern#123: devnet lotus-RPC mpool sink.
+		//
+		// On a single-node docker devnet the gossipsub mesh can't form
+		// (no peers), so the standard mpool.Pool wired inside
+		// startGossipHead has nothing to publish onto. Wire a Pool whose
+		// Config.Sink POSTs directly to the devnet's lotus via
+		// Filecoin.MpoolPush. All other Pool semantics (persist journal,
+		// pending set, nonce derivation, #47 reconcile/rebroadcast loop)
+		// work identically; only the wire transport changes.
+		//
+		// Trust posture: unchanged from #122. Devnet is single-source by
+		// design (operator owns the devnet). This path is guarded on
+		// network == Devnet so it never fires on mainnet/calibration.
+		if chainAPI != nil && chainAPI.Mpool == nil && network == build.Devnet {
+			devnetCfg := build.GetDevnetConfig()
+			if devnetCfg != nil && devnetCfg.LotusRPC != "" {
+				lotusClient := glif.New(devnetCfg.LotusRPC, 15*time.Second)
+				persistPath := ""
+				if !d.cfg.MpoolPersistDisabled {
+					if d.cfg.MpoolPersistPath != "" {
+						persistPath = d.cfg.MpoolPersistPath
+					} else {
+						persistPath = filepath.Join(d.cfg.DataDir, network.String(), "mpool", "pending.jsonl")
+					}
+				}
+				sink := func(sctx context.Context, sm *types.SignedMessage, _ []byte) (cid.Cid, error) {
+					return lotusClient.MpoolPush(sctx, sm)
+				}
+				mp, mperr := mpool.New(ctx, nil, mpool.Config{
+					Topic:       network.GossipTopicMessages(),
+					PersistPath: persistPath,
+					Sink:        sink,
+				})
+				if mperr != nil {
+					log.Warnw("devnet lotus-RPC mpool wiring failed; MpoolPushMessage will error out", "err", mperr)
+				} else {
+					chainAPI.Mpool = mp
+					d.mu.Lock()
+					d.mpool = mp
+					d.mu.Unlock()
+					log.Infow("devnet mpool wired via lotus RPC (lantern#123)",
+						"lotusRPC", devnetCfg.LotusRPC,
+						"persistPath", persistPath,
+						"restored", mp.Stats().Restored)
+				}
+			} else {
+				log.Warnw("devnet mode active but devnet-config missing LotusRPC; MpoolPushMessage will error out",
+					"hint", "re-run `lantern devnet-init --lotus-rpc <URL>`")
+			}
+		}
+
 		// lantern#44: FEVM contract-state prefetcher. On every head advance,
 		// walk the configured EVM contract addresses' bytecode + storage
 		// subtree into the local blockstore cache so later eth_calls hit
@@ -390,8 +441,24 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 	// eth_estimateGas) and SendRawTransaction get forwarded to an
 	// upstream Forest/Lotus node. Without this, eth_call against any
 	// contract returns "FEVM method requires --vm-bridge-rpc".
-	if d.cfg.VMBridgeRPC != "" {
-		vmBr := bridge.NewForestBridge(d.cfg.VMBridgeRPC, d.cfg.VMBridgeToken, d.cfg.VMBridgeTimeout)
+	//
+	// lantern#123: on devnet, if the operator didn't set --vm-bridge-rpc
+	// explicitly, auto-wire the devnet lotus as the bridge. The trust
+	// posture is unchanged from #122: devnet is single-source by design
+	// (operator owns both the devnet lotus and the Lantern client).
+	// Without this, eth_getCode / eth_call / eth_getStorageAt time out
+	// on cold state (no libp2p means no bitswap for state blocks) and
+	// fall through to `errBridgeUnconfigured`.
+	vmBridgeRPC := d.cfg.VMBridgeRPC
+	vmBridgeToken := d.cfg.VMBridgeToken
+	if vmBridgeRPC == "" && network == build.Devnet {
+		if devnetCfg := build.GetDevnetConfig(); devnetCfg != nil && devnetCfg.LotusRPC != "" {
+			vmBridgeRPC = devnetCfg.LotusRPC
+			log.Infow("devnet auto-wiring lotus as VMBridge (lantern#123)", "lotusRPC", vmBridgeRPC)
+		}
+	}
+	if vmBridgeRPC != "" {
+		vmBr := bridge.NewForestBridge(vmBridgeRPC, vmBridgeToken, d.cfg.VMBridgeTimeout)
 		chainAPI.WithBridge(vmBr)
 		chainAPI.AllowBlockSubmit = d.cfg.AllowBlockSubmit
 		if !d.cfg.EmbeddedMode {

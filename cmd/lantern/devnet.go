@@ -101,12 +101,36 @@ func cmdDevnetInit(args []string) error {
 	}
 	fmt.Printf("  ✓ ChainHead:        epoch %d, state root %s\n", head.Epoch, head.StateRoot)
 
-	// 4. Assemble + write config.
+	// 4. eth_chainId → EIP-155 chain identifier. Devnet's chainId is
+	// per-config (curio-fork docker devnet defaults to 31415926,
+	// custom setups may differ), so we bind it at devnet-init time.
+	cidCtx, cidCancel := context.WithTimeout(ctx, *timeout)
+	chainID, err := c.EthChainID(cidCtx)
+	cidCancel()
+	if err != nil {
+		return fmt.Errorf("eth_chainId: %w", err)
+	}
+	fmt.Printf("  ✓ eth_chainId:      %d (0x%x)\n", chainID, chainID)
+
+	// 5. Version.BlockDelay → block cadence in seconds. Devnet default is
+	// 4s (curio-fork docker), but the operator may customize; consumers
+	// computing epoch-time (curio schedulers) need the actual value.
+	verCtx, verCancel := context.WithTimeout(ctx, *timeout)
+	blockDelay, err := c.BlockDelaySecs(verCtx)
+	verCancel()
+	if err != nil {
+		return fmt.Errorf("Filecoin.Version.BlockDelay: %w", err)
+	}
+	fmt.Printf("  ✓ BlockDelaySecs:   %d\n", blockDelay)
+
+	// 6. Assemble + write config.
 	cfg := &build.DevnetConfig{
 		NetworkName:    networkName,
 		GenesisCID:     genesisCID.String(),
 		LotusRPC:       *lotusRPC,
 		BootstrapPeers: splitCSV(*bootstrapPeers),
+		EthChainID:     chainID,
+		BlockDelaySecs: blockDelay,
 	}
 	if err := build.SaveDevnetConfig(cfgPath, cfg); err != nil {
 		return fmt.Errorf("write devnet config: %w", err)
@@ -119,7 +143,7 @@ func cmdDevnetInit(args []string) error {
 		fmt.Printf("    bootstrap peers:    (none — single-cluster devnet)\n")
 	}
 
-	// 5. Seed bootstrap-anchor.json from ChainHead, so the daemon can
+	// 7. Seed bootstrap-anchor.json from ChainHead, so the daemon can
 	//    start without a multi-source quorum probe (which wouldn't
 	//    reach quorum against a single-endpoint devnet anyway).
 	if *skipAnchor {

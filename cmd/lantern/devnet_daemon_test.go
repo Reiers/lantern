@@ -62,6 +62,14 @@ func fakeDaemonLotus(t *testing.T, networkName, genesisCIDStr string, headEpoch 
 					"ParentWeight":          "12345",
 				}},
 			}
+		case "eth_chainId":
+			resp["result"] = "0x1df5e76" // 31415926, curio-fork devnet default
+		case "Filecoin.Version":
+			resp["result"] = map[string]any{
+				"Version":    "1.35.1+devnet-fake",
+				"APIVersion": 0x00020300,
+				"BlockDelay": 4,
+			}
 		default:
 			// Return an "unimplemented" JSON-RPC error rather than 404.
 			// Lantern's boot path already tolerates optional-method failures
@@ -99,8 +107,11 @@ func TestDevnet_DevnetInitPersistsConfig(t *testing.T) {
 	if err := cmdDevnetInit([]string{"--lotus-rpc", srv.URL}); err != nil {
 		t.Fatalf("cmdDevnetInit: %v", err)
 	}
-	if got := calls.Load(); got < 3 {
-		t.Errorf("expected at least 3 RPC calls (StateNetworkName + ChainGetGenesis + ChainHead), got %d", got)
+	// lantern#123 raises the discovery-call floor to 5: adds eth_chainId +
+	// Filecoin.Version to the pre-existing StateNetworkName + ChainGetGenesis
+	// + ChainHead trio.
+	if got := calls.Load(); got < 5 {
+		t.Errorf("expected at least 5 RPC calls (StateNetworkName + ChainGetGenesis + ChainHead + eth_chainId + Filecoin.Version), got %d", got)
 	}
 
 	// Now re-load via the same path cmdDaemon uses.
