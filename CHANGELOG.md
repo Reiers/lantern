@@ -118,9 +118,23 @@ are byte-identical to pre-change behaviour.
   lotus.
 
 Not in this PR: `ChainHead` head-poll lag on devnet ([#123](https://github.com/Reiers/lantern/issues/123)
-findings 8+9) and the `eth_getCode` proxy-address slowness (finding 7).
-Both are latency issues, not correctness issues; folding them into a
-separate `--devnet-head-poll-interval` knob PR after this batch lands.
+findings 8+9). Folding it into a separate `--devnet-head-poll-interval`
+knob PR.
+
+### Devnet: bridge-first read ordering for eth_* (closes [#123](https://github.com/Reiers/lantern/issues/123) finding 7)
+
+- **`eth_getCode`, `eth_getStorageAt`, and `eth_call` on devnet now bypass
+  the local hamt walk and go straight to the auto-wired VMBridge.** On a
+  single-node docker devnet the local walk always burns its full retry
+  budget (no bitswap peers to fetch cold storage-trie blocks from), then
+  falls through to the bridge anyway. The devnet lotus IS the source of
+  truth for the devnet chain, so short-circuiting is faster (verified
+  live: 34 ms vs 15 s timeout for `eth_getCode`) and semantically identical.
+  Guarded on `NetworkName == "devnet" && Bridge != nil` so mainnet /
+  calibration paths are unchanged, and so an operator who explicitly
+  drops the bridge on devnet still gets a clear `errBridgeUnconfigured`
+  instead of a silent hang. 5 new unit tests in
+  `rpc/handlers/devnet_bridge_first_test.go` lock in the routing table.
 
 ### Added
 
