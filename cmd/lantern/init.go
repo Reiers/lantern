@@ -50,7 +50,7 @@ func cmdInit(args []string) error {
 	gateway := fs.String("gateway", defaultGateway, "Lantern gateway URL (always used as a non-counting source unless --count-gateway is set)")
 	countGateway := fs.Bool("count-gateway", false, "Count the Lantern gateway in the quorum tally (default false; not recommended)")
 	noLibp2p := fs.Bool("no-libp2p", false, "Skip libp2p sources (use only HTTP RPC sources). Useful for environments without inbound networking.")
-	libp2pSettle := fs.Duration("libp2p-settle", 8*time.Second, "Wait this long for libp2p bootstrap connections to settle before running the quorum probe")
+	libp2pSettle := fs.Duration("libp2p-settle", 15*time.Second, "Wait this long for libp2p bootstrap connections to settle before running the quorum probe (higher = more reliable first-try quorum on cold boot)")
 	network := fs.String("network", "filecoin", "F3 network name. DEPRECATED: prefer --filecoin-network which selects the F3 manifest automatically.")
 	filNetwork := fs.String("filecoin-network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration. Drives bootstrap peers, public RPC sources, and F3 manifest selection.")
 	var peers peerList
@@ -210,7 +210,7 @@ func runBootstrapQuorum(ctx context.Context, p bootstrapParams) (bootstrap.Final
 		p.Timeout = 60 * time.Second
 	}
 	if p.Libp2pSettle <= 0 {
-		p.Libp2pSettle = 8 * time.Second
+		p.Libp2pSettle = 15 * time.Second
 	}
 
 	// 1. Optional libp2p host for cert-exchange sources.
@@ -255,6 +255,7 @@ func runBootstrapQuorum(ctx context.Context, p bootstrapParams) (bootstrap.Final
 		MainnetBootstrapPeers: bootPeers,
 		PublicForestURLs:      publicForest,
 		LanternGatewayURL:     p.Gateway,
+		IncludeGatewayProbe:   p.CountGateway,
 		UserPeerURLs:          p.UserPeers,
 		NetworkName:           gpbftNetworkName(p.NetworkName),
 		SourceTimeout:         min(p.Timeout, 25*time.Second),
@@ -266,13 +267,39 @@ func runBootstrapQuorum(ctx context.Context, p bootstrapParams) (bootstrap.Final
 		countKind(srcs, bootstrap.KindUser),
 		countKind(srcs, bootstrap.KindLanternGateway))
 
-	// 3. Run the quorum.
-	res, err := bootstrap.Quorum(ctx, srcs, bootstrap.QuorumOptions{
-		Quorum:       p.Quorum,
-		Timeout:      p.Timeout,
-		CountGateway: p.CountGateway,
-		Progress:     p.Progress,
-	})
+	// 3. Run the quorum. Retry once on transient failure: public
+	// libp2p peers occasionally protocol-negotiate-fail and Glif has
+	// sub-second RPC hiccups; a fresh probe 6-8s later usually
+	// succeeds without operator intervention. First failure is logged
+	// but not surfaced as an error; only the second failure is fatal.
+	const maxAttempts = 2
+	var res *bootstrap.QuorumResult
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-ctx.Done():
+				return bootstrap.Finality{}, ctx.Err()
+			case <-time.After(6 * time.Second):
+			}
+			fmt.Println()
+			fmt.Printf("    retry %d/%d: transient peer flake on first pass, probing again...\n", attempt, maxAttempts)
+		}
+		res, err = bootstrap.Quorum(ctx, srcs, bootstrap.QuorumOptions{
+			Quorum:       p.Quorum,
+			Timeout:      p.Timeout,
+			CountGateway: p.CountGateway,
+			Progress:     p.Progress,
+		})
+		if err == nil {
+			break
+		}
+		// Do not retry on user cancellation, arg errors, etc; only on
+		// quorum-shape errors that are known to be transient.
+		if !errors.Is(err, bootstrap.ErrQuorumNotReached) && !errors.Is(err, bootstrap.ErrInsufficientSources) {
+			break
+		}
+	}
 	fmt.Println()
 	fmt.Print(bootstrap.FormatReport(res))
 	if err != nil {

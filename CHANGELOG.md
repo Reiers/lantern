@@ -4,6 +4,37 @@ All notable changes to Lantern.
 
 ## Unreleased (v1.9.0)
 
+### Setup UX / bootstrap reliability
+
+- **Cleaner install output: gateway is no longer probed as an F3 source by default.**
+  The Lantern gateway (`gateway.lantern.reiers.io`) serves `/state/root` +
+  `/block/<cid>` (hsync-shaped), not the Filecoin JSON-RPC surface, so probing
+  it as an rpcSource always 404s. Its real job at runtime is cold-block +
+  state-root fallback via `net/hsync`, not F3-quorum corroboration. Previously
+  every `lantern init` printed a scary red `✗ [lantern-gateway] ... HTTP 404`
+  even on successful installs. The gateway is now elided from the probe unless
+  the operator opts in explicitly with `--count-gateway` (the pre-existing flag,
+  which now also flips inclusion in the source list). No behavior change for
+  the quorum tally itself: the gateway was non-counting by default anyway.
+
+- **Higher `--libp2p-settle` default (8s → 15s).**
+  On first-try cold boot, libp2p bootstrap connections sometimes hadn't
+  finished dialing when the F3-cert-exchange probe fired, causing quorum to
+  fail with a spurious "peer connection failed" from a peer that would have
+  responded five seconds later. 15s brings calibration first-try quorum from
+  ~2/3 attempts to ~4/5 without user intervention. Higher settle also helps
+  mainnet on flaky networks. Applies to `init`, `doctor`, and `repair`.
+
+- **Auto-retry once on transient probe failure.**
+  `runBootstrapQuorum` now retries the probe once after a 6s backoff when the
+  first attempt fails with `ErrQuorumNotReached` or `ErrInsufficientSources`.
+  Second failure remains fatal. Only quorum-shape errors trigger retry;
+  context cancellation and arg errors do not. In smoke testing this closes the
+  remaining gap between best-case and worst-case first-boot reliability on
+  calibration (only 1 public RPC + ~4 libp2p peers available) without adding
+  more infrastructure. Log line: `retry 2/2: transient peer flake on first
+  pass, probing again...`.
+
 ### Added
 
 - **FRC-0089 EC finality calculator** ([#96](https://github.com/Reiers/lantern/issues/96)).
