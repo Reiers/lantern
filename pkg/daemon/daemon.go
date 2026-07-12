@@ -100,6 +100,17 @@ type Config struct {
 	// SyncInterval is the header-store poll cadence. Default 6s.
 	SyncInterval time.Duration
 
+	// DevnetHeadPollInterval, when > 0, overrides the header-store poll
+	// cadence on devnet only. Zero (default) means auto: use
+	// build.GetDevnetConfig().BlockDelaySecs (persisted by
+	// `lantern devnet-init`), or 4s if unavailable. Fixes lantern#123
+	// findings 8+9: a single-node docker devnet can't form a gossipsub
+	// mesh, so head arrives ONLY via RPC polling; the mainnet-oriented
+	// 30s cadence lags a 4s-epoch devnet by ~7x block time. Ignored on
+	// mainnet + calibration (SyncInterval / gossip logic is unchanged
+	// there).
+	DevnetHeadPollInterval time.Duration
+
 	// PersistentCache enables the on-disk (Badger) block cache instead of
 	// the in-memory MemBlockStore. This is the PDP / mid-node tier: the warm
 	// contract subtrees (PDP/payments/registry/USDFC) SURVIVE restart, so a
