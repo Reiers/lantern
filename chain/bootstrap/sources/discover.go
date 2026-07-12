@@ -98,10 +98,18 @@ type SourceSetConfig struct {
 	// empty, defaults to MainnetPublicForestURLs.
 	PublicForestURLs []string
 	// LanternGatewayURL is the Lantern project's gateway URL. Empty
-	// disables the gateway source. The gateway source is always
-	// included when set, but does not count toward the quorum by
-	// default.
+	// disables the gateway source. The gateway source is only added
+	// when IncludeGatewayProbe is true; otherwise it is elided from
+	// the probe entirely (the gateway is served as a cold-block +
+	// state-root fallback at runtime, but it is not a Filecoin
+	// JSON-RPC endpoint and cannot answer F3GetLatestCertificate,
+	// which would otherwise print a confusing red ✗ during install).
 	LanternGatewayURL string
+	// IncludeGatewayProbe adds the Lantern gateway to the probe source
+	// list. Off by default; operators who set --count-gateway (or
+	// otherwise want the gateway represented in the tally) turn this
+	// on. Requires a gateway URL.
+	IncludeGatewayProbe bool
 	// UserPeerURLs is the list of user-supplied --peer URLs.
 	UserPeerURLs []string
 	// LanternBeacons is the multiaddr list of known Lantern beacons that
@@ -196,9 +204,16 @@ func BuildDefaultSources(cfg SourceSetConfig) []bootstrap.Source {
 		}
 	}
 
-	// 5. Lantern gateway (always last, never counted by default).
-	if g := strings.TrimSpace(cfg.LanternGatewayURL); g != "" {
-		out = append(out, NewLanternGatewaySource("", g, cfg.SourceTimeout))
+	// 5. Lantern gateway (opt-in, gated by IncludeGatewayProbe).
+	// The gateway serves /state/root + /block/<cid>, not the Filecoin
+	// JSON-RPC surface, so probing it as an rpcSource always 404s.
+	// Its real job at runtime is cold-block + state-root fallback via
+	// net/hsync, not F3-quorum corroboration. See CHANGELOG unreleased
+	// (2026-07-12).
+	if cfg.IncludeGatewayProbe {
+		if g := strings.TrimSpace(cfg.LanternGatewayURL); g != "" {
+			out = append(out, NewLanternGatewaySource("", g, cfg.SourceTimeout))
+		}
 	}
 
 	return out
