@@ -20,3 +20,10 @@ RELEASE-NOTES-v*.md
 
 # Internal working notes — never publish to the public repo.
 internal-notes/
+
+# Local diagnostic scripts + workflow notes tied to a specific workstation
+# (hardcoded absolute paths, cross-repo references). If any of these
+# should ship, refactor to portable form first and move under docs/ or
+# apps/.
+curio-milestone-*.md
+scripts/devnet/parity-check.py

@@ -307,6 +307,57 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 			}
 		}
 
+		// lantern#123: devnet lotus-RPC mpool sink.
+		//
+		// On a single-node docker devnet the gossipsub mesh can't form
+		// (no peers), so the standard mpool.Pool wired inside
+		// startGossipHead has nothing to publish onto. Wire a Pool whose
+		// Config.Sink POSTs directly to the devnet's lotus via
+		// Filecoin.MpoolPush. All other Pool semantics (persist journal,
+		// pending set, nonce derivation, #47 reconcile/rebroadcast loop)
+		// work identically; only the wire transport changes.
+		//
+		// Trust posture: unchanged from #122. Devnet is single-source by
+		// design (operator owns the devnet). This path is guarded on
+		// network == Devnet so it never fires on mainnet/calibration.
+		if chainAPI != nil && chainAPI.Mpool == nil && network == build.Devnet {
+			devnetCfg := build.GetDevnetConfig()
+			if devnetCfg != nil && devnetCfg.LotusRPC != "" {
+				lotusClient := glif.New(devnetCfg.LotusRPC, 15*time.Second)
+				persistPath := ""
+				if !d.cfg.MpoolPersistDisabled {
+					if d.cfg.MpoolPersistPath != "" {
+						persistPath = d.cfg.MpoolPersistPath
+					} else {
+						persistPath = filepath.Join(d.cfg.DataDir, network.String(), "mpool", "pending.jsonl")
+					}
+				}
+				sink := func(sctx context.Context, sm *types.SignedMessage, _ []byte) (cid.Cid, error) {
+					return lotusClient.MpoolPush(sctx, sm)
+				}
+				mp, mperr := mpool.New(ctx, nil, mpool.Config{
+					Topic:       network.GossipTopicMessages(),
+					PersistPath: persistPath,
+					Sink:        sink,
+				})
+				if mperr != nil {
+					log.Warnw("devnet lotus-RPC mpool wiring failed; MpoolPushMessage will error out", "err", mperr)
+				} else {
+					chainAPI.Mpool = mp
+					d.mu.Lock()
+					d.mpool = mp
+					d.mu.Unlock()
+					log.Infow("devnet mpool wired via lotus RPC (lantern#123)",
+						"lotusRPC", devnetCfg.LotusRPC,
+						"persistPath", persistPath,
+						"restored", mp.Stats().Restored)
+				}
+			} else {
+				log.Warnw("devnet mode active but devnet-config missing LotusRPC; MpoolPushMessage will error out",
+					"hint", "re-run `lantern devnet-init --lotus-rpc <URL>`")
+			}
+		}
+
 		// lantern#44: FEVM contract-state prefetcher. On every head advance,
 		// walk the configured EVM contract addresses' bytecode + storage
 		// subtree into the local blockstore cache so later eth_calls hit
@@ -390,8 +441,24 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 	// eth_estimateGas) and SendRawTransaction get forwarded to an
 	// upstream Forest/Lotus node. Without this, eth_call against any
 	// contract returns "FEVM method requires --vm-bridge-rpc".
-	if d.cfg.VMBridgeRPC != "" {
-		vmBr := bridge.NewForestBridge(d.cfg.VMBridgeRPC, d.cfg.VMBridgeToken, d.cfg.VMBridgeTimeout)
+	//
+	// lantern#123: on devnet, if the operator didn't set --vm-bridge-rpc
+	// explicitly, auto-wire the devnet lotus as the bridge. The trust
+	// posture is unchanged from #122: devnet is single-source by design
+	// (operator owns both the devnet lotus and the Lantern client).
+	// Without this, eth_getCode / eth_call / eth_getStorageAt time out
+	// on cold state (no libp2p means no bitswap for state blocks) and
+	// fall through to `errBridgeUnconfigured`.
+	vmBridgeRPC := d.cfg.VMBridgeRPC
+	vmBridgeToken := d.cfg.VMBridgeToken
+	if vmBridgeRPC == "" && network == build.Devnet {
+		if devnetCfg := build.GetDevnetConfig(); devnetCfg != nil && devnetCfg.LotusRPC != "" {
+			vmBridgeRPC = devnetCfg.LotusRPC
+			log.Infow("devnet auto-wiring lotus as VMBridge (lantern#123)", "lotusRPC", vmBridgeRPC)
+		}
+	}
+	if vmBridgeRPC != "" {
+		vmBr := bridge.NewForestBridge(vmBridgeRPC, vmBridgeToken, d.cfg.VMBridgeTimeout)
 		chainAPI.WithBridge(vmBr)
 		chainAPI.AllowBlockSubmit = d.cfg.AllowBlockSubmit
 		if !d.cfg.EmbeddedMode {
@@ -699,60 +766,75 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 				persistPath = filepath.Join(d.cfg.DataDir, network.String(), "mpool", "pending.jsonl")
 			}
 		}
-		mp, mperr := mpool.New(ctx, host.PubSub, mpool.Config{
-			Topic:       network.GossipTopicMessages(),
-			PersistPath: persistPath,
-		})
-		if mperr != nil {
-			log.Warnw("mpool publisher unavailable; eth_sendRawTransaction stays on bridge", "err", mperr)
-		} else {
-			chainAPI.Mpool = mp
-			d.mu.Lock()
-			d.mpool = mp
-			d.mu.Unlock()
-			log.Infow("gossipsub mempool publisher wired", "topic", network.GossipTopicMessages(), "persistPath", persistPath, "restored", mp.Stats().Restored)
-
-			// lantern#47: drive the mpool's pending -> confirm -> rebroadcast
-			// loop on every head advance. StateSearchMsg is local + zero-Glif
-			// (#9/#49), so a published-but-unmined tx gets rebroadcast
-			// (identical bytes, same nonce) instead of stalling silently and
-			// blocking the sender's later nonces. Confirmed txs are dropped;
-			// max-retries-exhausted txs surface as failed (never stuck).
-			// Reconcile also walks each pending tx's message/receipt blocks
-			// via StateSearchMsg, which warms exactly the blocks #50 needs
-			// for a writing SP's own in-flight txs bridge-off.
-			search := func(sctx context.Context, msgCID cid.Cid) (mpool.SearchResult, error) {
-				lk, serr := chainAPI.StateSearchMsg(sctx, types.TipSetKey{}, msgCID, 0, false)
-				if serr != nil {
-					return mpool.SearchUnknown, serr
-				}
-				if lk != nil {
-					return mpool.SearchFound, nil
-				}
-				return mpool.SearchUnknown, nil
-			}
-			// The header store fires OnHeadChange listeners INLINE on the
-			// SetHead path, so the callback must not block head advancement.
-			// Reconcile does StateSearchMsg I/O across every pending tx, so we
-			// run it on its own goroutine, with a single-flight guard so a slow
-			// reconcile can't pile up behind fast head advances (we'd rather
-			// skip a tick than queue an unbounded backlog; the next head picks
-			// up any still-pending tx).
-			var reconciling int32
-			store.OnHeadChange(func(ts *types.TipSet) {
-				if ts == nil {
-					return
-				}
-				if !atomic.CompareAndSwapInt32(&reconciling, 0, 1) {
-					return // a reconcile is already in flight; skip this tick
-				}
-				height := int64(ts.Height())
-				go func() {
-					defer atomic.StoreInt32(&reconciling, 0)
-					mp.Reconcile(ctx, height, search)
-				}()
-			})
+		// lantern#123: on devnet, skip the gossipsub mpool wiring entirely.
+		// A single-node docker devnet has no gossipsub mesh so a Publish
+		// would silently drop the message into the void. Instead we let
+		// startInternal's devnet block (further up in the caller) wire an
+		// mpool.Pool with Config.Sink pointing at the devnet lotus's
+		// Filecoin.MpoolPush. Leaving chainAPI.Mpool nil here is the trigger
+		// for that later block. Bitswap wiring below still runs.
+		if network == build.Devnet {
+			log.Infow("gossipsub mempool wiring skipped on devnet; lotus-RPC sink wires next",
+				"reason", "single-node docker devnet has no gossipsub mesh")
+			goto afterMpoolWiring
 		}
+		{
+			mp, mperr := mpool.New(ctx, host.PubSub, mpool.Config{
+				Topic:       network.GossipTopicMessages(),
+				PersistPath: persistPath,
+			})
+			if mperr != nil {
+				log.Warnw("mpool publisher unavailable; eth_sendRawTransaction stays on bridge", "err", mperr)
+			} else {
+				chainAPI.Mpool = mp
+				d.mu.Lock()
+				d.mpool = mp
+				d.mu.Unlock()
+				log.Infow("gossipsub mempool publisher wired", "topic", network.GossipTopicMessages(), "persistPath", persistPath, "restored", mp.Stats().Restored)
+
+				// lantern#47: drive the mpool's pending -> confirm -> rebroadcast
+				// loop on every head advance. StateSearchMsg is local + zero-Glif
+				// (#9/#49), so a published-but-unmined tx gets rebroadcast
+				// (identical bytes, same nonce) instead of stalling silently and
+				// blocking the sender's later nonces. Confirmed txs are dropped;
+				// max-retries-exhausted txs surface as failed (never stuck).
+				// Reconcile also walks each pending tx's message/receipt blocks
+				// via StateSearchMsg, which warms exactly the blocks #50 needs
+				// for a writing SP's own in-flight txs bridge-off.
+				search := func(sctx context.Context, msgCID cid.Cid) (mpool.SearchResult, error) {
+					lk, serr := chainAPI.StateSearchMsg(sctx, types.TipSetKey{}, msgCID, 0, false)
+					if serr != nil {
+						return mpool.SearchUnknown, serr
+					}
+					if lk != nil {
+						return mpool.SearchFound, nil
+					}
+					return mpool.SearchUnknown, nil
+				}
+				// The header store fires OnHeadChange listeners INLINE on the
+				// SetHead path, so the callback must not block head advancement.
+				// Reconcile does StateSearchMsg I/O across every pending tx, so we
+				// run it on its own goroutine, with a single-flight guard so a slow
+				// reconcile can't pile up behind fast head advances (we'd rather
+				// skip a tick than queue an unbounded backlog; the next head picks
+				// up any still-pending tx).
+				var reconciling int32
+				store.OnHeadChange(func(ts *types.TipSet) {
+					if ts == nil {
+						return
+					}
+					if !atomic.CompareAndSwapInt32(&reconciling, 0, 1) {
+						return // a reconcile is already in flight; skip this tick
+					}
+					height := int64(ts.Height())
+					go func() {
+						defer atomic.StoreInt32(&reconciling, 0)
+						mp.Reconcile(ctx, height, search)
+					}()
+				})
+			}
+		}
+	afterMpoolWiring:
 	}
 
 	// lantern#50: mount the libp2p Bitswap client as a high-priority block

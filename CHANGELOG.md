@@ -35,6 +35,93 @@ All notable changes to Lantern.
   more infrastructure. Log line: `retry 2/2: transient peer flake on first
   pass, probing again...`.
 
+### Devnet parity (closes [#123](https://github.com/Reiers/lantern/issues/123))
+
+All ten devnet-mode RPC parity gaps against `make docker/devnet` lotus
+(post-[#122](https://github.com/Reiers/lantern/pull/122)) are addressed.
+Every change is gated on `network == "devnet"`; mainnet/calibration paths
+are byte-identical to pre-change behaviour.
+
+- **`eth_chainId` + `net_version` now return the devnet's actual EIP-155
+  chainId** instead of the mainnet fallback `0x13a` / `"314"`. The
+  curio-fork docker devnet uses `31415926` (`0x1df5e76`); custom setups
+  may pick different values. `lantern devnet-init` reads `eth_chainId`
+  from the running devnet lotus and persists it into `devnet-config.json`
+  as `ethChainID`. This was the P0 finding: an EVM client signing
+  transactions with the wrong chainId gets "invalid signature" back
+  from lotus and takes hours to diagnose.
+
+- **`Filecoin.Version.BlockDelay` now returns the devnet's actual
+  cadence** instead of the hardcoded `30`. `lantern devnet-init` reads
+  `Filecoin.Version.BlockDelay` from the running devnet lotus and
+  persists it as `blockDelaySecs`. Consumers computing epoch-time (curio
+  schedulers) get the right value on a 4s-cadence devnet.
+
+- **`Filecoin.StateNetworkName` now returns the devnet's localnet-uuid**
+  instead of the literal string `"devnet"`. `devnet-init` already
+  discovered the correct name (from `Filecoin.StateNetworkName` on the
+  running lotus) and wrote it to `devnet-config.json`; the RPC handler
+  now reads from that config instead of returning a literal. Fixes
+  gossipsub topic identity (`/fil/blocks/<name>`) and DHT protocol prefix
+  alignment.
+
+- **`Filecoin.ChainGetGenesis` on devnet now returns the persisted
+  genesis CID** instead of the not-implemented error. Compile-time genesis
+  constants exist only for mainnet + calibration; devnet's genesis is
+  generated at boot, so the handler now sources the CID from
+  `devnet-config.json`.
+
+- **`Filecoin.MpoolGetConfig` returns a stable snapshot** instead of
+  HTTP 500. Values chosen to match lotus defaults so consumers (curio at
+  boot) don't have to special-case Lantern. `PriorityAddrs` is `nil`
+  (marshals to JSON `null`, matching lotus's wire shape byte-for-byte);
+  an empty slice would marshal as `[]` and break consumers that check
+  `== null`.
+
+- **`Filecoin.MpoolPushMessage` now works on single-node devnet.** The
+  gossipsub mesh can't form on a single-node docker devnet, so the
+  standard `mpool.Pool` had nothing to publish onto. The daemon now
+  wires a Pool whose `Config.Sink` POSTs directly to the devnet lotus
+  via `Filecoin.MpoolPush`. All other Pool semantics (persist journal,
+  pending set, nonce derivation, [#47](https://github.com/Reiers/lantern/issues/47)
+  reconcile/rebroadcast loop, [#121](https://github.com/Reiers/lantern/pull/121)
+  restart-persist) work identically; only the wire transport changes.
+  Trust posture is unchanged from [#122](https://github.com/Reiers/lantern/pull/122):
+  devnet is single-source by design (operator owns both the devnet
+  lotus and the Lantern client). Guarded on `network == build.Devnet`.
+
+- **Devnet mode auto-wires the devnet lotus as the VM bridge** when the
+  operator did not pass `--vm-bridge-rpc` explicitly. Fixes
+  `eth_getCode` / `eth_call` / `eth_getStorageAt` timeouts on cold state
+  (a single-node devnet has no libp2p, so bitswap can't fetch state
+  blocks; the daemon fell through to `errBridgeUnconfigured`).
+
+- **New `mpool.Config.Sink`** hook lets the Pool run with a nil pubsub
+  instance. When `Sink` is non-nil and `ps` is nil, `New()` skips the
+  gossipsub join+subscribe entirely and Publish/Rebroadcast route
+  through the sink. Only used by devnet mode; mainnet/calibration paths
+  continue to require a pubsub instance and reject nil-pubsub construction.
+  5 new unit tests in `net/mpool/sink_test.go` cover: nil-pubsub requires
+  Sink; Publish invokes Sink instead of gossipsub with byte-identical
+  raw; persist journal entry matches published raw; Close is a no-op on
+  nil topic/subscription; sink error surfaces from Publish without
+  recording pending.
+
+- **`net/glif.Client.EthChainID`, `.BlockDelaySecs`, `.MpoolPush`** — three
+  new methods on the shared JSON-RPC client, used by both `devnet-init`
+  (for the boot-time discovery) and the daemon (for the devnet mpool sink).
+
+- **`build.DevnetConfig`** gained two fields: `EthChainID` (uint64) and
+  `BlockDelaySecs` (uint64). Older devnet configs written before this
+  change have zero values; handlers that need them return an error
+  hinting `lantern devnet-init --force` to re-capture from the running
+  lotus.
+
+Not in this PR: `ChainHead` head-poll lag on devnet ([#123](https://github.com/Reiers/lantern/issues/123)
+findings 8+9) and the `eth_getCode` proxy-address slowness (finding 7).
+Both are latency issues, not correctness issues; folding them into a
+separate `--devnet-head-poll-interval` knob PR after this batch lands.
+
 ### Added
 
 - **FRC-0089 EC finality calculator** ([#96](https://github.com/Reiers/lantern/issues/96)).

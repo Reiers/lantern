@@ -133,10 +133,19 @@ func (p *Pool) Reconcile(ctx context.Context, headEpoch int64, search SearchFunc
 		}
 
 		// Rebroadcast the IDENTICAL bytes (same nonce, same CID). Not in
-		// DryRun.
+		// DryRun. When cfg.Sink is set (#123, devnet lotus-RPC mode),
+		// rebroadcast via the sink; otherwise the gossipsub topic. Both
+		// paths are idempotent for the same-bytes/same-nonce/same-CID
+		// contract.
 		if !p.cfg.DryRun && it.raw != nil {
-			if err := p.topic.Publish(ctx, it.raw); err != nil {
-				log.Warnw("mpool: rebroadcast publish failed; will retry next head", "cid", it.cid, "err", err)
+			var perr error
+			if p.cfg.Sink != nil {
+				_, perr = p.cfg.Sink(ctx, it.pm.sm, it.raw)
+			} else if p.topic != nil {
+				perr = p.topic.Publish(ctx, it.raw)
+			}
+			if perr != nil {
+				log.Warnw("mpool: rebroadcast publish failed; will retry next head", "cid", it.cid, "err", perr)
 				p.persistAnchor(it.cid, it.pm.publishedAt)
 				continue
 			}

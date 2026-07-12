@@ -82,6 +82,20 @@ type Config struct {
 	// wipe it: user-signed pending messages are user state, not rebuildable
 	// chain state.
 	PersistPath string
+
+	// --- #123: alternate wire sink for devnet ---
+	//
+	// Sink, when non-nil, replaces the gossipsub topic.Publish call in
+	// Publish(). This is the devnet lotus-RPC path: on a single-node
+	// docker devnet the gossipsub mesh can't form, so signed messages
+	// are POST'd directly to the devnet lotus via Filecoin.MpoolPush
+	// instead. All other Pool semantics (persist journal, pending set,
+	// nonce derivation, reconcile/retry loop) work identically.
+	//
+	// When Sink is set, New() may be called with a nil pubsub instance;
+	// no topic is joined and no subscription is created. The reconcile
+	// loop still runs, rebroadcasting via Sink until inclusion.
+	Sink func(ctx context.Context, sm *ltypes.SignedMessage, raw []byte) (cid.Cid, error)
 }
 
 // pendingMsg tracks a locally published message for the confirm/retry loop.
@@ -118,18 +132,32 @@ type Pool struct {
 
 // New starts a Pool: joins the topic, subscribes, and (if OnMessage is set)
 // dispatches incoming messages to the handler in a background goroutine.
+//
+// When ps is nil, no gossipsub topic is joined and no subscription is
+// created. In that mode cfg.Sink must be set (used for the devnet
+// lotus-RPC send-path per #123). Persist + reconcile loop + pending set
+// still work identically; the difference is only the wire transport used
+// by Publish and Rebroadcast.
 func New(ctx context.Context, ps *pubsub.PubSub, cfg Config) (*Pool, error) {
 	if cfg.Topic == "" {
 		cfg.Topic = build.MainnetGossipTopicMessages
 	}
-	t, err := ps.Join(cfg.Topic)
-	if err != nil {
-		return nil, fmt.Errorf("join topic %s: %w", cfg.Topic, err)
+	if ps == nil && cfg.Sink == nil {
+		return nil, errors.New("mpool: New requires either a pubsub instance or Config.Sink (devnet)")
 	}
-	sub, err := t.Subscribe()
-	if err != nil {
-		_ = t.Close()
-		return nil, fmt.Errorf("subscribe topic %s: %w", cfg.Topic, err)
+	var t *pubsub.Topic
+	var sub *pubsub.Subscription
+	if ps != nil {
+		var err error
+		t, err = ps.Join(cfg.Topic)
+		if err != nil {
+			return nil, fmt.Errorf("join topic %s: %w", cfg.Topic, err)
+		}
+		sub, err = t.Subscribe()
+		if err != nil {
+			_ = t.Close()
+			return nil, fmt.Errorf("subscribe topic %s: %w", cfg.Topic, err)
+		}
 	}
 	if cfg.ConfirmAfterEpochs <= 0 {
 		cfg.ConfirmAfterEpochs = 3
@@ -152,8 +180,12 @@ func New(ctx context.Context, ps *pubsub.PubSub, cfg Config) (*Pool, error) {
 	if cfg.PersistPath != "" {
 		store, perr := openPersistStore(cfg.PersistPath)
 		if perr != nil {
-			_ = sub.Cancel
-			_ = t.Close()
+			if sub != nil {
+				sub.Cancel()
+			}
+			if t != nil {
+				_ = t.Close()
+			}
 			return nil, fmt.Errorf("open pending journal: %w", perr)
 		}
 		p.persist = store
@@ -181,15 +213,23 @@ func New(ctx context.Context, ps *pubsub.PubSub, cfg Config) (*Pool, error) {
 		}
 	}
 
-	go p.readLoop(ctx)
+	if sub != nil {
+		go p.readLoop(ctx)
+	}
 	return p, nil
 }
 
 // Close stops the subscription and topic, and closes the persist journal
-// (when open).
+// (when open). Safe when the pool was constructed without a pubsub
+// instance (devnet Sink mode); the nil topic/sub branches are skipped.
 func (p *Pool) Close() error {
-	p.sub.Cancel()
-	topicErr := p.topic.Close()
+	if p.sub != nil {
+		p.sub.Cancel()
+	}
+	var topicErr error
+	if p.topic != nil {
+		topicErr = p.topic.Close()
+	}
 	if p.persist != nil {
 		if perr := p.persist.Close(); perr != nil && topicErr == nil {
 			return perr
@@ -260,8 +300,23 @@ func (p *Pool) Publish(ctx context.Context, sm *ltypes.SignedMessage) (cid.Cid, 
 		return mcid, ErrDryRun
 	}
 
-	if err := p.topic.Publish(ctx, raw); err != nil {
-		return cid.Undef, fmt.Errorf("publish: %w", err)
+	if p.cfg.Sink != nil {
+		// Devnet lotus-RPC send path (#123). Sink returns the message
+		// CID lotus computed; we compare against our local CID as a
+		// consistency check but keep our local value (bytes-identical
+		// under an honest sink).
+		remoteCid, err := p.cfg.Sink(ctx, sm, raw)
+		if err != nil {
+			return cid.Undef, fmt.Errorf("sink publish: %w", err)
+		}
+		if remoteCid.Defined() && remoteCid != mcid {
+			log.Warnw("mpool sink: remote CID differs from local CID (raw bytes may have been re-serialized upstream)",
+				"local", mcid, "remote", remoteCid)
+		}
+	} else {
+		if err := p.topic.Publish(ctx, raw); err != nil {
+			return cid.Undef, fmt.Errorf("publish: %w", err)
+		}
 	}
 	p.mu.Lock()
 	p.pending[mcid] = &pendingMsg{sm: sm, raw: raw}

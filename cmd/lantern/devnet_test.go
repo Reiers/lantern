@@ -53,6 +53,16 @@ func fakeLotusRPC(t *testing.T, networkName, genesisCIDStr string, headEpoch int
 					"ParentWeight":          "12345",
 				}},
 			}
+		case "eth_chainId":
+			// curio-fork docker devnet default: 31415926 (0x1df5e76).
+			resp["result"] = "0x1df5e76"
+		case "Filecoin.Version":
+			// curio-fork docker devnet default: BlockDelay=4.
+			resp["result"] = map[string]any{
+				"Version":    "1.35.1+devnet-fake",
+				"APIVersion": 0x00020300,
+				"BlockDelay": 4,
+			}
 		default:
 			t.Errorf("unexpected RPC method: %s", req.Method)
 			resp["error"] = map[string]any{"code": -32601, "message": "unknown method"}
@@ -105,6 +115,14 @@ func TestDevnetInit_EndToEnd(t *testing.T) {
 	}
 	if cfg.LotusRPC != srv.URL {
 		t.Errorf("LotusRPC=%q, want %q", cfg.LotusRPC, srv.URL)
+	}
+	// lantern#123: EIP-155 chainId + BlockDelay must be captured from
+	// the running devnet lotus so the daemon reports the same values.
+	if cfg.EthChainID != 31415926 {
+		t.Errorf("EthChainID=%d, want 31415926", cfg.EthChainID)
+	}
+	if cfg.BlockDelaySecs != 4 {
+		t.Errorf("BlockDelaySecs=%d, want 4", cfg.BlockDelaySecs)
 	}
 	if len(cfg.BootstrapPeers) != 1 || !strings.Contains(cfg.BootstrapPeers[0], "12D3KooWDummy") {
 		t.Errorf("BootstrapPeers=%v, want the one we passed", cfg.BootstrapPeers)
