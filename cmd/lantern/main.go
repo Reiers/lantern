@@ -1067,6 +1067,17 @@ func cmdDaemon(args []string) error {
 	if effAllowBlockSubmit && *vmBridgeRPC == "" {
 		return fmt.Errorf("block submission (tier=%s or --allow-block-submit) requires --vm-bridge-rpc to be set (see issue #4 in repo)", profile.Tier)
 	}
+	// lantern#123: on devnet, auto-wire the devnet lotus as the VMBridge
+	// when the operator didn't set --vm-bridge-rpc. A single-node devnet
+	// has no libp2p so bitswap can't fetch cold state, and eth_call /
+	// eth_getCode / eth_getStorageAt fall through to errBridgeUnconfigured.
+	// Trust posture unchanged from #122: devnet is single-source by design.
+	if *vmBridgeRPC == "" && network == build.Devnet {
+		if devnetCfg := build.GetDevnetConfig(); devnetCfg != nil && devnetCfg.LotusRPC != "" {
+			*vmBridgeRPC = devnetCfg.LotusRPC
+			fmt.Printf("  vm-bridge:    devnet auto-wire (lantern#123) → %s\n", *vmBridgeRPC)
+		}
+	}
 	var vmBr *bridge.ForestBridge
 	if *vmBridgeRPC != "" {
 		token := *vmBridgeToken

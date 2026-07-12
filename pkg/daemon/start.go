@@ -766,60 +766,75 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 				persistPath = filepath.Join(d.cfg.DataDir, network.String(), "mpool", "pending.jsonl")
 			}
 		}
-		mp, mperr := mpool.New(ctx, host.PubSub, mpool.Config{
-			Topic:       network.GossipTopicMessages(),
-			PersistPath: persistPath,
-		})
-		if mperr != nil {
-			log.Warnw("mpool publisher unavailable; eth_sendRawTransaction stays on bridge", "err", mperr)
-		} else {
-			chainAPI.Mpool = mp
-			d.mu.Lock()
-			d.mpool = mp
-			d.mu.Unlock()
-			log.Infow("gossipsub mempool publisher wired", "topic", network.GossipTopicMessages(), "persistPath", persistPath, "restored", mp.Stats().Restored)
-
-			// lantern#47: drive the mpool's pending -> confirm -> rebroadcast
-			// loop on every head advance. StateSearchMsg is local + zero-Glif
-			// (#9/#49), so a published-but-unmined tx gets rebroadcast
-			// (identical bytes, same nonce) instead of stalling silently and
-			// blocking the sender's later nonces. Confirmed txs are dropped;
-			// max-retries-exhausted txs surface as failed (never stuck).
-			// Reconcile also walks each pending tx's message/receipt blocks
-			// via StateSearchMsg, which warms exactly the blocks #50 needs
-			// for a writing SP's own in-flight txs bridge-off.
-			search := func(sctx context.Context, msgCID cid.Cid) (mpool.SearchResult, error) {
-				lk, serr := chainAPI.StateSearchMsg(sctx, types.TipSetKey{}, msgCID, 0, false)
-				if serr != nil {
-					return mpool.SearchUnknown, serr
-				}
-				if lk != nil {
-					return mpool.SearchFound, nil
-				}
-				return mpool.SearchUnknown, nil
-			}
-			// The header store fires OnHeadChange listeners INLINE on the
-			// SetHead path, so the callback must not block head advancement.
-			// Reconcile does StateSearchMsg I/O across every pending tx, so we
-			// run it on its own goroutine, with a single-flight guard so a slow
-			// reconcile can't pile up behind fast head advances (we'd rather
-			// skip a tick than queue an unbounded backlog; the next head picks
-			// up any still-pending tx).
-			var reconciling int32
-			store.OnHeadChange(func(ts *types.TipSet) {
-				if ts == nil {
-					return
-				}
-				if !atomic.CompareAndSwapInt32(&reconciling, 0, 1) {
-					return // a reconcile is already in flight; skip this tick
-				}
-				height := int64(ts.Height())
-				go func() {
-					defer atomic.StoreInt32(&reconciling, 0)
-					mp.Reconcile(ctx, height, search)
-				}()
-			})
+		// lantern#123: on devnet, skip the gossipsub mpool wiring entirely.
+		// A single-node docker devnet has no gossipsub mesh so a Publish
+		// would silently drop the message into the void. Instead we let
+		// startInternal's devnet block (further up in the caller) wire an
+		// mpool.Pool with Config.Sink pointing at the devnet lotus's
+		// Filecoin.MpoolPush. Leaving chainAPI.Mpool nil here is the trigger
+		// for that later block. Bitswap wiring below still runs.
+		if network == build.Devnet {
+			log.Infow("gossipsub mempool wiring skipped on devnet; lotus-RPC sink wires next",
+				"reason", "single-node docker devnet has no gossipsub mesh")
+			goto afterMpoolWiring
 		}
+		{
+			mp, mperr := mpool.New(ctx, host.PubSub, mpool.Config{
+				Topic:       network.GossipTopicMessages(),
+				PersistPath: persistPath,
+			})
+			if mperr != nil {
+				log.Warnw("mpool publisher unavailable; eth_sendRawTransaction stays on bridge", "err", mperr)
+			} else {
+				chainAPI.Mpool = mp
+				d.mu.Lock()
+				d.mpool = mp
+				d.mu.Unlock()
+				log.Infow("gossipsub mempool publisher wired", "topic", network.GossipTopicMessages(), "persistPath", persistPath, "restored", mp.Stats().Restored)
+
+				// lantern#47: drive the mpool's pending -> confirm -> rebroadcast
+				// loop on every head advance. StateSearchMsg is local + zero-Glif
+				// (#9/#49), so a published-but-unmined tx gets rebroadcast
+				// (identical bytes, same nonce) instead of stalling silently and
+				// blocking the sender's later nonces. Confirmed txs are dropped;
+				// max-retries-exhausted txs surface as failed (never stuck).
+				// Reconcile also walks each pending tx's message/receipt blocks
+				// via StateSearchMsg, which warms exactly the blocks #50 needs
+				// for a writing SP's own in-flight txs bridge-off.
+				search := func(sctx context.Context, msgCID cid.Cid) (mpool.SearchResult, error) {
+					lk, serr := chainAPI.StateSearchMsg(sctx, types.TipSetKey{}, msgCID, 0, false)
+					if serr != nil {
+						return mpool.SearchUnknown, serr
+					}
+					if lk != nil {
+						return mpool.SearchFound, nil
+					}
+					return mpool.SearchUnknown, nil
+				}
+				// The header store fires OnHeadChange listeners INLINE on the
+				// SetHead path, so the callback must not block head advancement.
+				// Reconcile does StateSearchMsg I/O across every pending tx, so we
+				// run it on its own goroutine, with a single-flight guard so a slow
+				// reconcile can't pile up behind fast head advances (we'd rather
+				// skip a tick than queue an unbounded backlog; the next head picks
+				// up any still-pending tx).
+				var reconciling int32
+				store.OnHeadChange(func(ts *types.TipSet) {
+					if ts == nil {
+						return
+					}
+					if !atomic.CompareAndSwapInt32(&reconciling, 0, 1) {
+						return // a reconcile is already in flight; skip this tick
+					}
+					height := int64(ts.Height())
+					go func() {
+						defer atomic.StoreInt32(&reconciling, 0)
+						mp.Reconcile(ctx, height, search)
+					}()
+				})
+			}
+		}
+	afterMpoolWiring:
 	}
 
 	// lantern#50: mount the libp2p Bitswap client as a high-priority block
