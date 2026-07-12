@@ -117,9 +117,27 @@ are byte-identical to pre-change behaviour.
   hinting `lantern devnet-init --force` to re-capture from the running
   lotus.
 
-Not in this PR: `ChainHead` head-poll lag on devnet ([#123](https://github.com/Reiers/lantern/issues/123)
-findings 8+9). Folding it into a separate `--devnet-head-poll-interval`
-knob PR.
+Not in this PR: standalone `cmd/lantern` mpool wiring baseline (a
+pre-existing gap discovered during the live-smoke run for this PR).
+
+### Devnet: `--devnet-head-poll-interval` knob (closes [#123](https://github.com/Reiers/lantern/issues/123) findings 8+9)
+
+- **Devnet header-store poll interval now defaults to match block
+  cadence instead of the mainnet 30s.** On a single-node docker devnet
+  the gossipsub mesh can't form, so head arrives ONLY via RPC polling;
+  the mainnet-oriented 30s cadence lags a 4s-epoch devnet by ~7x block
+  time (finding 8+9 originally documented lags of ~80 epochs = ~320s).
+  On devnet, the daemon now derives the poll interval from
+  `build.GetDevnetConfig().BlockDelaySecs` (captured at devnet-init time
+  by [#125](https://github.com/Reiers/lantern/pull/125)), falling back to 4s if unavailable.
+  Live smoke: cold-boot head lag dropped from ~80 epochs to 4-7 epochs
+  sustained (~10x improvement).
+
+- **New `--devnet-head-poll-interval` flag** (cmd/lantern) +
+  `Config.DevnetHeadPollInterval` field (pkg/daemon) let operators
+  override the derived cadence. Zero (default) means auto: read from
+  `BlockDelaySecs`. Ignored on mainnet / calibration (the gossip-primary
+  cadence logic stays untouched there).
 
 ### Devnet: bridge-first read ordering for eth_* (closes [#123](https://github.com/Reiers/lantern/issues/123) finding 7)
 

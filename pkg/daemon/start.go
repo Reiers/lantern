@@ -226,6 +226,24 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		if libp2pEnabled {
 			syncInterval = 30 * time.Second
 		}
+		// lantern#123 findings 8+9: on devnet, a single-node docker cluster
+		// can't form a gossipsub mesh, so head arrives ONLY via polling. The
+		// mainnet-oriented 30s cadence set above is 7.5x block-time on a 4s
+		// devnet. Honor an explicit DevnetHeadPollInterval override, otherwise
+		// derive from the devnet-config BlockDelaySecs (captured at
+		// devnet-init time by #125), falling back to 4s.
+		if network == build.Devnet {
+			switch {
+			case d.cfg.DevnetHeadPollInterval > 0:
+				syncInterval = d.cfg.DevnetHeadPollInterval
+			default:
+				cadence := 4 * time.Second
+				if devnetCfg := build.GetDevnetConfig(); devnetCfg != nil && devnetCfg.BlockDelaySecs > 0 {
+					cadence = time.Duration(devnetCfg.BlockDelaySecs) * time.Second
+				}
+				syncInterval = cadence
+			}
+		}
 
 		// Issue #33: the hardened Sync resumes catch-up contiguously from
 		// currentHead+1 in CatchUpChunk-sized steps (never skips epochs),

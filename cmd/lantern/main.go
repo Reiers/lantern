@@ -736,6 +736,7 @@ func cmdDaemon(args []string) error {
 	noHS := fs.Bool("no-header-store", false, "Disable the persistent header store (legacy synthetic-head mode)")
 	hsPath := fs.String("header-store", "", "Header store BadgerDB path (default: <data-dir>/<network>/headerstore)")
 	syncInterval := fs.Duration("sync-interval", 6*time.Second, "Header-store sync poll interval")
+	devnetHeadPollInterval := fs.Duration("devnet-head-poll-interval", 0, "Devnet-only: override the header-store poll interval on devnet (default 0 = auto: use BlockDelaySecs from devnet-config, or 4s if unavailable). Fixes lantern#123 findings 8+9: a single-node docker devnet can't form a gossipsub mesh, so head updates come only from RPC polling; the mainnet-oriented 30s cadence lags a 4s-cadence devnet by ~7x block time. Ignored on mainnet/calibration.")
 	staleResetThreshold := fs.Int64("stale-reset-threshold", 2880, "Epochs behind live head past which a persisted header store re-anchors near live head instead of backfilling (#51). 0 disables. Chain state only; keys are never touched.")
 	notifyBufSize := fs.Int("notify-buf", headnotify.DefaultBufferSize, "ChainNotify per-subscriber buffer size")
 	p2pListen := fs.String("p2p-listen", "/ip4/0.0.0.0/tcp/0,/ip4/0.0.0.0/udp/0/quic-v1", "libp2p listen multiaddrs (comma-separated). Empty disables the libp2p host.")
@@ -1174,6 +1175,24 @@ func cmdDaemon(args []string) error {
 		gossipEnabled := !*noLibp2p && *p2pListen != ""
 		if gossipEnabled && effSyncInterval == 6*time.Second {
 			effSyncInterval = 30 * time.Second
+		}
+		// lantern#123 findings 8+9: on devnet, a single-node docker cluster
+		// can't form a gossipsub mesh, so head arrives ONLY via polling. The
+		// mainnet-oriented 30s cadence set above is 7.5x block-time on a
+		// 4s-epoch devnet. Override with the user's --devnet-head-poll-interval
+		// flag if set, otherwise derive from the devnet-config BlockDelaySecs
+		// (captured at devnet-init time by #125), falling back to 4s.
+		if network == build.Devnet {
+			switch {
+			case *devnetHeadPollInterval > 0:
+				effSyncInterval = *devnetHeadPollInterval
+			default:
+				cadence := 4 * time.Second
+				if devnetCfg := build.GetDevnetConfig(); devnetCfg != nil && devnetCfg.BlockDelaySecs > 0 {
+					cadence = time.Duration(devnetCfg.BlockDelaySecs) * time.Second
+				}
+				effSyncInterval = cadence
+			}
 		}
 		sync = hstore.NewSync(store, src, hstore.SyncOptions{
 			Interval:       effSyncInterval,
