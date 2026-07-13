@@ -81,10 +81,13 @@ type Kernel struct {
 	sendFn SendFunc
 
 	// SigVerifier is used by crypto.verify_consensus_fault to validate
-	// block signatures. nil defaults to RejectAllVerifier so the safe
-	// posture is "no fault reportable" until a real verifier is wired
-	// (#130 Tier 2, sharing the crypto core with #88).
+	// block signatures. nil defaults to RejectAllVerifier.
 	SigVerifier SignatureVerifier
+
+	// ProofVer is used by crypto.verify_post / verify_seal / etc. to
+	// delegate Groth16 proof verification. nil defaults to
+	// RejectAllProofVerifier (safe posture).
+	ProofVer ProofVerifier
 
 	// Observability: every syscall name -> count.
 	syscalls map[string]int
