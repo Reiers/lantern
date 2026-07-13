@@ -74,3 +74,55 @@ jobs:
             echo "Run 'gofmt -w .' locally and re-commit."
             exit 1
           fi
+
+      # Dependency firewall (#24 / #131): the shipping `lantern` binary
+      # must never transitively acquire the research/fvm module's WASM
+      # runtime. wazero is the one dependency that is exclusively used
+      # by the research prototype; if it shows up here, some code path
+      # imported into main has crossed the module boundary.
+      # (multihash + refmt are already used by main for CID + CBOR, so
+      # they cannot serve as canary packages.)
+      - name: research-fvm dependency firewall
+        run: |
+          set -e
+          leak="$(go list -deps ./... | grep '^github.com/tetratelabs/wazero' || true)"
+          if [ -n "$leak" ]; then
+            echo "::error::Main lantern module transitively imports wazero:"
+            echo "$leak"
+            echo ""
+            echo "research/fvm has its own go.mod. If wazero is needed in the"
+            echo "shipping binary, that is a promotion decision, not an import."
+            exit 1
+          fi
+          echo "Main module dependency graph is clean (no wazero)."
+
+  research-fvm:
+    name: research/fvm (scoped module)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+          cache-dependency-path: research/fvm/go.sum
+
+      - name: go build
+        working-directory: research/fvm
+        env:
+          CGO_ENABLED: '0'
+        run: go build ./...
+
+      - name: go test
+        working-directory: research/fvm
+        env:
+          CGO_ENABLED: '0'
+        run: go test -timeout 5m ./...
+
+      - name: go vet
+        working-directory: research/fvm
+        run: go vet ./...
