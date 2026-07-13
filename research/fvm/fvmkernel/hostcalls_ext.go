@@ -75,10 +75,10 @@ func (k *Kernel) registerCryptoModule(ctx context.Context, rt wazero.Runtime) er
 		{"hash", []api.ValueType{i32, i64, i32, i32, i32, i32}, []api.ValueType{i32}, k.cryptoHash},
 		{"verify_signature", []api.ValueType{i32, i32, i32, i32, i32, i32, i32, i32}, []api.ValueType{i32}, okRet("verify_signature")},
 		{"recover_secp_public_key", []api.ValueType{i32, i32, i32}, []api.ValueType{i32}, okRet("recover_secp_public_key")},
-		{"verify_post", []api.ValueType{i32, i32, i32}, []api.ValueType{i32}, okRet("verify_post")},
-		{"verify_replica_update", []api.ValueType{i32, i32, i32}, []api.ValueType{i32}, okRet("verify_replica_update")},
-		{"verify_aggregate_seals", []api.ValueType{i32, i32, i32}, []api.ValueType{i32}, okRet("verify_aggregate_seals")},
-		{"batch_verify_seals", []api.ValueType{i32, i32, i32}, []api.ValueType{i32}, okRet("batch_verify_seals")},
+		{"verify_post", []api.ValueType{i32, i32, i32}, []api.ValueType{i32}, k.cryptoVerifyProof("verify_post")},
+		{"verify_replica_update", []api.ValueType{i32, i32, i32}, []api.ValueType{i32}, k.cryptoVerifyProof("verify_replica_update")},
+		{"verify_aggregate_seals", []api.ValueType{i32, i32, i32}, []api.ValueType{i32}, k.cryptoVerifyProof("verify_aggregate_seals")},
+		{"batch_verify_seals", []api.ValueType{i32, i32, i32}, []api.ValueType{i32}, k.cryptoVerifyProof("batch_verify_seals")},
 		{"compute_unsealed_sector_cid", []api.ValueType{i32, i64, i32, i32, i32, i32}, []api.ValueType{i32}, k.cryptoComputeUnsealedSectorCID},
 		{"verify_consensus_fault", []api.ValueType{i32, i32, i32, i32, i32, i32, i32}, []api.ValueType{i32}, k.cryptoVerifyConsensusFault},
 	})
@@ -308,6 +308,52 @@ func (k *Kernel) actorGetBuiltinType(_ context.Context, m api.Module, stack []ui
 		return
 	}
 	stack[0] = uint64(errOK)
+}
+
+// cryptoVerifyProof returns a handler for proof-verify syscalls (verify_post,
+// verify_seal, verify_aggregate_seals, verify_replica_update, batch_verify_seals).
+// All share the same ABI: (ret_ptr, data_off, data_len) -> errno, where the
+// data blob is the CBOR-encoded proof + public inputs specific to the proof
+// type. The handler passes the raw bytes to ProofVerifier.VerifyProof; a real
+// verifier decodes the type-specific shape internally.
+//
+// When ProofVerifier is nil, RejectAllProofVerifier is used (safe default).
+func (k *Kernel) cryptoVerifyProof(name string) api.GoModuleFunc {
+	return func(_ context.Context, m api.Module, stack []uint64) {
+		k.count("crypto." + name)
+		retPtr := api.DecodeU32(stack[0])
+		dataOff := api.DecodeU32(stack[1])
+		dataLen := api.DecodeU32(stack[2])
+
+		data, ok := readMem(m, dataOff, dataLen)
+		if !ok {
+			stack[0] = uint64(errIllegalArgument)
+			return
+		}
+
+		verifier := k.ProofVer
+		if verifier == nil {
+			verifier = RejectAllProofVerifier{}
+		}
+
+		// The proof type is encoded in the CBOR payload; the verifier
+		// implementation is responsible for parsing. We pass 0 as the
+		// proof type since the syscall name already disambiguates.
+		err := verifier.VerifyProof(0, data, nil)
+
+		// Write the result as a u32 at ret_ptr: 0 = valid, non-zero = invalid.
+		var result uint32
+		if err != nil {
+			result = 1 // invalid
+		}
+		var rb [4]byte
+		le32(rb[:], result)
+		if !writeMem(m, retPtr, rb[:]) {
+			stack[0] = uint64(errIllegalArgument)
+			return
+		}
+		stack[0] = uint64(errOK)
+	}
 }
 
 // cryptoHash implements the FVM `crypto.hash` syscall for real.
