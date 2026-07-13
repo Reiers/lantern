@@ -1,0 +1,1988 @@
+[
+  {
+    "actor": "placeholder",
+    "size": 143,
+    "import_count": 0,
+    "import_modules": null,
+    "imports": null,
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_result": "[0]"
+  },
+  {
+    "actor": "ethaccount",
+    "size": 107281,
+    "import_count": 11,
+    "import_modules": [
+      "actor",
+      "debug",
+      "ipld",
+      "vm"
+    ],
+    "imports": [
+      {
+        "module": "debug",
+        "name": "enabled",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "message_context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "resolve_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "lookup_delegated_address",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_actor_code_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_builtin_actor_type",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "debug",
+        "name": "log",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_create",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_read",
+        "params": "i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_stat",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "exit",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      }
+    ],
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_err": "wasm error: unreachable\nwasm stack trace:\n\t.$157()\n\t.$60(i32,i32,i32,i32)\n\t.$59(i32,i32,i32,i32)\n\t.$46(i32,i32,i32)\n\t.$11(i32,i32)\n\t.$176(i32,i32,i32,i32,i32)\n\t.$159(i32)\n\t.$158(i32)\n\t.$168(i32)\n\t.$200(i32,i32)\n\t.$218(i32,i32,i32)\n\t.$54(i32,i32)\n\t.$21(i32) i32"
+  },
+  {
+    "actor": "system",
+    "size": 187254,
+    "import_count": 13,
+    "import_modules": [
+      "actor",
+      "debug",
+      "ipld",
+      "self",
+      "vm"
+    ],
+    "imports": [
+      {
+        "module": "debug",
+        "name": "enabled",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "message_context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "resolve_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_actor_code_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_builtin_actor_type",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "debug",
+        "name": "log",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_create",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_link",
+        "params": "i32,i32,i64,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_read",
+        "params": "i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_stat",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "root",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "set_root",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "exit",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      }
+    ],
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_err": "wasm error: unreachable\nwasm stack trace:\n\t.$290()\n\t.$162(i32,i32,i32,i32)\n\t.$161(i32,i32,i32,i32)\n\t.$146(i32,i32,i32)\n\t.$16(i32,i32)\n\t.$309(i32,i32,i32,i32,i32)\n\t.$292(i32)\n\t.$291(i32)\n\t.$301(i32)\n\t.$383(i32,i32)\n\t.$407(i32,i32,i32)\n\t.$153(i32,i32)\n\t.$105(i32) i32"
+  },
+  {
+    "actor": "eam",
+    "size": 201791,
+    "import_count": 14,
+    "import_modules": [
+      "actor",
+      "crypto",
+      "debug",
+      "ipld",
+      "send",
+      "vm"
+    ],
+    "imports": [
+      {
+        "module": "debug",
+        "name": "enabled",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "message_context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "resolve_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "lookup_delegated_address",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_actor_code_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_builtin_actor_type",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_code_cid_for_type",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "hash",
+        "params": "i32,i64,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "debug",
+        "name": "log",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_create",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_read",
+        "params": "i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_stat",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "send",
+        "name": "send",
+        "params": "i32,i32,i32,i64,i32,i64,i64,i64,i64",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "exit",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      }
+    ],
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_err": "wasm error: unreachable\nwasm stack trace:\n\t.$275()\n\t.$162(i32,i32,i32,i32)\n\t.$161(i32,i32,i32,i32)\n\t.$81(i32) i32"
+  },
+  {
+    "actor": "cron",
+    "size": 248962,
+    "import_count": 15,
+    "import_modules": [
+      "actor",
+      "debug",
+      "ipld",
+      "self",
+      "send",
+      "vm"
+    ],
+    "imports": [
+      {
+        "module": "debug",
+        "name": "enabled",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "message_context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "resolve_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_actor_code_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_builtin_actor_type",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "debug",
+        "name": "log",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_create",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_link",
+        "params": "i32,i32,i64,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_open",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_read",
+        "params": "i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_stat",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "send",
+        "name": "send",
+        "params": "i32,i32,i32,i64,i32,i64,i64,i64,i64",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "root",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "set_root",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "exit",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      }
+    ],
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_err": "wasm error: unreachable\nwasm stack trace:\n\t.$390()\n\t.$241(i32,i32,i32,i32)\n\t.$240(i32,i32,i32,i32)\n\t.$222(i32,i32,i32)\n\t.$17(i32,i32)\n\t.$409(i32,i32,i32,i32,i32)\n\t.$392(i32)\n\t.$391(i32)\n\t.$401(i32)\n\t.$493(i32,i32)\n\t.$517(i32,i32,i32)\n\t.$230(i32,i32)\n\t.$135(i32) i32"
+  },
+  {
+    "actor": "account",
+    "size": 257394,
+    "import_count": 15,
+    "import_modules": [
+      "actor",
+      "crypto",
+      "debug",
+      "ipld",
+      "self",
+      "vm"
+    ],
+    "imports": [
+      {
+        "module": "debug",
+        "name": "enabled",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "message_context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "resolve_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_actor_code_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_builtin_actor_type",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "verify_signature",
+        "params": "i32,i32,i32,i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "debug",
+        "name": "log",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_create",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_link",
+        "params": "i32,i32,i64,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_open",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_read",
+        "params": "i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_stat",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "root",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "set_root",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "exit",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      }
+    ],
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_err": "wasm error: unreachable\nwasm stack trace:\n\t.$451()\n\t.$292(i32,i32,i32,i32)\n\t.$291(i32,i32,i32,i32)\n\t.$273(i32,i32,i32)\n\t.$20(i32,i32)\n\t.$470(i32,i32,i32,i32,i32)\n\t.$453(i32)\n\t.$452(i32)\n\t.$462(i32)\n\t.$554(i32,i32)\n\t.$578(i32,i32,i32)\n\t.$281(i32,i32)\n\t.$149(i32) i32"
+  },
+  {
+    "actor": "init",
+    "size": 349170,
+    "import_count": 19,
+    "import_modules": [
+      "actor",
+      "crypto",
+      "debug",
+      "ipld",
+      "self",
+      "send",
+      "vm"
+    ],
+    "imports": [
+      {
+        "module": "debug",
+        "name": "enabled",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "message_context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "resolve_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_actor_code_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "next_actor_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "create_actor",
+        "params": "i64,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_builtin_actor_type",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_code_cid_for_type",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "hash",
+        "params": "i32,i64,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "debug",
+        "name": "log",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_create",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_link",
+        "params": "i32,i32,i64,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_open",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_read",
+        "params": "i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_stat",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "send",
+        "name": "send",
+        "params": "i32,i32,i32,i64,i32,i64,i64,i64,i64",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "root",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "set_root",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "exit",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      }
+    ],
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_err": "wasm error: unreachable\nwasm stack trace:\n\t.$525()\n\t.$334(i32,i32,i32,i32)\n\t.$333(i32,i32,i32,i32)\n\t.$309(i32,i32,i32)\n\t.$74(i32,i32)\n\t.$544(i32,i32,i32,i32,i32)\n\t.$527(i32)\n\t.$526(i32)\n\t.$536(i32)\n\t.$630(i32,i32)\n\t.$655(i32,i32,i32)\n\t.$319(i32,i32)\n\t.$215(i32,i32,i64,i32)\n\t.$214(i32) i32"
+  },
+  {
+    "actor": "reward",
+    "size": 358611,
+    "import_count": 17,
+    "import_modules": [
+      "actor",
+      "debug",
+      "ipld",
+      "network",
+      "self",
+      "send",
+      "vm"
+    ],
+    "imports": [
+      {
+        "module": "debug",
+        "name": "enabled",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "network",
+        "name": "context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "message_context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "resolve_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_actor_code_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_builtin_actor_type",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "debug",
+        "name": "log",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_create",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_link",
+        "params": "i32,i32,i64,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_open",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_read",
+        "params": "i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_stat",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "send",
+        "name": "send",
+        "params": "i32,i32,i32,i64,i32,i64,i64,i64,i64",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "root",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "set_root",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "current_balance",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "exit",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      }
+    ],
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_err": "wasm error: unreachable\nwasm stack trace:\n\t.$496()\n\t.$307(i32,i32,i32,i32)\n\t.$306(i32,i32,i32,i32)\n\t.$286(i32,i32,i32)\n\t.$52(i32,i32)\n\t.$515(i32,i32,i32,i32,i32)\n\t.$498(i32)\n\t.$497(i32)\n\t.$507(i32)\n\t.$599(i32,i32)\n\t.$623(i32,i32,i32)\n\t.$295(i32,i32)\n\t.$184(i32,i32,i64,i32)\n\t.$183(i32) i32"
+  },
+  {
+    "actor": "paymentchannel",
+    "size": 402068,
+    "import_count": 19,
+    "import_modules": [
+      "actor",
+      "crypto",
+      "debug",
+      "ipld",
+      "network",
+      "self",
+      "send",
+      "vm"
+    ],
+    "imports": [
+      {
+        "module": "debug",
+        "name": "enabled",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "network",
+        "name": "context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "message_context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "resolve_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_actor_code_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_builtin_actor_type",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "hash",
+        "params": "i32,i64,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "debug",
+        "name": "log",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_create",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_link",
+        "params": "i32,i32,i64,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_open",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_read",
+        "params": "i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_stat",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "send",
+        "name": "send",
+        "params": "i32,i32,i32,i64,i32,i64,i64,i64,i64",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "root",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "set_root",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "self_destruct",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "current_balance",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "exit",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      }
+    ],
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_err": "wasm error: unreachable\nwasm stack trace:\n\t.$586()\n\t.$384(i32,i32,i32,i32)\n\t.$383(i32,i32,i32,i32)\n\t.$361(i32,i32,i32)\n\t.$86(i32,i32)\n\t.$605(i32,i32,i32,i32,i32)\n\t.$588(i32)\n\t.$587(i32)\n\t.$597(i32)\n\t.$690(i32,i32)\n\t.$714(i32,i32,i32)\n\t.$370(i32,i32)\n\t.$233(i32,i32,i64,i32)\n\t.$232(i32) i32"
+  },
+  {
+    "actor": "multisig",
+    "size": 517164,
+    "import_count": 26,
+    "import_modules": [
+      "actor",
+      "crypto",
+      "debug",
+      "ipld",
+      "network",
+      "self",
+      "send",
+      "vm"
+    ],
+    "imports": [
+      {
+        "module": "debug",
+        "name": "enabled",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "network",
+        "name": "context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "message_context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "resolve_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_actor_code_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_builtin_actor_type",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "verify_signature",
+        "params": "i32,i32,i32,i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "recover_secp_public_key",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "hash",
+        "params": "i32,i64,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "compute_unsealed_sector_cid",
+        "params": "i32,i64,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "verify_post",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "verify_consensus_fault",
+        "params": "i32,i32,i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "verify_aggregate_seals",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "verify_replica_update",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "batch_verify_seals",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "debug",
+        "name": "log",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_create",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_link",
+        "params": "i32,i32,i64,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_open",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_read",
+        "params": "i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_stat",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "send",
+        "name": "send",
+        "params": "i32,i32,i32,i64,i32,i64,i64,i64,i64",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "root",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "set_root",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "current_balance",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "exit",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      }
+    ],
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_err": "wasm error: unreachable\nwasm stack trace:\n\t.$656()\n\t.$446(i32,i32,i32,i32)\n\t.$445(i32,i32,i32,i32)\n\t.$398(i32,i32,i32)\n\t.$112(i32,i32)\n\t.$675(i32,i32,i32,i32,i32)\n\t.$658(i32)\n\t.$657(i32)\n\t.$667(i32)\n\t.$763(i32,i32)\n\t.$788(i32,i32,i32)\n\t.$423(i32,i32)\n\t.$275(i32,i32,i64,i32)\n\t.$274(i32) i32"
+  },
+  {
+    "actor": "storagepower",
+    "size": 582469,
+    "import_count": 18,
+    "import_modules": [
+      "actor",
+      "crypto",
+      "debug",
+      "ipld",
+      "network",
+      "self",
+      "send",
+      "vm"
+    ],
+    "imports": [
+      {
+        "module": "debug",
+        "name": "enabled",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "network",
+        "name": "context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "message_context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "resolve_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_actor_code_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_builtin_actor_type",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_code_cid_for_type",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "hash",
+        "params": "i32,i64,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "debug",
+        "name": "log",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_create",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_link",
+        "params": "i32,i32,i64,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_open",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_read",
+        "params": "i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_stat",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "send",
+        "name": "send",
+        "params": "i32,i32,i32,i64,i32,i64,i64,i64,i64",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "root",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "set_root",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "exit",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      }
+    ],
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_err": "wasm error: unreachable\nwasm stack trace:\n\t.$773()\n\t.$509(i32,i32,i32,i32)\n\t.$508(i32,i32,i32,i32)\n\t.$485(i32,i32,i32)\n\t.$142(i32,i32)\n\t.$792(i32,i32,i32,i32,i32)\n\t.$775(i32)\n\t.$774(i32)\n\t.$784(i32)\n\t.$879(i32,i32)\n\t.$904(i32,i32,i32)\n\t.$495(i32,i32)\n\t.$341(i32,i32,i64,i32)\n\t.$340(i32) i32"
+  },
+  {
+    "actor": "datacap",
+    "size": 610214,
+    "import_count": 15,
+    "import_modules": [
+      "actor",
+      "debug",
+      "ipld",
+      "self",
+      "send",
+      "vm"
+    ],
+    "imports": [
+      {
+        "module": "debug",
+        "name": "enabled",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "message_context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "resolve_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_actor_code_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_builtin_actor_type",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "debug",
+        "name": "log",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_create",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_link",
+        "params": "i32,i32,i64,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_open",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_read",
+        "params": "i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_stat",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "send",
+        "name": "send",
+        "params": "i32,i32,i32,i64,i32,i64,i64,i64,i64",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "root",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "set_root",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "exit",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      }
+    ],
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_err": "wasm error: unreachable\nwasm stack trace:\n\t.$703()\n\t.$487(i32,i32,i32,i32)\n\t.$486(i32,i32,i32,i32)\n\t.$468(i32,i32,i32)\n\t.$150(i32,i32)\n\t.$722(i32,i32,i32,i32,i32)\n\t.$705(i32)\n\t.$704(i32)\n\t.$714(i32)\n\t.$809(i32,i32)\n\t.$834(i32,i32,i32)\n\t.$476(i32,i32)\n\t.$144(i32) i32\n\t.$295(i32) i32"
+  },
+  {
+    "actor": "verifiedregistry",
+    "size": 728371,
+    "import_count": 18,
+    "import_modules": [
+      "actor",
+      "crypto",
+      "debug",
+      "event",
+      "ipld",
+      "network",
+      "self",
+      "send",
+      "vm"
+    ],
+    "imports": [
+      {
+        "module": "debug",
+        "name": "enabled",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "network",
+        "name": "context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "message_context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "resolve_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_actor_code_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_builtin_actor_type",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "hash",
+        "params": "i32,i64,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "debug",
+        "name": "log",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "event",
+        "name": "emit_event",
+        "params": "i32,i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_create",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_link",
+        "params": "i32,i32,i64,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_open",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_read",
+        "params": "i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_stat",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "send",
+        "name": "send",
+        "params": "i32,i32,i32,i64,i32,i64,i64,i64,i64",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "root",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "set_root",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "exit",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      }
+    ],
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_err": "wasm error: unreachable\nwasm stack trace:\n\t.$779()\n\t.$561(i32,i32,i32,i32)\n\t.$560(i32,i32,i32,i32)\n\t.$536(i32,i32,i32)\n\t.$241(i32,i32)\n\t.$798(i32,i32,i32,i32,i32)\n\t.$781(i32)\n\t.$780(i32)\n\t.$790(i32)\n\t.$885(i32,i32)\n\t.$910(i32,i32,i32)\n\t.$547(i32,i32)\n\t.$412(i32,i32,i64,i32)\n\t.$411(i32) i32"
+  },
+  {
+    "actor": "evm",
+    "size": 877168,
+    "import_count": 25,
+    "import_modules": [
+      "actor",
+      "crypto",
+      "debug",
+      "event",
+      "gas",
+      "ipld",
+      "network",
+      "rand",
+      "self",
+      "send",
+      "vm"
+    ],
+    "imports": [
+      {
+        "module": "debug",
+        "name": "enabled",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "network",
+        "name": "context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "message_context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "resolve_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "lookup_delegated_address",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_actor_code_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_builtin_actor_type",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "balance_of",
+        "params": "i32,i64",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "recover_secp_public_key",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "hash",
+        "params": "i32,i64,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "debug",
+        "name": "log",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "event",
+        "name": "emit_event",
+        "params": "i32,i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "gas",
+        "name": "available",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_create",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_link",
+        "params": "i32,i32,i64,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_open",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_read",
+        "params": "i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_stat",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "network",
+        "name": "tipset_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "rand",
+        "name": "get_beacon_randomness",
+        "params": "i32,i64",
+        "results": "i32"
+      },
+      {
+        "module": "send",
+        "name": "send",
+        "params": "i32,i32,i32,i64,i32,i64,i64,i64,i64",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "root",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "set_root",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "current_balance",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "exit",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      }
+    ],
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_err": "wasm error: unreachable\nwasm stack trace:\n\t.$1015()\n\t.$814(i32,i32,i32,i32)\n\t.$813(i32,i32,i32,i32)\n\t.$458(i32) i32"
+  },
+  {
+    "actor": "storagemarket",
+    "size": 1033760,
+    "import_count": 20,
+    "import_modules": [
+      "actor",
+      "crypto",
+      "debug",
+      "event",
+      "ipld",
+      "network",
+      "self",
+      "send",
+      "vm"
+    ],
+    "imports": [
+      {
+        "module": "debug",
+        "name": "enabled",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "network",
+        "name": "context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "message_context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "resolve_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_actor_code_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_builtin_actor_type",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "hash",
+        "params": "i32,i64,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "compute_unsealed_sector_cid",
+        "params": "i32,i64,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "debug",
+        "name": "log",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "event",
+        "name": "emit_event",
+        "params": "i32,i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_create",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_link",
+        "params": "i32,i32,i64,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_open",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_read",
+        "params": "i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_stat",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "network",
+        "name": "total_fil_circ_supply",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "send",
+        "name": "send",
+        "params": "i32,i32,i32,i64,i32,i64,i64,i64,i64",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "root",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "set_root",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "exit",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      }
+    ],
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_err": "wasm error: unreachable\nwasm stack trace:\n\t.$1086()\n\t.$841(i32,i32,i32,i32)\n\t.$840(i32,i32,i32,i32)\n\t.$802(i32,i32,i32)\n\t.$350(i32,i32)\n\t.$1105(i32,i32,i32,i32,i32)\n\t.$1088(i32)\n\t.$1087(i32)\n\t.$1097(i32)\n\t.$1195(i32,i32)\n\t.$1220(i32,i32,i32)\n\t.$824(i32,i32)\n\t.$617(i32,i32,i64,i32)\n\t.$616(i32) i32"
+  },
+  {
+    "actor": "storageminer",
+    "size": 1728384,
+    "import_count": 28,
+    "import_modules": [
+      "actor",
+      "crypto",
+      "debug",
+      "event",
+      "ipld",
+      "network",
+      "rand",
+      "self",
+      "send",
+      "vm"
+    ],
+    "imports": [
+      {
+        "module": "debug",
+        "name": "enabled",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "network",
+        "name": "context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "message_context",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "resolve_address",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_actor_code_cid",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "actor",
+        "name": "get_builtin_actor_type",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "hash",
+        "params": "i32,i64,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "compute_unsealed_sector_cid",
+        "params": "i32,i64,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "verify_post",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "verify_consensus_fault",
+        "params": "i32,i32,i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "verify_aggregate_seals",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "verify_replica_update",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "crypto",
+        "name": "batch_verify_seals",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "debug",
+        "name": "log",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "event",
+        "name": "emit_event",
+        "params": "i32,i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_create",
+        "params": "i32,i64,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_link",
+        "params": "i32,i32,i64,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_open",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_read",
+        "params": "i32,i32,i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "ipld",
+        "name": "block_stat",
+        "params": "i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "network",
+        "name": "total_fil_circ_supply",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "rand",
+        "name": "get_chain_randomness",
+        "params": "i32,i64",
+        "results": "i32"
+      },
+      {
+        "module": "rand",
+        "name": "get_beacon_randomness",
+        "params": "i32,i64",
+        "results": "i32"
+      },
+      {
+        "module": "send",
+        "name": "send",
+        "params": "i32,i32,i32,i64,i32,i64,i64,i64,i64",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "root",
+        "params": "i32,i32,i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "set_root",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "self",
+        "name": "current_balance",
+        "params": "i32",
+        "results": "i32"
+      },
+      {
+        "module": "vm",
+        "name": "exit",
+        "params": "i32,i32,i32,i32",
+        "results": "i32"
+      }
+    ],
+    "export_count": 1,
+    "exports": [
+      ""
+    ],
+    "instantiated": true,
+    "invoke_err": "wasm error: unreachable\nwasm stack trace:\n\t.$1506()\n\t.$1212(i32,i32,i32,i32)\n\t.$1211(i32,i32,i32,i32)\n\t.$1161(i32,i32,i32)\n\t.$574(i32,i32)\n\t.$1525(i32,i32,i32,i32,i32)\n\t.$1508(i32)\n\t.$1507(i32)\n\t.$1517(i32)\n\t.$1616(i32,i32)\n\t.$1641(i32,i32,i32)\n\t.$1187(i32,i32)\n\t.$571(i32) i32\n\t.$977(i32) i32"
+  }
+]

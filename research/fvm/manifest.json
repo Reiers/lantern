@@ -1,0 +1,98 @@
+[
+  {
+    "name": "placeholder",
+    "code_cid": "bafk2bzacedfvut2myeleyq67fljcrw4kkmn5pb5dpyozovj7jpoez5irnc3ro",
+    "size": 143,
+    "wasm": "wasm/placeholder.wasm"
+  },
+  {
+    "name": "ethaccount",
+    "code_cid": "bafk2bzacedgl6zt7d2ointmeyqrdwkehpi5w5rk3smsemrwbf3v5gc2wx7qfy",
+    "size": 107281,
+    "wasm": "wasm/ethaccount.wasm"
+  },
+  {
+    "name": "system",
+    "code_cid": "bafk2bzacebf4et7elmttbioggwlpmsjhplcnzfxtmi4lnbtqr3f6tzuwsoj2a",
+    "size": 187254,
+    "wasm": "wasm/system.wasm"
+  },
+  {
+    "name": "eam",
+    "code_cid": "bafk2bzacecp2lpiqfjeiulrgor7g6zx4boo2oobjuyuxvtoqya46ljm6gkgci",
+    "size": 201791,
+    "wasm": "wasm/eam.wasm"
+  },
+  {
+    "name": "cron",
+    "code_cid": "bafk2bzacea74gcozu357t22lm6t7n7jxsv7buz2quurhtjzz6s7tkxyyfrve6",
+    "size": 248962,
+    "wasm": "wasm/cron.wasm"
+  },
+  {
+    "name": "account",
+    "code_cid": "bafk2bzaceb4as5yyhjfkvxgooum37uvm5gbjr4dtbpxmqnpvvbjfpu5qouii4",
+    "size": 257394,
+    "wasm": "wasm/account.wasm"
+  },
+  {
+    "name": "init",
+    "code_cid": "bafk2bzacecp5go2numz52kerspigi2e3rygesaqeqhn4gegmfgr5xoon73sde",
+    "size": 349170,
+    "wasm": "wasm/init.wasm"
+  },
+  {
+    "name": "reward",
+    "code_cid": "bafk2bzacebezdh75otifygspbfymgeipv34v6feti5xylrxt7xetu77pisnym",
+    "size": 358611,
+    "wasm": "wasm/reward.wasm"
+  },
+  {
+    "name": "paymentchannel",
+    "code_cid": "bafk2bzaceavlvljdoww4v3bp225p6lurcxtdsub4rg33ee6xhvhkyyysnenac",
+    "size": 402068,
+    "wasm": "wasm/paymentchannel.wasm"
+  },
+  {
+    "name": "multisig",
+    "code_cid": "bafk2bzaceblf5vqw4dwjueoetgawhg7t6he7qhdnfy3shf7ufnfv4mkwchgbm",
+    "size": 517164,
+    "wasm": "wasm/multisig.wasm"
+  },
+  {
+    "name": "storagepower",
+    "code_cid": "bafk2bzacedyhaec4jvpdmaas6pgtoj7zkdlmdpljz7yjwjqtkfmwv7yb5invw",
+    "size": 582469,
+    "wasm": "wasm/storagepower.wasm"
+  },
+  {
+    "name": "datacap",
+    "code_cid": "bafk2bzaceakb5v267o4y6jq3vao4b5c63sjjk3sr2jgjoabtze7ygcvbpvc6i",
+    "size": 610214,
+    "wasm": "wasm/datacap.wasm"
+  },
+  {
+    "name": "verifiedregistry",
+    "code_cid": "bafk2bzaceak2iqpfy4hw6xyyrf7c4yfh7pl4copzm7t63mokecsxfcnybxnd2",
+    "size": 728371,
+    "wasm": "wasm/verifiedregistry.wasm"
+  },
+  {
+    "name": "evm",
+    "code_cid": "bafk2bzaced5i2jt5t4f5gplsfb5gogjl5tknvhvsssgyj75on3g6ds36yy45y",
+    "size": 877168,
+    "wasm": "wasm/evm.wasm"
+  },
+  {
+    "name": "storagemarket",
+    "code_cid": "bafk2bzacebsnn4nk5crrlrvhg5vdpaxsrs4r72etaofxdi7tucr72om22z6a4",
+    "size": 1033760,
+    "wasm": "wasm/storagemarket.wasm"
+  },
+  {
+    "name": "storageminer",
+    "code_cid": "bafk2bzaceautzxqsrstcxerpxtykn4syogslbiwpsfoh562jex262vxeluc4w",
+    "size": 1728384,
+    "wasm": "wasm/storageminer.wasm"
+  }
+]
