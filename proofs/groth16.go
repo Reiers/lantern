@@ -133,24 +133,35 @@ func ParseG2Uncompressed(data []byte) (bls12381.G2Affine, error) {
 	return p, nil
 }
 
-// ParseGroth16Proof parses a 192-byte bellperson proof (A: G1, B: G2, C: G1).
+// ParseGroth16Proof parses a bellperson Groth16 proof (A: G1, B: G2, C: G1).
+// Accepts both the compressed encoding (48+96+48 = 192 bytes, which is what
+// Filecoin block-header / PoSt proofs use) and the uncompressed encoding
+// (96+192+96 = 384 bytes). gnark's SetBytes auto-detects compression from
+// the flag bits, but we slice by the fixed field widths per encoding.
 func ParseGroth16Proof(data []byte) (*Groth16Proof, error) {
-	if len(data) < 192 {
-		return nil, fmt.Errorf("proof too short: %d bytes, need 192", len(data))
+	var g1Len, g2Len int
+	switch len(data) {
+	case 192:
+		g1Len, g2Len = 48, 96 // compressed
+	case 384:
+		g1Len, g2Len = 96, 192 // uncompressed
+	default:
+		return nil, fmt.Errorf("proof length %d, want 192 (compressed) or 384 (uncompressed)", len(data))
 	}
-	a, err := ParseG1Uncompressed(data[0:96])
-	if err != nil {
+	var p Groth16Proof
+	off := 0
+	if _, err := p.A.SetBytes(data[off : off+g1Len]); err != nil {
 		return nil, fmt.Errorf("proof.A: %w", err)
 	}
-	b, err := ParseG2Uncompressed(data[96:288])
-	if err != nil {
+	off += g1Len
+	if _, err := p.B.SetBytes(data[off : off+g2Len]); err != nil {
 		return nil, fmt.Errorf("proof.B: %w", err)
 	}
-	c, err := ParseG1Uncompressed(data[288:384])
-	if err != nil {
+	off += g2Len
+	if _, err := p.C.SetBytes(data[off : off+g1Len]); err != nil {
 		return nil, fmt.Errorf("proof.C: %w", err)
 	}
-	return &Groth16Proof{A: a, B: b, C: c}, nil
+	return &p, nil
 }
 
 // ParseGroth16VerifyingKey reads a bellperson verifying key from a reader.
@@ -192,13 +203,14 @@ func ParseGroth16VerifyingKey(r io.Reader) (*Groth16VerifyingKey, error) {
 		return nil, fmt.Errorf("DeltaG2: %w", err)
 	}
 
-	// IC count: u32 little-endian.
+	// IC count: u32 BIG-endian (bellperson serializes the vector length
+	// with byteorder::BigEndian).
 	var countBuf [4]byte
 	if _, err := io.ReadFull(r, countBuf[:]); err != nil {
 		return nil, fmt.Errorf("read IC count: %w", err)
 	}
-	icCount := uint32(countBuf[0]) | uint32(countBuf[1])<<8 | uint32(countBuf[2])<<16 | uint32(countBuf[3])<<24
-	if icCount == 0 || icCount > 100 {
+	icCount := uint32(countBuf[0])<<24 | uint32(countBuf[1])<<16 | uint32(countBuf[2])<<8 | uint32(countBuf[3])
+	if icCount == 0 || icCount > 1_000_000 {
 		return nil, fmt.Errorf("IC count %d out of range", icCount)
 	}
 
