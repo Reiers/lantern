@@ -45,6 +45,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -53,11 +54,14 @@ import (
 	addr "github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
+	gscrypto "github.com/filecoin-project/go-state-types/crypto"
 	"github.com/ipfs/go-cid"
 
 	"github.com/Reiers/lantern/api"
 	"github.com/Reiers/lantern/build"
+	"github.com/Reiers/lantern/chain/beacon"
 	"github.com/Reiers/lantern/chain/types"
+	"github.com/Reiers/lantern/proofs"
 )
 
 // MaxBaseInfoSectors caps the number of sectors we return in
@@ -92,12 +96,10 @@ func (c *ChainAPI) MinerGetBaseInfo(ctx context.Context, m addr.Address, epoch a
 	if err != nil {
 		return nil, fmt.Errorf("MinerGetBaseInfo miner power: %w", err)
 	}
-	var minerPower, minerQAPower abi.StoragePower
+	var minerQAPower abi.StoragePower
 	if has {
-		minerPower = mc.RawBytePower
 		minerQAPower = mc.QualityAdjPower
 	} else {
-		minerPower = big.Zero()
 		minerQAPower = big.Zero()
 	}
 	tot := ps.Totals()
@@ -117,27 +119,24 @@ func (c *ChainAPI) MinerGetBaseInfo(ctx context.Context, m addr.Address, epoch a
 		}
 	}
 
-	// 4. Sample provable sectors.
+	// 4. WinningPoSt-challenged sectors. Lotus returns exactly the sectors
+	//    the WinningPoSt challenge selects (not the whole proving set): it
+	//    draws the WinningPoStChallengeSeed randomness at `epoch` and calls
+	//    GenerateWinningPoStSectorChallenge over the proving-set size to
+	//    pick which sectors the miner must prove. Curio generates its
+	//    WinningPoSt proof over exactly these sectors, so returning the full
+	//    set (the old behavior) would make Curio prove the wrong sectors
+	//    and produce an invalid block (#87 + #88).
 	var sectors []api.SectorInfo
-	allSectors, err := c.StateMinerActiveSectors(ctx, m, types.TipSetKey{})
-	if err == nil {
-		// Pick the lowest-numbered N sectors deterministically.
+	allSectors, serr := c.StateMinerActiveSectors(ctx, m, types.TipSetKey{})
+	if serr == nil && len(allSectors) > 0 {
+		// Sort by sector number to match Lotus's proving-sectors bitfield
+		// bit-index iteration (GetSectorsForWinningPoSt selects by index
+		// into the ascending proving set).
 		sort.Slice(allSectors, func(i, j int) bool {
 			return allSectors[i].SectorNumber < allSectors[j].SectorNumber
 		})
-		n := len(allSectors)
-		if n > MaxBaseInfoSectors {
-			n = MaxBaseInfoSectors
-		}
-		sectors = make([]api.SectorInfo, n)
-		for i := 0; i < n; i++ {
-			s := allSectors[i]
-			sectors[i] = api.SectorInfo{
-				SealProof:    s.SealProof,
-				SectorNumber: s.SectorNumber,
-				SealedCID:    s.SealedCID,
-			}
-		}
+		sectors = c.winningPoStChallengedSectors(m, epoch, entries, prevEntry, allSectors)
 	}
 
 	// 5. Eligibility: above minimum power, no fee debt, no consensus
@@ -147,7 +146,7 @@ func (c *ChainAPI) MinerGetBaseInfo(ctx context.Context, m addr.Address, epoch a
 	eligible := hasMinPower && feeDebt.IsZero()
 
 	return &api.MiningBaseInfo{
-		MinerPower:        minerPower,
+		MinerPower:        minerQAPower,
 		NetworkPower:      tot.QualityAdjPower,
 		Sectors:           sectors,
 		WorkerKey:         info.Worker,
@@ -156,6 +155,64 @@ func (c *ChainAPI) MinerGetBaseInfo(ctx context.Context, m addr.Address, epoch a
 		BeaconEntries:     entries,
 		EligibleForMining: eligible,
 	}, nil
+}
+
+// winningPoStChallengedSectors selects, from the miner's ascending-sorted
+// proving set, the sectors the WinningPoSt challenge picks at `epoch`.
+// Mirrors Lotus stmgr.GetSectorsForWinningPoSt: draw the
+// WinningPoStChallengeSeed randomness (beacon-at-epoch + miner entropy),
+// then GenerateWinningPoStSectorChallenge over the proving-set size.
+//
+// Falls back to a bounded lowest-N sample if the randomness can't be
+// derived (no beacon entry available) so the field is never empty when
+// sectors exist — an approximate answer beats a hard failure on a node
+// that's briefly missing beacon data.
+func (c *ChainAPI) winningPoStChallengedSectors(m addr.Address, epoch abi.ChainEpoch, entries []types.BeaconEntry, prevEntry types.BeaconEntry, allSectors []*api.SectorOnChainInfo) []api.SectorInfo {
+	toInfo := func(s *api.SectorOnChainInfo) api.SectorInfo {
+		return api.SectorInfo{SealProof: s.SealProof, SectorNumber: s.SectorNumber, SealedCID: s.SealedCID}
+	}
+
+	// Randomness base: the block's last beacon entry if present, else the
+	// prev-epoch entry (matches Lotus rbase selection).
+	var rbaseData []byte
+	if len(entries) > 0 {
+		rbaseData = entries[len(entries)-1].Data
+	} else if len(prevEntry.Data) > 0 {
+		rbaseData = prevEntry.Data
+	}
+	mid, iderr := addr.IDFromAddress(m)
+	if len(rbaseData) > 0 && iderr == nil {
+		var buf bytes.Buffer
+		if err := m.MarshalCBOR(&buf); err == nil {
+			base, err := beacon.DrawRandomnessFromBase(rbaseData, gscrypto.DomainSeparationTag_WinningPoStChallengeSeed, epoch, buf.Bytes())
+			if err == nil {
+				var rand [32]byte
+				copy(rand[:], base)
+				if ids, cerr := proofs.GenerateWinningPoStSectorChallenge(abi.ActorID(mid), rand, uint64(len(allSectors))); cerr == nil {
+					out := make([]api.SectorInfo, 0, len(ids))
+					for _, idx := range ids {
+						if idx < uint64(len(allSectors)) {
+							out = append(out, toInfo(allSectors[idx]))
+						}
+					}
+					if len(out) > 0 {
+						return out
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback: bounded lowest-N sample (previous behavior).
+	n := len(allSectors)
+	if n > MaxBaseInfoSectors {
+		n = MaxBaseInfoSectors
+	}
+	out := make([]api.SectorInfo, n)
+	for i := 0; i < n; i++ {
+		out[i] = toInfo(allSectors[i])
+	}
+	return out
 }
 
 // MpoolSelect returns messages to include in a block. Tier 4 (#34).
