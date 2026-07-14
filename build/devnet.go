@@ -86,6 +86,22 @@ type DevnetConfig struct {
 	// different values. Optional (older configs may lack the field);
 	// when missing, callers should re-run `lantern devnet-init --force`.
 	EthChainID uint64 `json:"ethChainID,omitempty"`
+
+	// NetworkVersion is the Filecoin network version the devnet reports
+	// (Filecoin.StateNetworkVersion). Used with ActorCodeCIDs to register
+	// the devnet's custom actor bundle into Lantern's decoder registry at
+	// the correct actors version. Optional (older configs lack it).
+	NetworkVersion uint64 `json:"networkVersion,omitempty"`
+
+	// ActorCodeCIDs is the devnet's actor-name -> code-CID map
+	// (Filecoin.StateActorCodeCIDs). A debug-compiled devnet ships code
+	// CIDs that are in no released builtin-actors bundle, so Lantern's
+	// registry can't decode devnet actor state without them. Recording
+	// them here lets the daemon register the bundle at startup and decode
+	// devnet state (StateMinerPower, StateMinerInfo, ...). CIDs are stored
+	// as strings for JSON stability. Optional (older configs lack it);
+	// re-run `lantern devnet-init --force` to populate.
+	ActorCodeCIDs map[string]string `json:"actorCodeCIDs,omitempty"`
 }
 
 var (

@@ -96,6 +96,38 @@ func (r *Registry) Lookup(code cid.Cid) (CodeInfo, bool) {
 	return ci, ok
 }
 
+// RegisterCodeCIDs adds an actor-name -> code-CID bundle to the registry
+// at the given actors version + network label. Used to teach the registry
+// a devnet's custom (debug-compiled) builtin-actors bundle whose code CIDs
+// are in no released bundle table. The CBOR layout of a debug build matches
+// the released actors version it was built from, so the existing vN
+// decoders handle it once the code CIDs resolve.
+//
+// Existing entries are NOT overwritten (first-seen wins, matching
+// DefaultRegistry), so registering a devnet bundle can never shadow a real
+// mainnet/calibration code CID. Unknown actor-name keys are accepted (they
+// simply map to a Kind the loaders may not decode, which is harmless — the
+// loader validates Kind before decoding). Returns the number of new code
+// CIDs added.
+func (r *Registry) RegisterCodeCIDs(version int, network string, codeCIDs map[string]cid.Cid) int {
+	added := 0
+	for name, code := range codeCIDs {
+		if !code.Defined() {
+			continue
+		}
+		if _, exists := r.byCode[code]; exists {
+			continue
+		}
+		r.byCode[code] = CodeInfo{
+			Kind:    Kind(name),
+			Version: version,
+			Network: network,
+		}
+		added++
+	}
+	return added
+}
+
 // MustLookup returns the CodeInfo or panics with a descriptive error.
 // Use only for tests / debug paths.
 func (r *Registry) MustLookup(code cid.Cid) CodeInfo {

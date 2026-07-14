@@ -123,7 +123,35 @@ func cmdDevnetInit(args []string) error {
 	}
 	fmt.Printf("  ✓ BlockDelaySecs:   %d\n", blockDelay)
 
-	// 6. Assemble + write config.
+	// 6. StateNetworkVersion + StateActorCodeCIDs → the devnet's custom
+	// (debug-compiled) builtin-actors bundle. These code CIDs are in no
+	// released bundle, so recording them lets the daemon decode devnet
+	// actor state (StateMinerPower/StateMinerInfo) instead of failing with
+	// "unknown code CID". Best-effort: a devnet lotus that doesn't serve
+	// these methods still yields a usable (if actor-blind) config.
+	nvCtx, nvCancel := context.WithTimeout(ctx, *timeout)
+	netVer, nverr := c.StateNetworkVersion(nvCtx)
+	nvCancel()
+	var codeCIDStrs map[string]string
+	if nverr != nil {
+		fmt.Printf("  ! StateNetworkVersion failed (%v); actor decoding disabled for this devnet\n", nverr)
+	} else {
+		fmt.Printf("  ✓ NetworkVersion:   %d\n", netVer)
+		accCtx, accCancel := context.WithTimeout(ctx, *timeout)
+		codeCIDs, aerr := c.StateActorCodeCIDs(accCtx, netVer)
+		accCancel()
+		if aerr != nil {
+			fmt.Printf("  ! StateActorCodeCIDs failed (%v); actor decoding disabled for this devnet\n", aerr)
+		} else {
+			codeCIDStrs = make(map[string]string, len(codeCIDs))
+			for name, cc := range codeCIDs {
+				codeCIDStrs[name] = cc.String()
+			}
+			fmt.Printf("  ✓ ActorCodeCIDs:    %d actors (custom devnet bundle)\n", len(codeCIDStrs))
+		}
+	}
+
+	// 7. Assemble + write config.
 	cfg := &build.DevnetConfig{
 		NetworkName:    networkName,
 		GenesisCID:     genesisCID.String(),
@@ -131,6 +159,8 @@ func cmdDevnetInit(args []string) error {
 		BootstrapPeers: splitCSV(*bootstrapPeers),
 		EthChainID:     chainID,
 		BlockDelaySecs: blockDelay,
+		NetworkVersion: netVer,
+		ActorCodeCIDs:  codeCIDStrs,
 	}
 	if err := build.SaveDevnetConfig(cfgPath, cfg); err != nil {
 		return fmt.Errorf("write devnet config: %w", err)

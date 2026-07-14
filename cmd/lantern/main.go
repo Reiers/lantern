@@ -42,6 +42,8 @@ import (
 
 	addr "github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
+	gstactors "github.com/filecoin-project/go-state-types/actors"
+	gstnetwork "github.com/filecoin-project/go-state-types/network"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -1063,6 +1065,30 @@ func cmdDaemon(args []string) error {
 		defer persistentCache.Close()
 	}
 	chainAPI := handlers.New(tr, fetcher, w, nil, network.String())
+
+	// #87: teach the actor registry the devnet's custom (debug-compiled)
+	// builtin-actors bundle so actor-state reads (StateMinerPower,
+	// StateMinerInfo, ...) decode instead of failing "unknown code CID".
+	// The devnet's code CIDs are in no released bundle; devnet-init
+	// recorded them + the network version, from which we derive the
+	// actors version whose go-state-types decoders match the CBOR layout.
+	if network == build.Devnet {
+		if dcfg := build.GetDevnetConfig(); dcfg != nil && len(dcfg.ActorCodeCIDs) > 0 && dcfg.NetworkVersion > 0 {
+			av, averr := gstactors.VersionForNetwork(gstnetwork.Version(dcfg.NetworkVersion))
+			if averr != nil {
+				fmt.Printf("  devnet:      actor-bundle registration skipped: cannot map nv%d to actors version: %v\n", dcfg.NetworkVersion, averr)
+			} else {
+				codeCIDs := make(map[string]cid.Cid, len(dcfg.ActorCodeCIDs))
+				for name, s := range dcfg.ActorCodeCIDs {
+					if cc, perr := cid.Parse(s); perr == nil {
+						codeCIDs[name] = cc
+					}
+				}
+				n := chainAPI.Accessor.Registry().RegisterCodeCIDs(int(av), "devnet", codeCIDs)
+				fmt.Printf("  devnet:      registered custom actors bundle: %d code CIDs at actors v%d (nv%d)\n", n, int(av), dcfg.NetworkVersion)
+			}
+		}
+	}
 
 	// Issue #4: wire optional VM bridge for block production. Refuse to
 	// start when AllowBlockSubmit is on but no bridge is configured;

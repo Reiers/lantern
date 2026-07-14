@@ -70,3 +70,44 @@ func TestRegistryUnknownCID(t *testing.T) {
 		t.Errorf("expected lookup miss for unknown CID, got hit")
 	}
 }
+
+func TestRegisterCodeCIDs_DevnetBundle(t *testing.T) {
+	r := DefaultRegistry()
+	devCode := cid.MustParse("bafk2bzaceal437l2hwjynf3pzvjbtnwlqn7p5gibdf7rkrauk6cnnwez7jtmw")
+	// Unknown before registration.
+	if _, ok := r.Lookup(devCode); ok {
+		t.Fatal("devnet code CID unexpectedly known before registration")
+	}
+	n := r.RegisterCodeCIDs(18, "devnet", map[string]cid.Cid{
+		"storagepower": devCode,
+	})
+	if n != 1 {
+		t.Fatalf("registered %d code CIDs, want 1", n)
+	}
+	ci, ok := r.Lookup(devCode)
+	if !ok {
+		t.Fatal("devnet code CID not resolvable after registration")
+	}
+	if ci.Kind != KindPower || ci.Version != 18 || ci.Network != "devnet" {
+		t.Fatalf("got %+v, want {power,18,devnet}", ci)
+	}
+}
+
+func TestRegisterCodeCIDs_DoesNotOverrideExisting(t *testing.T) {
+	r := DefaultRegistry()
+	// Pick a real known code CID (calibration v18 power) and try to
+	// re-register it under a bogus kind; must be refused (first-seen wins).
+	var known cid.Cid
+	var knownInfo CodeInfo
+	for code, info := range r.byCode {
+		known, knownInfo = code, info
+		break
+	}
+	n := r.RegisterCodeCIDs(99, "devnet", map[string]cid.Cid{"bogus": known})
+	if n != 0 {
+		t.Fatalf("re-registered %d existing CIDs, want 0 (must not override)", n)
+	}
+	if got, _ := r.Lookup(known); got != knownInfo {
+		t.Fatalf("existing entry mutated: got %+v want %+v", got, knownInfo)
+	}
+}

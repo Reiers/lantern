@@ -300,6 +300,42 @@ func (c *Client) FetchGenesis(ctx context.Context) (cid.Cid, error) {
 	return cid.Parse(raw.Cids[0].Slash)
 }
 
+// StateNetworkVersion queries Filecoin.StateNetworkVersion at the current
+// head and returns the network version. The devnet-init path records it so
+// the daemon can map the devnet's actor code CIDs to the right go-state-
+// types actor-version decoders.
+func (c *Client) StateNetworkVersion(ctx context.Context) (uint64, error) {
+	var nv uint64
+	// StateNetworkVersion takes a TipSetKey; an empty array selects head.
+	if err := c.rpcCall(ctx, "Filecoin.StateNetworkVersion", []any{[]any{}}, &nv); err != nil {
+		return 0, err
+	}
+	return nv, nil
+}
+
+// StateActorCodeCIDs queries Filecoin.StateActorCodeCIDs for the given
+// network version and returns the actor-name -> code-CID map. A custom
+// devnet (debug-compiled builtin-actors) ships code CIDs that are in no
+// released bundle; recording them lets Lantern's actor registry decode
+// devnet state that would otherwise be "unknown code CID".
+func (c *Client) StateActorCodeCIDs(ctx context.Context, networkVersion uint64) (map[string]cid.Cid, error) {
+	var raw map[string]struct {
+		Slash string `json:"/"`
+	}
+	if err := c.rpcCall(ctx, "Filecoin.StateActorCodeCIDs", []any{networkVersion}, &raw); err != nil {
+		return nil, err
+	}
+	out := make(map[string]cid.Cid, len(raw))
+	for name, v := range raw {
+		c, err := cid.Parse(v.Slash)
+		if err != nil {
+			return nil, fmt.Errorf("parse code cid for %q (%s): %w", name, v.Slash, err)
+		}
+		out[name] = c
+	}
+	return out, nil
+}
+
 // EthChainID queries eth_chainId and returns the decimal chain identifier.
 // The devnet-init path uses this to bind the devnet's EIP-155 chain ID
 // into the Lantern config so `eth_chainId` + `net_version` on the daemon

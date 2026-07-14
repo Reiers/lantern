@@ -63,6 +63,15 @@ func fakeLotusRPC(t *testing.T, networkName, genesisCIDStr string, headEpoch int
 				"APIVersion": 0x00020300,
 				"BlockDelay": 4,
 			}
+		case "Filecoin.StateNetworkVersion":
+			resp["result"] = 28
+		case "Filecoin.StateActorCodeCIDs":
+			// A minimal custom devnet bundle (just power, enough to prove
+			// the discovery + config round-trip).
+			resp["result"] = map[string]any{
+				"storagepower": map[string]string{"/": "bafk2bzaceal437l2hwjynf3pzvjbtnwlqn7p5gibdf7rkrauk6cnnwez7jtmw"},
+				"storageminer": map[string]string{"/": "bafk2bzacebz6pb4vdnl74oekr53zui3mgnonzphlul7uzvsmxcles54f6pebg"},
+			}
 		default:
 			t.Errorf("unexpected RPC method: %s", req.Method)
 			resp["error"] = map[string]any{"code": -32601, "message": "unknown method"}
@@ -123,6 +132,12 @@ func TestDevnetInit_EndToEnd(t *testing.T) {
 	}
 	if cfg.BlockDelaySecs != 4 {
 		t.Errorf("BlockDelaySecs=%d, want 4", cfg.BlockDelaySecs)
+	}
+	if cfg.NetworkVersion != 28 {
+		t.Errorf("NetworkVersion=%d, want 28", cfg.NetworkVersion)
+	}
+	if got := cfg.ActorCodeCIDs["storagepower"]; got != "bafk2bzaceal437l2hwjynf3pzvjbtnwlqn7p5gibdf7rkrauk6cnnwez7jtmw" {
+		t.Errorf("ActorCodeCIDs[storagepower]=%q, want the devnet power CID", got)
 	}
 	if len(cfg.BootstrapPeers) != 1 || !strings.Contains(cfg.BootstrapPeers[0], "12D3KooWDummy") {
 		t.Errorf("BootstrapPeers=%v, want the one we passed", cfg.BootstrapPeers)
