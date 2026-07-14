@@ -138,6 +138,20 @@ type Config struct {
 	// before the pipeline is trusted to gate ingest.
 	FullValidationFatal bool
 
+	// WinningPoStVerify enables pure-Go WinningPoSt SNARK verification on
+	// every ingested Full-tier block (#87 + #88). Only takes effect when
+	// FullValidation=true. Observe mode by default (respects
+	// FullValidationFatal). Requires WinningPoStParamsDir to hold the
+	// Filecoin proof-parameter verifying keys for the sector-size range
+	// the network uses.
+	WinningPoStVerify bool
+
+	// WinningPoStParamsDir is the directory holding the Filecoin proof-
+	// parameters (specifically the WinningPoSt verifying keys). Empty =>
+	// the daemon uses its default (<DataDir>/proof-params). Ignored when
+	// WinningPoStVerify=false.
+	WinningPoStParamsDir string
+
 	// HeadCorroborationPeers (#80 part 2) is the number of distinct gossip
 	// peers that must forward a block before the ingestor adopts it as the
 	// new head. A trusted floor peer (protected bootstrap/beacon/direct

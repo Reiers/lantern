@@ -778,6 +778,13 @@ func cmdDaemon(args []string) error {
 	// Light/PDP: off). 0 = off. N>0 = require N distinct forwarding peers
 	// (or one trusted floor peer) before adopting a gossip head.
 	headCorroPeers := fs.Int("head-corroboration-peers", -1, "Distinct gossip peers required to corroborate a head advance before adoption. -1=auto (Full tier 2, others off), 0=off.")
+	// #87 + #88: Full-tier pure-Go WinningPoSt SNARK verify on ingest.
+	// Observe-only (logs, does not gate ingest) so a Full node can be
+	// brought up + soaked on calibration before we trust the verifier to
+	// reject blocks. Off by default; only the Full tier honors it (Light/PDP
+	// don't do consensus validation).
+	winningPostVerify := fs.Bool("winning-post-verify", false, "Full tier only (#87 + #88): run pure-Go WinningPoSt SNARK verification on every ingested block. Observe-only (never rejects ingest). Requires the WinningPoSt verifying keys under --winning-post-params-dir.")
+	winningPostParamsDir := fs.String("winning-post-params-dir", "", "Directory holding the Filecoin proof-parameters (WinningPoSt verifying keys). Empty (default) uses <data-dir>/proof-params. Required when --winning-post-verify is set.")
 	// #98: VM-bridge cross-check auditor. Observe-only: compares the local
 	// canonical tipset at head-3 against the bridge node once a minute and
 	// alarms on divergence. Requires --vm-bridge-rpc.
@@ -1215,12 +1222,34 @@ func cmdDaemon(args []string) error {
 		if profile.FullValidation() && chainAPI != nil {
 			sv := chainAPI.FullValidateView()
 			hsForBeacon := store
+			// #87 + #88: optional pure-Go WinningPoSt SNARK verify. Observe-only.
+			var wpsv fullvalidate.MinerSectorSetView
+			var wpParamsDir string
+			if *winningPostVerify {
+				wpsv = chainAPI.WinningPoStSectorView()
+				wpParamsDir = *winningPostParamsDir
+				if wpParamsDir == "" {
+					wpParamsDir = filepath.Join(netDir, "proof-params")
+				}
+			}
 			sync.SetBlockValidator(func(ctx context.Context, bh *types.BlockHeader) error {
 				prevBeacon, _ := hsForBeacon.LatestBeaconEntry(bh)
 				_, err := fullvalidate.ValidateBlockConsensus(ctx, bh, prevBeacon, sv)
+				if wpsv != nil {
+					if werr := fullvalidate.VerifyBlockWinningPoSt(
+						ctx, bh, prevBeacon, sv, wpsv, wpParamsDir,
+					); werr != nil {
+						fmt.Printf("  [WINNING-POST-VERIFY WARN] epoch=%d miner=%s: %v\n",
+							bh.Height, bh.Miner.String(), werr)
+					}
+				}
 				return err
 			}, false)
-			fmt.Printf("  node tier:    full block validation ON (observe mode, #90)\n")
+			if *winningPostVerify {
+				fmt.Printf("  node tier:    full block validation ON (observe mode, #90) + WinningPoSt SNARK verify (#87 + #88; params=%s)\n", wpParamsDir)
+			} else {
+				fmt.Printf("  node tier:    full block validation ON (observe mode, #90)\n")
+			}
 		}
 		if err := sync.Start(ctx); err != nil {
 			return fmt.Errorf("start header sync: %w", err)

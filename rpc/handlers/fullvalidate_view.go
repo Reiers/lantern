@@ -19,6 +19,14 @@ func (c *ChainAPI) FullValidateView() fullvalidate.StateView {
 	return chainAPIStateView{c}
 }
 
+// WinningPoStSectorView returns the fullvalidate.MinerSectorSetView backed by
+// this ChainAPI so a Full node can additionally run pure-Go WinningPoSt
+// SNARK verification (#87 + #88). Same underlying accessor as FullValidateView;
+// separate return type keeps the WinningPoSt wiring opt-in.
+func (c *ChainAPI) WinningPoStSectorView() fullvalidate.MinerSectorSetView {
+	return chainAPIStateView{c}
+}
+
 type chainAPIStateView struct{ c *ChainAPI }
 
 // WorkerKey resolves miner -> current worker -> pubkey address, matching
@@ -78,4 +86,32 @@ func (v chainAPIStateView) MinerEligible(ctx context.Context, miner address.Addr
 	return true, nil
 }
 
-var _ fullvalidate.StateView = chainAPIStateView{}
+// MinerActiveSectors returns the miner's active (non-faulty) sectors at the
+// current head state, sorted by SectorNumber ascending. Implements
+// fullvalidate.MinerSectorSetView so a Full node can run pure-Go WinningPoSt
+// SNARK verification (#87 + #88). Sort order matches the proving-sectors
+// bitfield's bit-index iteration in Lotus's GetSectorsForWinningPoSt, so a
+// pure-Go challenge index resolves to the same sector.
+func (v chainAPIStateView) MinerActiveSectors(ctx context.Context, miner address.Address) ([]fullvalidate.MinerSectorRef, error) {
+	infos, err := v.c.StateMinerActiveSectors(ctx, miner, types.EmptyTSK)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]fullvalidate.MinerSectorRef, 0, len(infos))
+	for _, si := range infos {
+		if si == nil {
+			continue
+		}
+		out = append(out, fullvalidate.MinerSectorRef{
+			SectorNumber: si.SectorNumber,
+			SealedCID:    si.SealedCID,
+			SealProof:    si.SealProof,
+		})
+	}
+	return out, nil
+}
+
+var (
+	_ fullvalidate.StateView          = chainAPIStateView{}
+	_ fullvalidate.MinerSectorSetView = chainAPIStateView{}
+)

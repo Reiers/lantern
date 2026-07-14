@@ -280,15 +280,39 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		if d.cfg.FullValidation && chainAPI != nil {
 			sv := chainAPI.FullValidateView()
 			hsForBeacon := store
+			// Opt-in WinningPoSt SNARK verify (#87 + #88): loads the miner's
+			// active-sector set from parent state, derives the challenge
+			// randomness + selected sector, and runs pure-Go Groth16 verify.
+			// Failures are logged whatever FullValidationFatal is set to (we
+			// do NOT gate ingest on this until the pipeline is calibration-
+			// soaked; see #87 / #104).
+			var wpsv fullvalidate.MinerSectorSetView
+			var wpParamsDir string
+			if d.cfg.WinningPoStVerify {
+				wpsv = chainAPI.WinningPoStSectorView()
+				wpParamsDir = d.cfg.WinningPoStParamsDir
+				if wpParamsDir == "" {
+					wpParamsDir = filepath.Join(d.cfg.DataDir, "proof-params")
+				}
+			}
 			sync.SetBlockValidator(func(ctx context.Context, bh *types.BlockHeader) error {
 				// Resolve prevBeacon from the store so entry-less blocks
 				// validate fully (nil only if none found within the walk).
 				prevBeacon, _ := hsForBeacon.LatestBeaconEntry(bh)
 				_, err := fullvalidate.ValidateBlockConsensus(ctx, bh, prevBeacon, sv)
+				if wpsv != nil {
+					if werr := fullvalidate.VerifyBlockWinningPoSt(
+						ctx, bh, prevBeacon, sv, wpsv, wpParamsDir,
+					); werr != nil {
+						log.Warnw("winning-post verify failed (observe-only; not gating ingest)",
+							"epoch", bh.Height, "miner", bh.Miner.String(), "err", werr)
+					}
+				}
 				return err
 			}, d.cfg.FullValidationFatal)
 			log.Infow("full-node block validation wired (#90)",
-				"fatal", d.cfg.FullValidationFatal)
+				"fatal", d.cfg.FullValidationFatal,
+				"winning_post_verify", d.cfg.WinningPoStVerify)
 		}
 		if err := sync.Start(ctx); err != nil {
 			_ = store.Close()
