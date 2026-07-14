@@ -80,6 +80,7 @@ type Service struct {
 	h        host.Host
 	received atomic.Uint64 // requests we processed (drained + responded)
 	rejected atomic.Uint64 // requests we dropped (read error, oversized)
+	src      Source        // optional: when set, serve real tipsets via serveStream
 }
 
 // Stats reports observable activity. Exposed for the dashboard.
@@ -111,7 +112,16 @@ func (s *Service) Register() {
 // handleStream reads a request (and discards it), then writes a
 // well-formed NotFound response. Bounded by read + write deadlines so a
 // slow peer can't tie up resources.
+//
+// When SetSource has wired a local source of tipsets, handleStream
+// delegates to serveStream which parses the request and serves real
+// header chains. The NotFound-only path stays as the safe default so a
+// host that only wants to be REACHABLE on the protocol pays no cost.
 func (s *Service) handleStream(str network.Stream) {
+	if s.src != nil {
+		s.serveStream(str)
+		return
+	}
 	defer func() { _ = str.Close() }()
 
 	_ = str.SetReadDeadline(time.Now().Add(streamReadDeadline))
@@ -163,8 +173,5 @@ func drainBounded(r io.Reader, n int) error {
 }
 
 // silence the linter when context is unused at top level; reserved for
-// future enhancement (responding with real tipsets from a store).
+// callers that construct their own request contexts.
 var _ = context.Background
-var _ = statusOK
-var _ = statusBadRequest
-var _ = statusInternalError
