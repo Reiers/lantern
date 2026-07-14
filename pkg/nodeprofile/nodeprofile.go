@@ -46,6 +46,14 @@ const (
 	TierFull Tier = "full"
 )
 
+// DefaultFullCacheBytes is the persistent-cache budget written for a Full
+// tier install when the operator doesn't override --cache-gb. A Full node
+// serves the whole chain surface (not just PDP contract subtrees), so it
+// needs a bigger warm working set than PDP. 12 GiB is single-to-low-double-
+// digit GB territory (see #92) with plenty of headroom for a Mac-mini
+// deployment while staying well below Lotus's 76 GB baseline.
+const DefaultFullCacheBytes int64 = 12 << 30
+
 // DefaultPDPCacheBytes is the persistent-cache budget written for a PDP
 // install: 3 GiB, the middle of the 2-5 GB tier target.
 const DefaultPDPCacheBytes int64 = 3 << 30
@@ -92,7 +100,10 @@ func (p Profile) CacheBytes() int64 {
 	if p.PersistentCacheBytes > 0 {
 		return p.PersistentCacheBytes
 	}
-	if p.UsesPersistentCache() {
+	switch p.Tier {
+	case TierFull:
+		return DefaultFullCacheBytes
+	case TierPDP:
 		return DefaultPDPCacheBytes
 	}
 	return 0

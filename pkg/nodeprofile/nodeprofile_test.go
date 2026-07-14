@@ -92,3 +92,31 @@ func TestMalformedIsError(t *testing.T) {
 		t.Fatal("expected error on malformed profile (must not silently downgrade)")
 	}
 }
+
+func TestCacheBytes_TierDefaults(t *testing.T) {
+	cases := []struct {
+		tier Tier
+		want int64
+	}{
+		{TierLight, 0},
+		{TierPDP, DefaultPDPCacheBytes},
+		{TierFull, DefaultFullCacheBytes},
+	}
+	for _, tc := range cases {
+		p := Profile{Tier: tc.tier}
+		if got := p.CacheBytes(); got != tc.want {
+			t.Errorf("tier %s: CacheBytes = %d, want %d", tc.tier, got, tc.want)
+		}
+	}
+}
+
+func TestCacheBytes_ExplicitOverride(t *testing.T) {
+	// An explicit PersistentCacheBytes wins over the tier default for
+	// any tier (including Light, which gets 0 by default).
+	for _, tier := range []Tier{TierLight, TierPDP, TierFull} {
+		p := Profile{Tier: tier, PersistentCacheBytes: 42 << 30}
+		if got := p.CacheBytes(); got != 42<<30 {
+			t.Errorf("tier %s: explicit override = %d, want %d", tier, got, 42<<30)
+		}
+	}
+}
