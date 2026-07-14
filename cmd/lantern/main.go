@@ -801,6 +801,7 @@ func cmdDaemon(args []string) error {
 	// boot anchor (#54) still uses multi-source agreement (gateway+Glif) and
 	// is separate from runtime fetch counters.
 	noFallbackRPC := fs.Bool("no-fallback-rpc", false, "#76 bridge-off: wire no upstream RPC (Glif) fallback. Head=gossipsub-only, cold-blocks=gateway+bitswap. Requires libp2p/gossipsub.")
+	raceFallbackRPC := fs.Bool("race-fallback-rpc", false, "Promote the Glif RPC fallback into the RACE tier (fired concurrently with the gateway/bitswap) instead of a sequential last resort. Use when the configured --gateway is unreachable or slow: otherwise every cold-block fetch pays the gateway's full race timeout before falling to Glif, which serializes a state HAMT walk into minutes. Increases Glif load, so it's off by default (keeps the #53 'Glif last resort' behavior).")
 	seedPeerWait := fs.Duration("seed-peer-wait", 120*time.Second, "#91/#109 bridge-off: max time to wait for ChainExchange peers to seed the boot anchor tipset before failing loud.")
 	// #118: bridge-off boot auto-stale-reset. When --no-fallback-rpc is
 	// set there is no polling Sync stale-reset (that path lives on the RPC
@@ -1055,8 +1056,20 @@ func cmdDaemon(args []string) error {
 		{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
 	}
 	if !*noFallbackRPC {
+		// When --race-fallback-rpc is set, Glif joins the race tier so its
+		// fast response wins immediately rather than waiting behind an
+		// unreachable/slow gateway's per-block timeout (critical when the
+		// gateway can't serve this network's cold state, e.g. a private
+		// calibration deployment whose gateway host is firewalled).
+		glifTimeout := 20 * time.Second
+		if *raceFallbackRPC {
+			glifTimeout = 10 * time.Second
+		}
 		fetcherSources = append(fetcherSources,
-			combined.Source{Name: "glif", Getter: glif.New(glifURLForNetwork(network), 20*time.Second), Timeout: 20 * time.Second})
+			combined.Source{Name: "glif", Getter: glif.New(glifURLForNetwork(network), 20*time.Second), Timeout: glifTimeout, Race: *raceFallbackRPC})
+		if *raceFallbackRPC {
+			fmt.Printf("  fetch:        Glif RPC promoted to race tier (--race-fallback-rpc); wins over a slow/unreachable gateway\n")
+		}
 	} else {
 		fmt.Printf("  bridge-off:   no upstream RPC fallback wired (#76); head=gossipsub-only, cold-blocks=gateway+bitswap\n")
 	}
