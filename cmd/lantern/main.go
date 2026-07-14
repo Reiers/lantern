@@ -1358,11 +1358,16 @@ func cmdDaemon(args []string) error {
 			fmt.Printf("  hello:    DISABLED (genesis CID parse: %v)\n", perr)
 		}
 
-		// Issue #17: ChainExchange responder. Minimum-viable: answers
-		// 'NotFound' to every request. Being REACHABLE on the protocol
-		// is what removes the 'dead node' signal that triggers remote
-		// connmgr trim passes.
+		// Issue #17 + #91 server tail: ChainExchange responder. Base
+		// behavior is NotFound (keeps us reachable on the protocol so
+		// remote connmgr doesn't trim us). When we have a persistent
+		// header store, wire it as the Source so we ALSO serve real
+		// header chains to peers -- a Lantern node becomes a first-class
+		// BlockSync server, not just a client.
 		xchgSvc = chainxchg.NewService(p2pHost.H)
+		if store != nil {
+			xchgSvc.SetSource(store)
+		}
 		xchgSvc.Register()
 		// #91: the requesting half - fetch verified header chains from real
 		// Filecoin peers over the SAME standard protocol, so a bridge-off
