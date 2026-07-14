@@ -1,6 +1,6 @@
 // DRAND chain configurations used by Filecoin mainnet, lifted from
 // github.com/filecoin-project/lotus/build/buildconstants/drand.go at commit
-// a0ecb8687f1c60d5e66040b6de364dbc9cc4d253. See LICENSE-LOTUS.
+// a0ecb8687f1c60d5e66040b6de364dbc9cc4d253. See LICENSE.
 //
 // We keep only the ChainInfoJSON (the trust anchor for verification) and the
 // IsChained flag. Server lists and libp2p relays belong in net/hsync (when

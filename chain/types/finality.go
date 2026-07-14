@@ -1,5 +1,5 @@
 // Copied from github.com/filecoin-project/lotus/chain/types/finality.go
-// at commit a0ecb8687f1c60d5e66040b6de364dbc9cc4d253. See LICENSE-LOTUS.
+// at commit a0ecb8687f1c60d5e66040b6de364dbc9cc4d253. See LICENSE.
 package types
 
 // FinalityStatus describes how the node is currently determining finality,

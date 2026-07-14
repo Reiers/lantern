@@ -10,7 +10,7 @@
 // don't trim them either.
 //
 // Wire format follows Lotus byte-for-byte. The CBOR codec in cbor_gen.go
-// is the upstream Lotus generated codec, verbatim (see LICENSE-LOTUS).
+// is the upstream Lotus generated codec, verbatim (see LICENSE).
 //
 // Design intentionally narrower than Lotus's hello service:
 //   - We don't trigger chain sync on receiving Hello (Lantern syncs from

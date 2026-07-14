@@ -8,5 +8,5 @@
 // state transitions, or instantiate a VM. Lantern is a light client; message
 // execution lives in full nodes (Forest, Lotus, the future pure-Go FVM).
 //
-// See MODULES.md and TRUSTED-ROOT.md for context.
+// See docs/design/MODULES.md and docs/design/TRUSTED-ROOT.md for context.
 package header

@@ -2,7 +2,7 @@
 // and F3 finality certificates plus the network manifest, it produces and
 // persists Lantern's TrustedRoot tuple.
 //
-// See TRUSTED-ROOT.md for the spec.
+// See docs/design/TRUSTED-ROOT.md for the spec.
 
 package trustedroot
 

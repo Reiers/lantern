@@ -1,6 +1,6 @@
 // Mainnet libp2p bootstrap peers. Copied verbatim from
 // github.com/filecoin-project/lotus/build/bootstrap/mainnet.pi at commit
-// master @ 2026-05-21. See LICENSE-LOTUS.
+// master @ 2026-05-21. See LICENSE.
 //
 // These are the seed peers Lantern dials on startup to enter the Filecoin
 // mainnet DHT + gossipsub mesh.

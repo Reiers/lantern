@@ -1,6 +1,6 @@
 // Calibration libp2p bootstrap peers. Copied verbatim from
 // github.com/filecoin-project/lotus/build/bootstrap/calibnet.pi at tag
-// v1.36.0 (2026-05-23 verified). See LICENSE-LOTUS.
+// v1.36.0 (2026-05-23 verified). See LICENSE.
 //
 // These are the seed peers Lantern dials on startup to enter the Filecoin
 // calibration DHT + gossipsub mesh. The calibration network name is

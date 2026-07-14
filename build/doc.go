@@ -3,5 +3,5 @@
 //
 // Values here are copied from github.com/filecoin-project/lotus/build at
 // commit a0ecb8687f1c60d5e66040b6de364dbc9cc4d253 and adapted where the
-// Lantern light-client scope diverges. See LICENSE-LOTUS.
+// Lantern light-client scope diverges. See LICENSE.
 package build

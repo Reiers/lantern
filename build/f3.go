@@ -1,6 +1,6 @@
 // F3 network manifests embedded into the binary. The JSON files are copied
 // verbatim from lotus/build/buildconstants/f3manifest_*.json at commit
-// a0ecb8687f1c60d5e66040b6de364dbc9cc4d253. See LICENSE-LOTUS.
+// a0ecb8687f1c60d5e66040b6de364dbc9cc4d253. See LICENSE.
 
 package build
 

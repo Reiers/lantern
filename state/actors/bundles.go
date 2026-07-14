@@ -1,6 +1,6 @@
 // Code generated from filecoin-project/lotus@v1.36.0/build/builtin_actors_gen.go.
 // DO NOT EDIT. Source: github.com/filecoin-project/lotus/build/builtin_actors_gen.go
-// License: Apache-2.0 / MIT (Lotus dual-licensed; see LICENSE-LOTUS{,-APACHE,-MIT}).
+// License: Apache-2.0 / MIT (Lotus dual-licensed; see LICENSE{,-APACHE,-MIT}).
 
 package actors
 

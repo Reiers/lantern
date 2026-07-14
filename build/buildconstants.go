@@ -1,6 +1,6 @@
 // Constants in this file are lifted from
 // github.com/filecoin-project/lotus/build/buildconstants at commit
-// a0ecb8687f1c60d5e66040b6de364dbc9cc4d253. See LICENSE-LOTUS.
+// a0ecb8687f1c60d5e66040b6de364dbc9cc4d253. See LICENSE.
 //
 // We keep only the values that chain/types and other Phase 1 packages
 // actually consume. Adding more constants here is fine, but each one should

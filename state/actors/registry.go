@@ -12,7 +12,7 @@
 //
 // Provenance: the source data is `lotus@v1.36.0
 // build/builtin_actors_gen.go`. Lotus carries dual Apache-2.0 / MIT
-// license; see LICENSE-LOTUS{,-APACHE,-MIT}. The Manifest data itself is
+// license; see LICENSE{,-APACHE,-MIT}. The Manifest data itself is
 // reproducible by computing the IPLD CID of each release of
 // `github.com/filecoin-project/builtin-actors`.
 

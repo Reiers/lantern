@@ -145,7 +145,7 @@ func ValidateHeader(
 	// Sanity: BLSAggregate and BlockSig may be nil during catch-up replay
 	// where Lantern hasn't yet fetched message data; we record but don't
 	// fail. Higher-level callers can run a second pass once state is
-	// available (see TRUSTED-ROOT.md §1 step 1.2).
+	// available (see docs/design/TRUSTED-ROOT.md §1 step 1.2).
 
 	// Election proof: nullable for null-round epochs. If present we accept
 	// it; the BLS signature check needs the worker pubkey, which lives in

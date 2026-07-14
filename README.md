@@ -388,11 +388,13 @@ cmd/
 examples/
   historical/phase{1,2,5,6,7}/ archived per-phase end-to-end build-up demos
 
-SCOPE.md              full project scope
-MODULES.md            module layout + lift-vs-reimplement decisions
-CURIO-RPC-SURFACE.md  the 71-method Curio compatibility target with call-site map
-TRUSTED-ROOT.md       trusted-root data structure spec
 CHANGELOG.md          release history (per-release notes live on the GitHub releases)
+TRUST-MODEL.md        what Lantern trusts, verifies, and never trusts
+SWARM-ARCHITECTURE.md peer discovery + rendezvous design
+CURIO-RPC-SURFACE.md  the 71-method Curio compatibility target with call-site map
+docs/design/SCOPE.md          project scope (design doc)
+docs/design/MODULES.md        module layout + lift-vs-reimplement decisions (design doc)
+docs/design/TRUSTED-ROOT.md   trusted-root data structure spec (design doc)
 ```
 
 ---
@@ -483,12 +485,9 @@ Advisor roles are non-binding; views and code in this repository are the author'
 
 ## License
 
-Lantern is dual-licensed:
+Lantern is dual-licensed under **Apache License 2.0** OR **MIT** at your option. Both license texts and the third-party attribution notice live in a single [`LICENSE`](LICENSE) file.
 
-- **Apache License 2.0** ([LICENSE](LICENSE) or http://www.apache.org/licenses/LICENSE-2.0)
-- **MIT License** ([LICENSE-LOTUS-MIT](LICENSE-LOTUS-MIT) or http://opensource.org/licenses/MIT)
-
-Choose whichever fits your use case. Code lifted from Lotus is dual-licensed under the same terms ([LICENSE-LOTUS-APACHE](LICENSE-LOTUS-APACHE), [LICENSE-LOTUS-MIT](LICENSE-LOTUS-MIT)) with attribution headers on each file.
+Code lifted from Filecoin Lotus (dual Apache-2.0 / MIT) is used under matching terms, so your choice above applies uniformly. Every lifted file carries a header referencing the upstream path and commit.
 
 ---
 

@@ -5,7 +5,7 @@
 // The files in this package are copied verbatim from
 // github.com/filecoin-project/lotus/chain/types at commit
 // a0ecb8687f1c60d5e66040b6de364dbc9cc4d253 unless a header note indicates
-// otherwise. See LICENSE-LOTUS in the repository root.
+// otherwise. See LICENSE in the repository root.
 //
 // Lantern maintains its own copy so the module can avoid importing the
 // Lotus module (and its transitive filecoin-ffi dependency). Code here must

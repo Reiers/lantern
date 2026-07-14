@@ -5,7 +5,7 @@
 // 2026-05; functions `DrawRandomnessFromBase` and `DrawRandomnessFromDigest`)
 // to guarantee bit-stable cross-compatibility with Lotus.
 //
-// See LICENSE-LOTUS-MIT and LICENSE-LOTUS-APACHE in the repo root.
+// See LICENSE and LICENSE in the repo root.
 //
 // Lotus' rand.go pseudo-code (paraphrased):
 //

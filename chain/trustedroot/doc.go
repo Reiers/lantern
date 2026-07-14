@@ -15,5 +15,5 @@
 //     the head minus a safety buffer, pre-F3).
 //  5. Persist to BadgerDB so subsequent boots resume in seconds.
 //
-// See TRUSTED-ROOT.md for the full specification.
+// See docs/design/TRUSTED-ROOT.md for the full specification.
 package trustedroot
