@@ -60,6 +60,25 @@ func TestEffectiveStateRoot_FallsBackOnUndefinedHeadRoot(t *testing.T) {
 	}
 }
 
+func TestRebind_PreservesHeadStateProvider(t *testing.T) {
+	// Regression for the lantern#87 clobber bug: rebinding the block getter
+	// (as the daemon does after Bitswap comes up) must NOT drop the
+	// head-state provider. Before the fix, rebindBlockGetter rebuilt the
+	// accessor with accessor.New, silently re-pinning state reads to boot.
+	boot := cidFor(t, "boot-state-root")
+	head := cidFor(t, "live-head-state-root")
+	a := New(&trustedroot.TrustedRoot{StateRoot: boot}, nil)
+	a.SetHeadStateProvider(func() (cid.Cid, bool) { return head, true })
+	if got := a.effectiveStateRoot(); !got.Equals(head) {
+		t.Fatalf("pre-rebind: got %s want head %s", got, head)
+	}
+	// Rebind with a different (nil) getter; provider must survive.
+	a.Rebind(nil)
+	if got := a.effectiveStateRoot(); !got.Equals(head) {
+		t.Fatalf("post-rebind: got %s want head %s (provider was dropped)", got, head)
+	}
+}
+
 func TestEffectiveStateRoot_TracksProviderChanges(t *testing.T) {
 	boot := cidFor(t, "boot-state-root")
 	h1 := cidFor(t, "head-epoch-100")

@@ -44,6 +44,17 @@ func New(tr *trustedroot.TrustedRoot, bg hamt.BlockGetter) *Accessor {
 	return &Accessor{tr: tr, bg: bg}
 }
 
+// Rebind swaps the BlockGetter in place while PRESERVING accessor
+// configuration (notably the head-state provider). Used when a later
+// wiring step replaces the block source (e.g. after Bitswap comes up).
+//
+// Callers must not rebuild the accessor with New in that case: doing so
+// drops the head-state provider and silently re-pins state reads to the
+// boot trusted-root (the lantern#87 regression this method prevents).
+func (a *Accessor) Rebind(bg hamt.BlockGetter) {
+	a.bg = bg
+}
+
 // TrustedRoot returns the bound root.
 func (a *Accessor) TrustedRoot() *trustedroot.TrustedRoot { return a.tr }
 

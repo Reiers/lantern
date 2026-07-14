@@ -51,12 +51,26 @@ func parsePreferredPeers(s string) ([]peer.AddrInfo, error) {
 	return out, nil
 }
 
-// rebindBlockGetter swaps the ChainAPI's BlockGetter and rebuilds the
+// rebindBlockGetter swaps the ChainAPI's BlockGetter and rebinds the
 // state.Accessor on top of it. Used after Bitswap is wired in so existing
 // handlers immediately route through the new chain.
+//
+// It rebinds IN PLACE rather than rebuilding the accessor: a fresh
+// accessor.New would drop the head-state provider wired by
+// ChainAPI.FollowHeadState (#87), silently re-pinning actor-state reads to
+// the boot trusted-root. If for any reason the accessor isn't there yet,
+// fall back to building one and re-apply head-following.
 func rebindBlockGetter(c *handlers.ChainAPI, bg hamt.BlockGetter) {
 	c.BlockGetter = bg
-	c.Accessor = accessor.New(c.Trusted, bg)
+	if c.Accessor != nil {
+		c.Accessor.Rebind(bg)
+	} else {
+		c.Accessor = accessor.New(c.Trusted, bg)
+	}
+	// Re-apply head-following in case the accessor was just (re)built or the
+	// header store was wired after the initial FollowHeadState call. No-op
+	// when no header store is attached.
+	c.FollowHeadState()
 }
 
 // serveMetrics exposes per-source fetch hit counts + bitswap stats + libp2p
