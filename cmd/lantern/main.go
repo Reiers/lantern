@@ -1147,6 +1147,12 @@ func cmdDaemon(args []string) error {
 		}
 		defer store.Close()
 		chainAPI.HeaderStore = store
+		// #87: follow the live verified head for actor-state reads instead of
+		// staying pinned to the boot trusted-root. Without this the accessor
+		// serves state only at the boot epoch, which ages out (upstreams prune
+		// the stale root) and breaks StateMinerPower/StateMinerInfo — the reads
+		// Curio needs for WinningPoSt block production.
+		chainAPI.FollowHeadState()
 
 		dist = headnotify.New(store, *notifyBufSize)
 		dist.Start()

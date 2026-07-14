@@ -220,6 +220,41 @@ func (c *ChainAPI) WithHeaderStore(s *hstore.Store) *ChainAPI {
 	return c
 }
 
+// FollowHeadState wires the accessor to resolve state reads against the
+// live header-store head (head.ParentStateRoot) instead of the frozen boot
+// trusted-root. Without this, actor-state reads (StateMinerPower,
+// StateMinerInfo, GetActor, ...) are pinned to the boot anchor epoch and
+// fail once upstreams prune the aging boot state root (lantern#87). Call
+// after HeaderStore is set. No-op if the accessor or header store is nil.
+//
+// Semantics: uses the head tipset's ParentStateRoot, matching Lantern's
+// existing trusted-root convention (FromF3State) and the state a light
+// client can serve without executing the head tipset. This is at most one
+// epoch behind the true head state, which is correct for slowly-changing
+// reads like miner power/info and, critically, is recent enough that
+// bitswap/Glif can still serve it.
+func (c *ChainAPI) FollowHeadState() {
+	if c.Accessor == nil || c.HeaderStore == nil {
+		return
+	}
+	store := c.HeaderStore
+	c.Accessor.SetHeadStateProvider(func() (cid.Cid, bool) {
+		ts := store.Head()
+		if ts == nil {
+			return cid.Undef, false
+		}
+		blks := ts.Blocks()
+		if len(blks) == 0 {
+			return cid.Undef, false
+		}
+		psr := blks[0].ParentStateRoot
+		if !psr.Defined() {
+			return cid.Undef, false
+		}
+		return psr, true
+	})
+}
+
 // WithBridge attaches a VM bridge to the handler. See vm/bridge for the
 // trust model.
 func (c *ChainAPI) WithBridge(b bridge.Bridge) *ChainAPI {

@@ -25,6 +25,18 @@ import (
 type Accessor struct {
 	tr *trustedroot.TrustedRoot
 	bg hamt.BlockGetter
+
+	// headState, when set, returns the state root of the current verified
+	// header-store head (typically head.ParentStateRoot). State reads use
+	// it instead of the frozen boot trusted-root state root, so actor
+	// lookups follow the live chain instead of aging out at the boot epoch
+	// (lantern#87: without this the accessor is pinned to the boot anchor
+	// and StateMinerPower/StateMinerInfo fail once upstreams prune the
+	// stale boot state root). The (cid, ok) shape lets the provider signal
+	// "no live head yet" so the accessor falls back to the boot root during
+	// the first moments after start. The provider must be goroutine-safe;
+	// the header store's Head() already is.
+	headState func() (cid.Cid, bool)
 }
 
 // New returns an Accessor bound to a TrustedRoot and a BlockGetter.
@@ -35,21 +47,42 @@ func New(tr *trustedroot.TrustedRoot, bg hamt.BlockGetter) *Accessor {
 // TrustedRoot returns the bound root.
 func (a *Accessor) TrustedRoot() *trustedroot.TrustedRoot { return a.tr }
 
+// SetHeadStateProvider wires an optional live-head state-root provider.
+// When set, state reads resolve against the provider's state root instead
+// of the frozen boot trusted-root, so the accessor follows the chain. Pass
+// nil to revert to boot-anchored reads. Safe to call once at wiring time.
+func (a *Accessor) SetHeadStateProvider(fn func() (cid.Cid, bool)) {
+	a.headState = fn
+}
+
+// effectiveStateRoot returns the state root state reads should resolve
+// against: the live head's state root when a provider is wired and has a
+// head, else the frozen boot trusted-root state root.
+func (a *Accessor) effectiveStateRoot() cid.Cid {
+	if a.headState != nil {
+		if sr, ok := a.headState(); ok && sr.Defined() {
+			return sr
+		}
+	}
+	return a.tr.StateRoot
+}
+
 // loadStateRoot fetches the [version, actorsRoot, infoRoot] tuple and
 // returns the actors-tree HAMT CID plus the proof for that step.
 func (a *Accessor) loadStateRoot(ctx context.Context) (*StateRoot, []cid.Cid, error) {
-	raw, err := a.bg.Get(ctx, a.tr.StateRoot)
+	stateRoot := a.effectiveStateRoot()
+	raw, err := a.bg.Get(ctx, stateRoot)
 	if err != nil {
-		return nil, nil, fmt.Errorf("fetch state root %s: %w", a.tr.StateRoot, err)
+		return nil, nil, fmt.Errorf("fetch state root %s: %w", stateRoot, err)
 	}
-	if err := hamt.VerifyBlockCID(a.tr.StateRoot, raw); err != nil {
+	if err := hamt.VerifyBlockCID(stateRoot, raw); err != nil {
 		return nil, nil, fmt.Errorf("state root: %w", err)
 	}
 	sr, err := DecodeStateRoot(raw)
 	if err != nil {
 		return nil, nil, err
 	}
-	return sr, []cid.Cid{a.tr.StateRoot}, nil
+	return sr, []cid.Cid{stateRoot}, nil
 }
 
 // GetActor resolves `target` (any-protocol address) to its ID address via

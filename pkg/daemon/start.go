@@ -191,6 +191,10 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 			return fmt.Errorf("open header store: %w", err)
 		}
 		chainAPI.HeaderStore = store
+		// #87: follow the live verified head for actor-state reads (see the
+		// FollowHeadState doc + the CLI daemon wiring). Embedded consumers
+		// (curio-core) get the same head-following state surface.
+		chainAPI.FollowHeadState()
 
 		dist := headnotify.New(store, d.cfg.NotifyBufSize)
 		dist.Start()
