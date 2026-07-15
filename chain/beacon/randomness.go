@@ -148,6 +148,25 @@ func MainnetQuicknetParams() QuicknetParams {
 	}
 }
 
+// CalibnetQuicknetParams returns the parameters for Filecoin calibration
+// using drand-quicknet. Drand chain is identical to mainnet quicknet
+// (hash 52db9ba7...); calibration only differs in FilecoinGenesisTime
+// (2026-11-01 15:33:00 UTC). Lotus keeps this in
+// build/buildconstants/params_calibnet.go; we mirror it directly so a
+// misconfigured import doesn't silently produce wrong beacon rounds.
+//
+// Verified against a live calibration tipset (2026-07-15): fil-epoch
+// 3893385 -> drand round 30441512 with FilecoinGenesisTime=1667326380,
+// which is the value observed on-chain via lotus StateGetBeaconEntry.
+func CalibnetQuicknetParams() QuicknetParams {
+	return QuicknetParams{
+		DrandGenesisTime:    1692803367,
+		DrandPeriodSecs:     3,
+		FilecoinGenesisTime: 1667326380,
+		BlockDelaySecs:      30,
+	}
+}
+
 // MaxBeaconRoundForEpoch returns the highest drand round whose seal time
 // happens no later than the start of the given Filecoin epoch.
 //
