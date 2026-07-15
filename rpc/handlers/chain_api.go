@@ -1233,7 +1233,31 @@ func (c *ChainAPI) WalletHas(ctx context.Context, a address.Address) (bool, erro
 	if c.Wallet == nil {
 		return false, nil
 	}
-	return c.Wallet.Has(ctx, a)
+	resolved := c.resolveToKeyAddress(ctx, a)
+	return c.Wallet.Has(ctx, resolved)
+}
+
+// resolveToKeyAddress maps an ID-typed address (e.g. f0137632) to its
+// BLS/secp pubkey-address by reading the on-chain Account actor, matching
+// what lotus does inside its wallet-facing calls. Wallets store keys under
+// the pubkey-address, but Filecoin miner data (MinerInfo.Worker,
+// MinerGetBaseInfo.WorkerKey) surfaces the ID-address; without this
+// resolution WalletSign/WalletHas fail with "key not found" for the very
+// address a caller would look up from a MinerInfo response.
+//
+// If `a` is already a pubkey address, it is returned unchanged. If
+// resolution fails, the original address is returned so the caller sees
+// the underlying keystore error rather than a resolver error swallowing
+// it.
+func (c *ChainAPI) resolveToKeyAddress(ctx context.Context, a address.Address) address.Address {
+	if a.Protocol() != address.ID {
+		return a
+	}
+	resolved, err := c.StateAccountKey(ctx, a, types.EmptyTSK)
+	if err != nil || resolved == address.Undef {
+		return a
+	}
+	return resolved
 }
 func (c *ChainAPI) WalletDelete(ctx context.Context, a address.Address) error {
 	if c.Wallet == nil {
@@ -1273,7 +1297,7 @@ func (c *ChainAPI) WalletSign(ctx context.Context, a address.Address, msg []byte
 	if c.Wallet == nil {
 		return nil, errors.New("wallet not initialised")
 	}
-	return c.Wallet.Sign(ctx, a, msg)
+	return c.Wallet.Sign(ctx, c.resolveToKeyAddress(ctx, a), msg)
 }
 func (c *ChainAPI) WalletSignMessage(ctx context.Context, a address.Address, msg *types.Message) (*types.SignedMessage, error) {
 	if c.Wallet == nil {
@@ -1283,7 +1307,7 @@ func (c *ChainAPI) WalletSignMessage(ctx context.Context, a address.Address, msg
 		return nil, errors.New("nil message")
 	}
 	mcid := msg.Cid()
-	sig, err := c.Wallet.Sign(ctx, a, mcid.Bytes())
+	sig, err := c.Wallet.Sign(ctx, c.resolveToKeyAddress(ctx, a), mcid.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("sign: %w", err)
 	}
