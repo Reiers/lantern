@@ -27,8 +27,8 @@ func TestGenerateWinningPoStSectorChallenge_ReferenceVectors(t *testing.T) {
 	copy(randomness[:], rnd)
 
 	cases := []struct {
-		name             string
-		eligibleCount    uint64
+		name              string
+		eligibleCount     uint64
 		expectedChallenge uint64
 	}{
 		{name: "eligibleSet=1 (matches shipped 2KiB proof vector)", eligibleCount: 1, expectedChallenge: 0},
