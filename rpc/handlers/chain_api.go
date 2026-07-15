@@ -208,8 +208,27 @@ func New(tr *trustedroot.TrustedRoot, bg hamt.BlockGetter, w *wallet.Wallet, mp 
 		Wallet:       w,
 		Mpool:        mp,
 		NetworkName:  netName,
-		BeaconParams: lbeacon.MainnetQuicknetParams(),
+		BeaconParams: beaconParamsForNetwork(netName),
 		sessionUUID:  uuid.New().String(),
+	}
+}
+
+// beaconParamsForNetwork picks the drand-quicknet timing parameters that
+// match the given Filecoin network. Calibration and mainnet share the
+// drand quicknet chain, but their FilecoinGenesisTime differs by ~2 years,
+// so hardcoding mainnet on calibration produces beacon rounds ~23 million
+// too high (StateGetBeaconEntry then fails with "not found in walked
+// tipsets", which cascades into every miner-side read that draws
+// randomness — including Curio's mining loop).
+//
+// Unknown networks fall back to mainnet params so the existing behaviour
+// is preserved.
+func beaconParamsForNetwork(netName string) lbeacon.QuicknetParams {
+	switch netName {
+	case "calibrationnet", "calibration", "calibnet":
+		return lbeacon.CalibnetQuicknetParams()
+	default:
+		return lbeacon.MainnetQuicknetParams()
 	}
 }
 
