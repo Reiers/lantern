@@ -43,8 +43,8 @@ import (
 	addr "github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
 	gstactors "github.com/filecoin-project/go-state-types/actors"
-	gstnetwork "github.com/filecoin-project/go-state-types/network"
 	"github.com/filecoin-project/go-state-types/big"
+	gstnetwork "github.com/filecoin-project/go-state-types/network"
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p/core/peer"
 
