@@ -568,11 +568,29 @@ func (c *ChainAPI) ChainPutObj(ctx context.Context, raw []byte) (cid.Cid, error)
 }
 
 // ChainTipSetWeight returns parent weight of a tipset. Tier 2 (#29).
-func (c *ChainAPI) ChainTipSetWeight(_ context.Context, _ types.TipSetKey) (big.Int, error) {
-	if c.Trusted == nil {
-		return big.Zero(), errors.New("trusted root not initialised")
+func (c *ChainAPI) ChainTipSetWeight(ctx context.Context, key types.TipSetKey) (big.Int, error) {
+	// Resolve the *requested* tipset (not just the head) and return the
+	// ParentWeight carried by its block headers. All blocks in a tipset
+	// share ParentWeight; it is a monotone proxy for the tipset's own weight
+	// and is sufficient for fork-choice comparisons such as Curio's
+	// winning-block base-vs-head weight check.
+	//
+	// Two invariants this fixes vs the previous implementation:
+	//   (a) honour the key—a caller comparing two tipsets (e.g. head vs base)
+	//       must get distinct weights, not the head's weight for both; and
+	//   (b) never return a nil-inner BigInt. c.Trusted.ParentWeight can be
+	//       unset, and a nil big.Int JSON-marshals as "<nil>", which breaks
+	//       clients (Curio's mining loop dies with
+	//       "failed to parse big string: <nil>").
+	if ts, err := c.ChainGetTipSet(ctx, key); err == nil && ts != nil && len(ts.Blocks()) > 0 {
+		if w := ts.Blocks()[0].ParentWeight; w.Int != nil {
+			return w, nil
+		}
 	}
-	return c.Trusted.ParentWeight, nil
+	if c.Trusted != nil && c.Trusted.ParentWeight.Int != nil {
+		return c.Trusted.ParentWeight, nil
+	}
+	return big.Zero(), nil
 }
 
 // ChainNotify streams head changes. Tier 2 (#7).
