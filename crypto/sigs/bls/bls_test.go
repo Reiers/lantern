@@ -14,7 +14,57 @@ import (
 
 	"github.com/Reiers/lantern/crypto/sigs"
 	lbls "github.com/Reiers/lantern/crypto/sigs/bls"
+
+	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
 )
+
+// TestPrivateKeyLittleEndian locks the private-key byte order to Filecoin's
+// little-endian convention (blst / filecoin-ffi). The scalar 1 serializes
+// to [0x01, 0x00, ...]; its public key must be exactly the G1 generator.
+// A big-endian misread would treat the same bytes as 2^248 and produce a
+// completely different point, so this is a byte-for-byte guard against the
+// endianness regression that made real on-chain keys import as "out of
+// range" and derive the wrong address.
+func TestPrivateKeyLittleEndian(t *testing.T) {
+	priv := make([]byte, lbls.PrivateKeyBytes)
+	priv[0] = 0x01 // scalar = 1, little-endian
+
+	pub, err := sigs.ToPublic(crypto.SigTypeBLS, priv)
+	require.NoError(t, err)
+
+	_, _, g1, _ := bls12381.Generators()
+	want := g1.Bytes()
+	require.Equal(t, want[:], pub, "ToPublic(scalar=1 LE) must equal the G1 generator")
+
+	// A scalar of 2 (LE [0x02,0x00,...]) must equal 2*G1, i.e. G1 doubled.
+	priv2 := make([]byte, lbls.PrivateKeyBytes)
+	priv2[0] = 0x02
+	pub2, err := sigs.ToPublic(crypto.SigTypeBLS, priv2)
+	require.NoError(t, err)
+	var dbl bls12381.G1Affine
+	dbl.Double(&g1)
+	want2 := dbl.Bytes()
+	require.Equal(t, want2[:], pub2, "ToPublic(scalar=2 LE) must equal 2*G1")
+}
+
+// TestBLSPrivateRoundTrip proves a generated key survives the little-endian
+// encode/decode round trip: generate -> pub -> sign -> verify, with the
+// private bytes in the on-disk (little-endian) shape the keystore persists.
+func TestBLSPrivateRoundTrip(t *testing.T) {
+	priv, err := sigs.Generate(crypto.SigTypeBLS)
+	require.NoError(t, err)
+	require.Len(t, priv, lbls.PrivateKeyBytes)
+
+	pub, err := sigs.ToPublic(crypto.SigTypeBLS, priv)
+	require.NoError(t, err)
+	addr, err := address.NewBLSAddress(pub)
+	require.NoError(t, err)
+
+	msg := []byte("little-endian round trip")
+	sig, err := sigs.Sign(crypto.SigTypeBLS, priv, msg)
+	require.NoError(t, err)
+	require.NoError(t, sigs.Verify(sig, addr, msg))
+}
 
 // Test vector lifted from
 // github.com/filecoin-project/lotus/lib/sigs/bls/bls_test.go

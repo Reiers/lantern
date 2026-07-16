@@ -184,10 +184,48 @@ func pairingCheckOne(pk bls12381.G1Affine, sig bls12381.G2Affine, h bls12381.G2A
 // sigs.Sign(...) uniformly.
 type blsSigner struct{}
 
+// scalarFromPrivate decodes a 32-byte Filecoin BLS private key into its
+// field scalar. Filecoin serializes the scalar in LITTLE-endian byte
+// order (the blst_scalar_from_lendian convention shared by blst and
+// filecoin-ffi, and therefore by every BLS key on the network). gnark's
+// big.Int arithmetic is big-endian, so we reverse the bytes before
+// interpreting them. Getting this wrong yields a different scalar, hence
+// a different public key / address and signatures that never verify
+// on-chain (it also trips the range check as a near-certain "out of
+// range" for real keys).
+func scalarFromPrivate(priv []byte) (*big.Int, error) {
+	if len(priv) != PrivateKeyBytes {
+		return nil, fmt.Errorf("bls: invalid private key length %d, want %d", len(priv), PrivateKeyBytes)
+	}
+	le := make([]byte, PrivateKeyBytes)
+	for i := 0; i < PrivateKeyBytes; i++ {
+		le[i] = priv[PrivateKeyBytes-1-i]
+	}
+	k := new(big.Int).SetBytes(le)
+	if k.Sign() == 0 || k.Cmp(fr.Modulus()) >= 0 {
+		return nil, errors.New("bls: private key out of range")
+	}
+	return k, nil
+}
+
+// privateFromScalar serializes a scalar back into Filecoin's little-endian
+// 32-byte private key encoding, the inverse of scalarFromPrivate. Keeping
+// generation and parsing on the same convention is what lets a key minted
+// here round-trip through `wallet export` into any other Filecoin tool.
+func privateFromScalar(k *big.Int) []byte {
+	be := make([]byte, PrivateKeyBytes)
+	k.FillBytes(be) // big-endian, left-padded to 32 bytes
+	out := make([]byte, PrivateKeyBytes)
+	for i := 0; i < PrivateKeyBytes; i++ {
+		out[i] = be[PrivateKeyBytes-1-i]
+	}
+	return out
+}
+
 func (blsSigner) GenPrivate() ([]byte, error) {
 	// Sample a uniformly random scalar in [1, r-1]; r is the BLS12-381 G2
-	// scalar field order. We use rejection sampling on 32-byte big-endian
-	// integers.
+	// scalar field order. Rejection sampling on 32 random bytes, then emit
+	// the scalar in Filecoin's little-endian private-key encoding.
 	mod := fr.Modulus()
 	for attempt := 0; attempt < 16; attempt++ {
 		var buf [PrivateKeyBytes]byte
@@ -198,20 +236,15 @@ func (blsSigner) GenPrivate() ([]byte, error) {
 		if k.Sign() == 0 || k.Cmp(mod) >= 0 {
 			continue
 		}
-		out := make([]byte, PrivateKeyBytes)
-		k.FillBytes(out)
-		return out, nil
+		return privateFromScalar(k), nil
 	}
 	return nil, errors.New("bls: failed to sample private key after retries")
 }
 
 func (blsSigner) ToPublic(priv []byte) ([]byte, error) {
-	if len(priv) != PrivateKeyBytes {
-		return nil, fmt.Errorf("bls: invalid private key length %d", len(priv))
-	}
-	k := new(big.Int).SetBytes(priv)
-	if k.Sign() == 0 || k.Cmp(fr.Modulus()) >= 0 {
-		return nil, errors.New("bls: private key out of range")
+	k, err := scalarFromPrivate(priv)
+	if err != nil {
+		return nil, err
 	}
 	_, _, g1Aff, _ := bls12381.Generators()
 	var pk bls12381.G1Affine
@@ -221,12 +254,9 @@ func (blsSigner) ToPublic(priv []byte) ([]byte, error) {
 }
 
 func (blsSigner) Sign(priv []byte, msg []byte) ([]byte, error) {
-	if len(priv) != PrivateKeyBytes {
-		return nil, fmt.Errorf("bls: invalid private key length %d", len(priv))
-	}
-	k := new(big.Int).SetBytes(priv)
-	if k.Sign() == 0 || k.Cmp(fr.Modulus()) >= 0 {
-		return nil, errors.New("bls: private key out of range")
+	k, err := scalarFromPrivate(priv)
+	if err != nil {
+		return nil, err
 	}
 	h, err := bls12381.HashToG2(msg, []byte(DST))
 	if err != nil {

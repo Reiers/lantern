@@ -173,9 +173,11 @@ COMMANDS
   wallet list
   wallet balance <addr>
   wallet send <to> <amount-FIL>                 (DRY-RUN — message preview)
-  wallet export <addr>                          (Lotus-hex KeyInfo to stdout)
-  wallet import [hex|-]                         (Lotus-hex KeyInfo from arg or stdin)
+  wallet export <addr>                          (hex KeyInfo to stdout)
+  wallet import [hex|-]                         (hex KeyInfo from arg or stdin)
   wallet import-lotus <repo-path>               (bulk import from a Lotus repo keystore)
+    all wallet subcommands accept --network={mainnet|calibration}
+    (keys are per-chain; picks which keystore to open. Or set LANTERN_NETWORK)
   chain head
   state get-actor <addr>
   info                                          Show daemon status + FULLNODE_API_INFO
@@ -445,12 +447,74 @@ func openWallet(network build.Network) (*wallet.Wallet, error) {
 	return wallet.New(context.Background(), dir, p)
 }
 
-// openWalletDefault opens the mainnet keystore. Used by CLI subcommands
-// that haven't been network-converted yet (wallet new/list/balance/send,
-// chain head, state get-actor). When those subcommands gain a --network
-// flag, they should switch to openWallet(net).
+// cliWalletNetwork is the network the wallet CLI subcommands operate on.
+// Signing keys are per-chain (a mainnet key does NOT sign calibration
+// messages and derives a different-prefixed address), so the wallet must
+// open the per-network keystore. Resolved once per invocation from
+// `--network` / LANTERN_NETWORK by cmdWallet; defaults to mainnet.
+var cliWalletNetwork = build.Mainnet
+
+// openWalletDefault opens the keystore for the network selected by the CLI
+// (cliWalletNetwork). Non-wallet subcommands that never set it get mainnet,
+// preserving prior behavior.
 func openWalletDefault() (*wallet.Wallet, error) {
-	return openWallet(build.Mainnet)
+	return openWallet(cliWalletNetwork)
+}
+
+// resolveCLINetwork pulls an optional network selector out of a wallet
+// subcommand's args so the per-command flag.FlagSet (ExitOnError) never
+// chokes on it. Accepted forms: `--network cal`, `--network=cal`,
+// `-network ...`, or the LANTERN_NETWORK env var. "cal"/"calib" are
+// accepted as friendly aliases for calibration. Returns the resolved
+// network and args with the selector removed.
+func resolveCLINetwork(args []string) (build.Network, []string, error) {
+	net := build.Mainnet
+	if env := strings.TrimSpace(os.Getenv("LANTERN_NETWORK")); env != "" {
+		n, err := parseNetworkAlias(env)
+		if err != nil {
+			return "", nil, fmt.Errorf("LANTERN_NETWORK: %w", err)
+		}
+		net = n
+	}
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--network" || a == "-network":
+			if i+1 >= len(args) {
+				return "", nil, fmt.Errorf("--network requires a value (mainnet|calibration)")
+			}
+			n, err := parseNetworkAlias(args[i+1])
+			if err != nil {
+				return "", nil, err
+			}
+			net = n
+			i++ // consume value
+		case strings.HasPrefix(a, "--network="), strings.HasPrefix(a, "-network="):
+			val := a[strings.IndexByte(a, '=')+1:]
+			n, err := parseNetworkAlias(val)
+			if err != nil {
+				return "", nil, err
+			}
+			net = n
+		default:
+			out = append(out, a)
+		}
+	}
+	return net, out, nil
+}
+
+// parseNetworkAlias maps user-facing network names (plus friendly aliases)
+// onto a build.Network.
+func parseNetworkAlias(s string) (build.Network, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "mainnet", "main", "":
+		return build.Mainnet, nil
+	case "calibration", "calib", "cal", "calibnet":
+		return build.Calibration, nil
+	default:
+		return "", fmt.Errorf("invalid network %q: want mainnet or calibration", s)
+	}
 }
 
 // gatewayClient builds the (cache + gateway + glif fallback) BlockGetter
@@ -1787,8 +1851,17 @@ func logSyncStats(ctx context.Context, s *hstore.Sync, d *headnotify.Distributor
 // --- wallet subcommands ---
 
 func cmdWallet(args []string) error {
+	// Resolve the target network (--network / LANTERN_NETWORK) and strip it
+	// from args before dispatch so per-subcommand flag sets don't reject it.
+	// Keys are per-chain, so this picks which keystore we open.
+	net, args, err := resolveCLINetwork(args)
+	if err != nil {
+		return err
+	}
+	cliWalletNetwork = net
+
 	if len(args) == 0 {
-		return fmt.Errorf("wallet: subcommand required (new|list|balance|send|export|import|import-lotus)")
+		return fmt.Errorf("wallet: subcommand required (new|list|balance|send|export|import|import-lotus) [--network mainnet|calibration]")
 	}
 	sub := args[0]
 	rest := args[1:]
