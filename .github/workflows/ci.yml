@@ -8,15 +8,13 @@
 #   - go vet ./...
 #   - gofmt -l         (no formatting drift)
 #
-# Runner choice: ubuntu-latest (GitHub-hosted). The original issue
-# wanted self-hosted on the lex server, but the lex Actions infra is
-# already running 15 runners for the prova-network org under a different
-# identity. Adding a Reiers-org runner there is a coordination cost
-# that's bigger than the GitHub-hosted runner queue cost for our
-# current push cadence. We're a small repo with infrequent pushes;
-# ubuntu-latest is 30-60s per run with no queue. Revisit if push
-# volume grows past ~10 PRs/day or if we need integration tests that
-# require mainnet access from the runner.
+# Runner: self-hosted on the Reiers home cluster (node1-lantern,
+# 10.20.0.11, Ubuntu 26.04, 6c/12t E5-1650v2, 60G RAM). Registered
+# 2026-07-23. Go 1.26.4 pre-installed; setup-go@v5 still runs to
+# keep the Go module cache warm across runs. If the runner is offline,
+# jobs queue until it comes back — the runner service auto-restarts
+# under user systemd and survives reboot (loginctl enable-linger).
+# Falls back to ubuntu-latest manually by editing runs-on.
 
 name: ci
 
@@ -24,12 +22,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build-test:
     name: build + test + vet + fmt
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: [self-hosted, linux, x64, node1, lantern]
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -98,8 +97,8 @@ jobs:
 
   research-fvm:
     name: research/fvm (scoped module)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: [self-hosted, linux, x64, node1, lantern]
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
