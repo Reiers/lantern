@@ -148,6 +148,12 @@ type ChainAPI struct {
 	mu          sync.Mutex
 	sessionUUID string
 	notifySubs  []chan []api.HeadChange
+	// pushLocks serializes MpoolPushMessage per sender so two concurrent
+	// pushes from the same From can't read the same nonce and produce two
+	// messages that collide on-chain (lantern#146; mirrors lotus
+	// PushLocks). Guarded by mu; the per-sender mutex is held across the
+	// whole estimate+sign+publish sequence.
+	pushLocks map[address.Address]*sync.Mutex
 	// blockPub is the /fil/blocks publisher for SyncSubmitBlock (PDP/backup
 	// tier). Wired via SetBlockPublisher; guarded by mu.
 	blockPub BlockPublisher
@@ -1338,14 +1344,57 @@ func (c *ChainAPI) MpoolPush(ctx context.Context, sm *types.SignedMessage) (cid.
 	return c.Mpool.Publish(ctx, sm)
 }
 
+// pushLockFor returns the per-sender mutex used to serialize the whole
+// estimate+sign+publish sequence in MpoolPushMessage (lantern#146).
+func (c *ChainAPI) pushLockFor(a address.Address) *sync.Mutex {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.pushLocks == nil {
+		c.pushLocks = make(map[address.Address]*sync.Mutex)
+	}
+	lk, ok := c.pushLocks[a]
+	if !ok {
+		lk = &sync.Mutex{}
+		c.pushLocks[a] = lk
+	}
+	return lk
+}
+
 // MpoolPushMessage = GasEstimate + Sign + Push. Tier 2 (#53).
-func (c *ChainAPI) MpoolPushMessage(ctx context.Context, msg *types.Message, spec *api.MessageSendSpec) (*types.SignedMessage, error) {
+//
+// lantern#146 hardening (mirrors lotus node/impl/full/mpool.go):
+//   - never mutates the caller's message (works on a copy)
+//   - serializes per sender, so concurrent pushes from one From can't
+//     read the same nonce and produce colliding messages
+//   - rewrites an ID-typed From (f0...) to the deterministic pubkey
+//     address before signing — ID addresses are not reorg-stable
+//   - rejects when balance < Value + RequiredFunds (a message that can
+//     never land would otherwise loop in the #47 rebroadcaster)
+//   - rejects GasPremium > GasFeeCap after estimation
+func (c *ChainAPI) MpoolPushMessage(ctx context.Context, msgIn *types.Message, spec *api.MessageSendSpec) (*types.SignedMessage, error) {
 	if c.Wallet == nil {
 		return nil, errors.New("wallet not initialised")
 	}
-	if msg == nil {
+	if msgIn == nil {
 		return nil, errors.New("nil message")
 	}
+	// Work on a copy: the caller's struct must stay untouched.
+	msg := *msgIn
+
+	// ID-typed From (f0...) is not reorg-stable; resolve to the pubkey
+	// address (lotus does the same, with a warning).
+	if msg.From.Protocol() == address.ID {
+		resolved := c.resolveToKeyAddress(ctx, msg.From)
+		if resolved != msg.From && resolved != address.Undef {
+			msg.From = resolved
+		}
+	}
+
+	// Serialize estimate+sign+publish per sender.
+	lk := c.pushLockFor(msg.From)
+	lk.Lock()
+	defer lk.Unlock()
+
 	// Fill nonce if 0.
 	if msg.Nonce == 0 {
 		n, err := c.MpoolGetNonce(ctx, msg.From)
@@ -1355,13 +1404,30 @@ func (c *ChainAPI) MpoolPushMessage(ctx context.Context, msg *types.Message, spe
 		msg.Nonce = n
 	}
 	// Fill gas defaults.
-	estim, err := c.GasEstimateMessageGas(ctx, msg, spec, types.TipSetKey{})
+	estim, err := c.GasEstimateMessageGas(ctx, &msg, spec, types.TipSetKey{})
 	if err != nil {
 		return nil, err
 	}
-	*msg = *estim
+	msg = *estim
+	if msg.GasPremium.GreaterThan(msg.GasFeeCap) {
+		return nil, fmt.Errorf("after estimation, GasPremium %s > GasFeeCap %s", msg.GasPremium, msg.GasFeeCap)
+	}
+
+	// Balance gate: a message the sender can't fund would be published,
+	// never land, and loop in the #47 rebroadcaster until max-retries.
+	// Fail it here instead. Balance-read errors don't block the push
+	// (fresh nodes may not have the sender's state warm yet).
+	if c.accForReads() != nil {
+		if bal, berr := c.WalletBalance(ctx, msg.From); berr == nil {
+			required := big.Add(msg.Value, msg.RequiredFunds())
+			if bal.LessThan(required) {
+				return nil, fmt.Errorf("mpool push: not enough funds: %s < %s (value + max gas fees)", bal, required)
+			}
+		}
+	}
+
 	// Sign over the message CID.
-	sm, err := c.WalletSignMessage(ctx, msg.From, msg)
+	sm, err := c.WalletSignMessage(ctx, msg.From, &msg)
 	if err != nil {
 		return nil, err
 	}
