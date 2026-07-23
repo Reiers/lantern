@@ -30,6 +30,7 @@ import (
 	"github.com/filecoin-project/go-address"
 	abi "github.com/filecoin-project/go-state-types/abi"
 	"github.com/ipfs/go-cid"
+	"golang.org/x/xerrors"
 
 	"github.com/Reiers/lantern/chain/msgsearch"
 	ltypes "github.com/Reiers/lantern/chain/types"
@@ -52,8 +53,24 @@ type ethLogFilter struct {
 	topics []map[string]bool
 }
 
-// localEthGetLogs returns (logs[], true, nil) on a clean local resolution,
-// or (nil, false, nil) to fall back to the bridge.
+// ErrLocalRangeTooWide is returned by localEthGetLogs when the requested
+// block range exceeds localGetLogsMaxRange. The caller uses it to surface
+// an accurate error to bridge-off clients instead of masking it as
+// "FEVM method requires --vm-bridge-rpc" (#76).
+var ErrLocalRangeTooWide = xerrors.New("eth_getLogs: block range exceeds local scan cap; chunk the query into smaller windows")
+
+// ErrLocalOutOfRetention is returned when a requested epoch is not in the
+// local header store retention window. Bridge-off clients should either
+// widen their retention (Full tier), narrow the query, or accept the
+// bridge fallback.
+var ErrLocalOutOfRetention = xerrors.New("eth_getLogs: requested epoch not in local retention window")
+
+// localEthGetLogs returns (logs[], true, nil) on a clean local resolution.
+// (nil, false, nil) means "cannot serve, no specific reason" — the caller
+// should fall back to the bridge.
+// (nil, false, err) means "cannot serve, and here is a specific reason" —
+// the caller should prefer this err over errBridgeUnconfigured when the
+// bridge itself is not configured.
 func (c *ChainAPI) localEthGetLogs(ctx context.Context, filterRaw any) (any, bool, error) {
 	if c.HeaderStore == nil || c.BlockGetter == nil {
 		return nil, false, nil
@@ -73,7 +90,7 @@ func (c *ChainAPI) localEthGetLogs(ctx context.Context, filterRaw any) (any, boo
 		// blockHash form: single block. Resolve its height locally.
 		h, served := c.heightForBlockHash(f.blockHash, head)
 		if !served {
-			return nil, false, nil
+			return nil, false, ErrLocalOutOfRetention
 		}
 		from, to = h, h
 	} else {
@@ -92,7 +109,7 @@ func (c *ChainAPI) localEthGetLogs(ctx context.Context, filterRaw any) (any, boo
 	// Bound the scan: a huge range against local state is expensive and
 	// usually means an indexer-style query better served by an upstream.
 	if to-from > localGetLogsMaxRange {
-		return nil, false, nil
+		return nil, false, ErrLocalRangeTooWide
 	}
 
 	bg := newRetryingBlockGetter(c.BlockGetter, 2, 8*time.Second)
@@ -103,7 +120,7 @@ func (c *ChainAPI) localEthGetLogs(ctx context.Context, filterRaw any) (any, boo
 	for ep := from; ep <= to; ep++ {
 		ts, err := c.HeaderStore.GetTipSetByHeight(ep)
 		if err != nil || ts == nil {
-			return nil, false, nil // gap in local range -> bridge
+			return nil, false, ErrLocalOutOfRetention // gap in local range -> bridge
 		}
 		child, err := searcher.FindChild(ts)
 		if err != nil {
@@ -145,7 +162,11 @@ func (c *ChainAPI) localEthGetLogs(ctx context.Context, filterRaw any) (any, boo
 	return out, true, nil
 }
 
-const localGetLogsMaxRange = abi.ChainEpoch(2880) // ~24h at 30s blocks
+// localGetLogsMaxRange caps a single eth_getLogs local scan. Raised from
+// 2880 (24h) to 20160 (~7d at 30s blocks) so first-boot Curio watchers
+// can backfill a normal weekly window without chunking. Beyond that
+// clients should chunk (ErrLocalRangeTooWide).
+const localGetLogsMaxRange = abi.ChainEpoch(20160)
 
 // logsForReceipt walks one receipt's events AMT and returns the ETH logs
 // that pass the filter. served=false signals a structural decode failure
