@@ -303,20 +303,32 @@ func (c *ChainAPI) EthMaxPriorityFeePerGas(_ context.Context) (string, error) {
 	return "0x0", nil
 }
 
-// EthGasPrice returns the chain's current floor base fee in attoFIL,
-// hex-encoded. This is the EIP-1559 'gasPrice' compatibility shim;
-// strictly speaking Filecoin uses base-fee + premium per message, but
-// reporting MinimumBaseFee gives viem clients a workable estimate
-// when they call gasPrice during transaction preparation.
+// EthGasPrice returns the EIP-1559 'gasPrice' compatibility quote in
+// attoFIL, hex-encoded. Strictly speaking Filecoin uses base-fee +
+// premium per message; this shim returns (parentBaseFee + gasPremium)
+// so a tx builder that prices off gasPrice matches Lotus's answer within
+// a few %. Falls back to just base fee if premium can't be estimated,
+// and to MinimumBaseFee only when no live head is available.
 //
-// Now wired to the live head base fee (via EthBaseFee) so a tx builder
-// that prices off gasPrice during a base-fee spike doesn't underprice and
-// stall. Falls back to MinimumBaseFee only when no live head is available.
+// Fixes gasPrice-vs-Glif delta observed on 2026-07-23 (~14% low).
 func (c *ChainAPI) EthGasPrice(ctx context.Context) (string, error) {
-	if bf, err := c.EthBaseFee(ctx); err == nil && bf != "" && bf != "0x0" {
-		return bf, nil
+	baseFeeHex, err := c.EthBaseFee(ctx)
+	if err != nil || baseFeeHex == "" || baseFeeHex == "0x0" {
+		return fmt.Sprintf("0x%x", build.MinimumBaseFee), nil
 	}
-	return fmt.Sprintf("0x%x", build.MinimumBaseFee), nil
+	baseFee, ok := new(stdbig.Int).SetString(strings.TrimPrefix(baseFeeHex, "0x"), 16)
+	if !ok {
+		return baseFeeHex, nil
+	}
+	// nblocksincl=10 mirrors what lotus's EthGasPrice uses. Errors are
+	// non-fatal: on failure we return just the base fee (previous
+	// behaviour) so we never return an error to the caller.
+	prem, perr := c.GasEstimateGasPremium(ctx, 10, address.Undef, 10000, types.TipSetKey{})
+	if perr != nil || prem.Int == nil {
+		return baseFeeHex, nil
+	}
+	total := new(stdbig.Int).Add(baseFee, prem.Int)
+	return "0x" + total.Text(16), nil
 }
 
 // EthBaseFee returns the base fee for the next block as a hex-quantity string
@@ -985,15 +997,32 @@ func (c *ChainAPI) EthGetBlockByHash(ctx context.Context, blockHash string, full
 // by client-side payment rail watchers (FilecoinPay rail event
 // indexing). Lantern doesn't run an FEVM log index of its own; the
 // upstream's index is the source of truth.
+//
+// Bridge-off (lantern#76): when the local path cannot serve (range too
+// wide, block out of retention, etc) we surface the SPECIFIC reason
+// instead of masking it as "FEVM method requires --vm-bridge-rpc".
+// That mask is the correct error for genuinely-FEVM-only methods (e.g.
+// eth_call), but for eth_getLogs it is misleading: the client can
+// almost always chunk the query and get a served answer.
 func (c *ChainAPI) EthGetLogs(ctx context.Context, filter any) (any, error) {
 	// Local-first (lantern#73): decode logs from per-receipt event AMTs so
 	// a bridge-off node (stock Curio / maxboom) serves PDP settlement +
 	// FilecoinPay rail watchers without a VMBridge. Falls back to the
 	// bridge for ranges/blocks outside the local window or on decode gaps.
-	if out, served, err := c.localEthGetLogs(ctx, filter); served {
-		return out, err
+	out, served, localErr := c.localEthGetLogs(ctx, filter)
+	if served {
+		return out, localErr
 	}
-	return c.forwardEth(ctx, "eth_getLogs", []any{filter})
+	// Not served locally. Prefer the bridge if configured.
+	if c.Bridge != nil {
+		return c.forwardEth(ctx, "eth_getLogs", []any{filter})
+	}
+	// Bridge-off. Surface the specific local reason if we have one; else
+	// fall back to the generic FEVM-required error (parity with #74).
+	if localErr != nil {
+		return nil, localErr
+	}
+	return nil, errBridgeUnconfigured
 }
 
 // forwardEth is the common shape: marshal params, post to bridge,
