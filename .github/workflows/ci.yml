@@ -24,6 +24,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Cancel any earlier in-flight run on the same branch/PR when a new push
+# arrives. Prevents the self-hosted runner from serially chewing through
+# stale runs after fast-follow commits.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     name: build + test + vet + fmt
