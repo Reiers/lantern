@@ -148,6 +148,52 @@ func (n Network) F3Manifest() []byte {
 	}
 }
 
+// GenesisUnix returns the wall-clock unix timestamp of epoch 0 for the
+// selected network, or 0 when unknown (unconfigured devnet). Used for
+// wall-clock sanity checks on bootstrap anchors: expected head epoch ≈
+// (now - genesis) / BlockDelaySecs.
+func (n Network) GenesisUnix() int64 {
+	switch n {
+	case Calibration:
+		return CalibnetGenesisUnix
+	case Devnet:
+		if IsDevnetConfigured() {
+			if cfg := GetDevnetConfig(); cfg != nil && cfg.GenesisTime > 0 {
+				return int64(cfg.GenesisTime)
+			}
+		}
+		return 0
+	default:
+		return MainnetGenesisUnix
+	}
+}
+
+// ExpectedHeadEpoch returns the epoch the network head should be at for
+// the given unix time, or -1 when the genesis time is unknown. The
+// answer is exact for a healthy chain (Filecoin epochs are wall-clock
+// scheduled); real heads trail it by at most a few epochs.
+func (n Network) ExpectedHeadEpoch(nowUnix int64) int64 {
+	genesis := n.GenesisUnix()
+	if genesis <= 0 || nowUnix < genesis {
+		return -1
+	}
+	delay := int64(BlockDelaySecs)
+	if n == Devnet && IsDevnetConfigured() {
+		if cfg := GetDevnetConfig(); cfg != nil && cfg.BlockDelaySecs > 0 {
+			delay = int64(cfg.BlockDelaySecs)
+		}
+	}
+	return (nowUnix - genesis) / delay
+}
+
+// MainnetGenesisUnix is the unix timestamp of mainnet epoch 0
+// (2020-08-24 22:00:00 UTC).
+const MainnetGenesisUnix = 1598306400
+
+// CalibnetGenesisUnix is the unix timestamp of the current calibration
+// network's epoch 0 (2022-11-01 18:13:00 UTC, the post-reset genesis).
+const CalibnetGenesisUnix = 1667326380
+
 // DefaultNetwork is what Lantern targets when no --network flag is
 // passed. Mainnet, preserving V1.2.1 behavior.
 const DefaultNetwork = Mainnet

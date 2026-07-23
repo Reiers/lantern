@@ -37,12 +37,9 @@ func cmdDoctor(args []string) error {
 	fs.Var(&peers, "peer", "Additional source URL (repeatable)")
 	fs.Parse(args)
 
-	filNet := build.Network(*filNetwork)
-	if !filNet.Valid() {
-		return fmt.Errorf("invalid --filecoin-network %q: want one of mainnet, calibration", *filNetwork)
-	}
-	if *network == "filecoin" && filNet == build.Calibration {
-		*network = "calibrationnet2"
+	filNet, err := resolveNetworkFlags(network, filNetwork)
+	if err != nil {
+		return err
 	}
 	if *quorum == 0 {
 		if filNet == build.Calibration {
@@ -114,12 +111,9 @@ func cmdRepair(args []string) error {
 	fs.Var(&peers, "peer", "Additional source URL (repeatable)")
 	fs.Parse(args)
 
-	filNet := build.Network(*filNetwork)
-	if !filNet.Valid() {
-		return fmt.Errorf("invalid --filecoin-network %q: want one of mainnet, calibration", *filNetwork)
-	}
-	if *network == "filecoin" && filNet == build.Calibration {
-		*network = "calibrationnet2"
+	filNet, err := resolveNetworkFlags(network, filNetwork)
+	if err != nil {
+		return err
 	}
 	if *quorum == 0 {
 		if filNet == build.Calibration {

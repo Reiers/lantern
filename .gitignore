@@ -27,3 +27,7 @@ internal-notes/
 # apps/.
 curio-milestone-*.md
 scripts/devnet/parity-check.py
+
+# local ops artifacts (never commit: infra hostnames)
+/soak-logs/
+/scripts/soak-sample.sh
