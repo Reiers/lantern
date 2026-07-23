@@ -548,6 +548,26 @@ func glifURLForNetwork(n build.Network) string {
 	return "" // empty -> glif.New uses its DefaultURL (mainnet)
 }
 
+// fallbackRPCURL returns the JSON-RPC endpoint the daemon uses as the
+// fetch-fallback source (chain-fetch, head-fetch, cold-block source).
+// A non-empty --fallback-rpc override always wins; otherwise we fall
+// back to the per-network Glif public endpoint.
+//
+// Motivation (fleet incident 2026-07-23): Glif public mainnet began
+// HTTP-403'ing our Hetzner census's egress IP with the -32156 "Access
+// denied" body. Because glifURLForNetwork was the ONLY reachable RPC
+// URL in the daemon path, the census's chain-fetch source went dark
+// and the inline gossip backfill (3-epoch cap) could not self-heal,
+// producing a silent head-stall (~90 epochs behind). This flag lets
+// operators point at a working alternate (chain.love / filfox / ankr)
+// without a code change.
+func fallbackRPCURL(override string, n build.Network) string {
+	if strings.TrimSpace(override) != "" {
+		return strings.TrimSpace(override)
+	}
+	return glifURLForNetwork(n)
+}
+
 // fetchTrustedHead probes the primary gateway's /state/root endpoint,
 // falling back to Glif's Filecoin.ChainHead when the gateway is down.
 // Both responses are CID-verified before becoming a TrustedRoot.
@@ -883,6 +903,7 @@ func cmdDaemon(args []string) error {
 	// is separate from runtime fetch counters.
 	noFallbackRPC := fs.Bool("no-fallback-rpc", false, "#76 bridge-off: wire no upstream RPC (Glif) fallback. Head=gossipsub-only, cold-blocks=gateway+bitswap. Requires libp2p/gossipsub.")
 	raceFallbackRPC := fs.Bool("race-fallback-rpc", false, "Promote the Glif RPC fallback into the RACE tier (fired concurrently with the gateway/bitswap) instead of a sequential last resort. Use when the configured --gateway is unreachable or slow: otherwise every cold-block fetch pays the gateway's full race timeout before falling to Glif, which serializes a state HAMT walk into minutes. Increases Glif load, so it's off by default (keeps the #53 'Glif last resort' behavior).")
+	fallbackRPCFlag := fs.String("fallback-rpc", "", "Override the daemon's fallback JSON-RPC URL used for chain-fetch, cold-block and combined-source fallback (default: Glif public for the selected --network). Use when Glif rate-limits or blocks the daemon's egress IP; verified alternates for mainnet include https://api.chain.love/rpc/v1, https://filfox.info/rpc/v1, https://rpc.ankr.com/filecoin. Does NOT change the boot-anchor's Glif source (init still requires gateway+Glif agreement for the #54 two-operator anchor). Ignored when --no-fallback-rpc is set.")
 	seedPeerWait := fs.Duration("seed-peer-wait", 120*time.Second, "#91/#109 bridge-off: max time to wait for ChainExchange peers to seed the boot anchor tipset before failing loud.")
 	// #118: bridge-off boot auto-stale-reset. When --no-fallback-rpc is
 	// set there is no polling Sync stale-reset (that path lives on the RPC
@@ -1168,7 +1189,7 @@ func cmdDaemon(args []string) error {
 			glifTimeout = 10 * time.Second
 		}
 		fetcherSources = append(fetcherSources,
-			combined.Source{Name: "glif", Getter: glif.New(glifURLForNetwork(network), 20*time.Second), Timeout: glifTimeout, Race: *raceFallbackRPC})
+			combined.Source{Name: "glif", Getter: glif.New(fallbackRPCURL(*fallbackRPCFlag, network), 20*time.Second), Timeout: glifTimeout, Race: *raceFallbackRPC})
 		if *raceFallbackRPC {
 			fmt.Printf("  fetch:        Glif RPC promoted to race tier (--race-fallback-rpc); wins over a slow/unreachable gateway\n")
 		}
@@ -1315,7 +1336,7 @@ func cmdDaemon(args []string) error {
 		// content-addressed backfill).
 		src := nilRPCSource()
 		if !*noFallbackRPC {
-			src = newBitswapBackedSource(glif.New(glifURLForNetwork(network), 8*time.Second), func() blockGetter { return fetcher })
+			src = newBitswapBackedSource(glif.New(fallbackRPCURL(*fallbackRPCFlag, network), 8*time.Second), func() blockGetter { return fetcher })
 		}
 		// #71: when libp2p/gossipsub is enabled it is the PRIMARY head source
 		// (0-1 epoch latency, no Glif), so relax the polling-Sync cadence to
@@ -1554,7 +1575,7 @@ func cmdDaemon(args []string) error {
 			// so the ingestor can parent-walk gaps via CID-addressed fetches;
 			// the RPC-shaped HeadEpoch/TipsetCIDsByHeight are never called on
 			// this path (parent-walk mode enabled below).
-			gossipSrc := newBitswapBackedSource(glif.New(glifURLForNetwork(network), 8*time.Second), func() blockGetter { return fetcher })
+			gossipSrc := newBitswapBackedSource(glif.New(fallbackRPCURL(*fallbackRPCFlag, network), 8*time.Second), func() blockGetter { return fetcher })
 			if *noFallbackRPC {
 				gossipSrc = newBitswapBackedSource(nil, func() blockGetter { return fetcher })
 			}
@@ -1734,7 +1755,7 @@ func cmdDaemon(args []string) error {
 		}
 		if !*noFallbackRPC {
 			rebuiltSources = append(rebuiltSources,
-				combined.Source{Name: "glif", Getter: glif.New(glifURLForNetwork(network), 20*time.Second), Timeout: 20 * time.Second})
+				combined.Source{Name: "glif", Getter: glif.New(fallbackRPCURL(*fallbackRPCFlag, network), 20*time.Second), Timeout: 20 * time.Second})
 		}
 		fetcher = combined.New(cache, rebuiltSources...)
 		rebindBlockGetter(chainAPI, fetcher)
