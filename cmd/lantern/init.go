@@ -42,6 +42,40 @@ type peerList []string
 func (p *peerList) String() string     { return strings.Join(*p, ",") }
 func (p *peerList) Set(v string) error { *p = append(*p, v); return nil }
 
+// resolveNetworkFlags reconciles the deprecated --network flag (an F3
+// wire name like "filecoin" / "calibrationnet2") with --filecoin-network
+// (mainnet | calibration).
+//
+// Footgun guard: `daemon`/`beacon`/`auth` use --network for the FILECOIN
+// network, but init/doctor historically used --network for the F3 wire
+// name. An operator typing the obvious `lantern init --network
+// calibration` used to get a chimera: mainnet data dir + mainnet
+// bootstrap sources + a "calibration" F3 protocol name — and a
+// wrong-network trust anchor written on "success". Filecoin-network
+// values passed via --network are now interpreted as --filecoin-network.
+func resolveNetworkFlags(network, filNetwork *string) (build.Network, error) {
+	if fn := build.Network(*network); fn.Valid() {
+		if *filNetwork != string(build.DefaultNetwork) && *filNetwork != string(fn) {
+			return "", fmt.Errorf("conflicting flags: --network %s vs --filecoin-network %s", *network, *filNetwork)
+		}
+		fmt.Printf("  note: interpreting --network %s as --filecoin-network %s (F3 name auto-derived)\n", *network, fn)
+		*filNetwork = string(fn)
+		*network = "filecoin"
+	}
+	filNet := build.Network(*filNetwork)
+	if !filNet.Valid() {
+		return "", fmt.Errorf("invalid --filecoin-network %q: want one of mainnet, calibration", *filNetwork)
+	}
+	// Auto-resolve the F3 NetworkName from the selected filecoin-network
+	// if the caller didn't override --network. Mainnet's F3 NetworkName is
+	// 'filecoin'; calibration's is 'calibrationnet2' (per the embedded
+	// f3manifest_*.json files).
+	if *network == "filecoin" && filNet == build.Calibration {
+		*network = "calibrationnet2"
+	}
+	return filNet, nil
+}
+
 func cmdInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	noWallet := fs.Bool("no-wallet", false, "Skip creating a wallet")
@@ -51,23 +85,18 @@ func cmdInit(args []string) error {
 	countGateway := fs.Bool("count-gateway", false, "Count the Lantern gateway in the quorum tally (default false; not recommended)")
 	noLibp2p := fs.Bool("no-libp2p", false, "Skip libp2p sources (use only HTTP RPC sources). Useful for environments without inbound networking.")
 	libp2pSettle := fs.Duration("libp2p-settle", 15*time.Second, "Wait this long for libp2p bootstrap connections to settle before running the quorum probe (higher = more reliable first-try quorum on cold boot)")
-	network := fs.String("network", "filecoin", "F3 network name. DEPRECATED: prefer --filecoin-network which selects the F3 manifest automatically.")
+	network := fs.String("network", "filecoin", "F3 network name. DEPRECATED: prefer --filecoin-network which selects the F3 manifest automatically. Values 'mainnet' and 'calibration' are interpreted as --filecoin-network for consistency with `lantern daemon --network`.")
 	filNetwork := fs.String("filecoin-network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration. Drives bootstrap peers, public RPC sources, and F3 manifest selection.")
+	allowStaleAnchor := fs.Bool("allow-stale-anchor", false, "Accept a quorum anchor whose epoch is far from the wall-clock expected head (NOT recommended; a stale anchor can pin the node to an old chain view)")
 	var peers peerList
 	fs.Var(&peers, "peer", "Additional finality source URL (repeatable). Format: URL or URL|TOKEN")
 	fs.Parse(args)
 
-	filNet := build.Network(*filNetwork)
-	if !filNet.Valid() {
-		return fmt.Errorf("invalid --filecoin-network %q: want one of mainnet, calibration", *filNetwork)
+	filNet, err := resolveNetworkFlags(network, filNetwork)
+	if err != nil {
+		return err
 	}
-	// Auto-resolve F3 NetworkName from the selected filecoin-network if
-	// the caller didn't override --network. Mainnet F3 NetworkName is
-	// 'filecoin'; calibration's is 'calibrationnet2' (per the embedded
-	// f3manifest_*.json files).
-	if *network == "filecoin" && filNet == build.Calibration {
-		*network = "calibrationnet2"
-	}
+	applyAddressNetwork(filNet)
 	// Resolve the quorum default based on the selected network. Mainnet
 	// has 5+ independent public sources; calibration today has 1
 	// (Glif calibration). We drop to 3-of-N for calibration to allow
@@ -129,6 +158,27 @@ func cmdInit(args []string) error {
 			fmt.Println("✗ Bootstrap quorum FAILED — refusing to write trust anchor.")
 			fmt.Println("  Run `lantern doctor` for a detailed per-source report.")
 			return err
+		}
+		// Wall-clock sanity gate: Filecoin epochs are wall-clock scheduled,
+		// so the expected head epoch is computable from genesis time alone.
+		// A quorum anchor far from it means the sources answered for the
+		// wrong network or served stale finality — either way, writing it
+		// would pin the node to a wrong chain view while claiming success.
+		if exp := filNet.ExpectedHeadEpoch(time.Now().Unix()); exp > 0 {
+			lag := exp - int64(fin.Epoch)
+			if lag < 0 {
+				lag = -lag
+			}
+			const maxAnchorLagEpochs = 2880 // 24h at 30s epochs
+			if lag > maxAnchorLagEpochs && !*allowStaleAnchor {
+				fmt.Println()
+				fmt.Println("✗ Anchor sanity check FAILED — refusing to write trust anchor.")
+				return fmt.Errorf("quorum anchor epoch %d is %d epochs (~%.1f days) away from the wall-clock expected head %d for %s; the sources likely answered for the wrong network or served stale finality (override with --allow-stale-anchor)",
+					fin.Epoch, lag, float64(lag)/2880.0, exp, filNet)
+			}
+			if lag > maxAnchorLagEpochs {
+				fmt.Printf("  ⚠ anchor is %d epochs from wall-clock expected head %d — accepted due to --allow-stale-anchor\n", lag, exp)
+			}
 		}
 		if err := writeBootstrapAnchor(dir, fin, filNet); err != nil {
 			return fmt.Errorf("persist bootstrap anchor: %w", err)

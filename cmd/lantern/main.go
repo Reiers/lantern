@@ -560,6 +560,20 @@ func glifURLForNetwork(n build.Network) string {
 // We also attempt a best-effort F3 latest-cert probe so F3Instance is
 // populated when the dashboard renders. Failure is non-fatal: F3 is
 // observability, not consensus, at this layer.
+// applyAddressNetwork sets the go-address display prefix for the
+// selected network: mainnet addresses render as f1/f3/..., every test
+// network (calibration, devnet) renders t1/t3/... — matching lotus.
+// Parsing accepts both prefixes regardless; this only affects encoding.
+// Without it a calibration node printed f-addresses, which faucets and
+// explorers on calibration reject or mis-render.
+func applyAddressNetwork(n build.Network) {
+	if n == build.Mainnet {
+		addr.CurrentNetwork = addr.Mainnet
+	} else {
+		addr.CurrentNetwork = addr.Testnet
+	}
+}
+
 func fetchTrustedHead(ctx context.Context, gw string, network build.Network) (*trustedroot.TrustedRoot, error) {
 	now := time.Now().UTC()
 	hc := hsync.NewClient([]string{gw}, 5*time.Second)
@@ -888,13 +902,27 @@ func cmdDaemon(args []string) error {
 	// anchor + cold-block fetches traverse this URL; HTTP has no transport
 	// integrity, so a MITM could seed a bad anchor (the CID-verify backstop
 	// protects state under a root, not the choice of root — see #54).
-	if err := validateGatewayScheme(*gw, *insecureGateway); err != nil {
-		return err
-	}
-
 	network := build.Network(*networkFlag)
 	if !network.Valid() {
 		return fmt.Errorf("invalid --network %q: want one of mainnet, calibration", *networkFlag)
+	}
+	applyAddressNetwork(network)
+
+	// The default Lantern gateway serves MAINNET blocks. Racing it into
+	// the calibration fetch chain poisons every cold-block fetch: the
+	// wrong-network gateway can never serve the requested CIDs, so each
+	// fetch burns the gateway's full race timeout before the correct
+	// source is tried. No Lantern gateway exists for calibration today;
+	// disable the source unless the operator explicitly points one.
+	if *gw == defaultGateway && network == build.Calibration {
+		*gw = ""
+		fmt.Println("  calibration: default gateway disabled (mainnet-only service); cold blocks use bitswap + chainxchg + Glif calibration. Pass --gateway <url> to re-enable.")
+	}
+
+	if *gw != "" {
+		if err := validateGatewayScheme(*gw, *insecureGateway); err != nil {
+			return err
+		}
 	}
 
 	// Propagate the active network into buildinfo so Filecoin.Version,
@@ -1003,7 +1031,9 @@ func cmdDaemon(args []string) error {
 
 	fmt.Printf("Lantern daemon — Lotus-compatible RPC (network: %s)\n", network)
 	fmt.Printf("  data dir:    %s\n", netDir)
-	fmt.Println("Fetching trusted head from", *gw)
+	if *gw != "" {
+		fmt.Println("Fetching trusted head from", *gw)
+	}
 
 	// #118: bridge-off auto-stale-reset. Runs BEFORE the anchor is loaded
 	// so a stale anchor is refreshed on disk first and the load below picks
@@ -1073,6 +1103,9 @@ func cmdDaemon(args []string) error {
 		if *noFallbackRPC {
 			return fmt.Errorf("--no-fallback-rpc: no usable persisted quorum anchor at %s; run `lantern init` or `lantern repair --bootstrap-quorum` first (bridge-off has no gateway/RPC anchor fallback)", filepath.Join(netDir, "bootstrap-anchor.json"))
 		}
+		if *gw == "" {
+			return fmt.Errorf("no persisted quorum anchor at %s and no gateway configured; run `lantern init --filecoin-network %s` first", filepath.Join(netDir, "bootstrap-anchor.json"), network)
+		}
 		tr, err = fetchVerifiedTrustedHead(ctx, *gw, network, *insecureAnchor)
 		if err != nil {
 			return err
@@ -1116,8 +1149,10 @@ func cmdDaemon(args []string) error {
 		cache = hamt.NewMemBlockStore()
 		fmt.Printf("  node tier:    %s  (in-memory cache)\n", profile.Tier)
 	}
-	fetcherSources := []combined.Source{
-		{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
+	var fetcherSources []combined.Source
+	if *gw != "" {
+		fetcherSources = append(fetcherSources,
+			combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true})
 	}
 	if !*noFallbackRPC {
 		// When --race-fallback-rpc is set, Glif joins the race tier so its
@@ -1606,7 +1641,10 @@ func cmdDaemon(args []string) error {
 		// shape, slower, public-service rate-limited).
 		rebuiltSources := []combined.Source{
 			{Name: "bitswap", Getter: bsClient, Timeout: *bitswapFullDL, Race: true},
-			{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true},
+		}
+		if *gw != "" {
+			rebuiltSources = append(rebuiltSources,
+				combined.Source{Name: "gateway", Getter: hsync.NewClient([]string{*gw}, 20*time.Second), Timeout: 5 * time.Second, Race: true})
 		}
 		if !*noFallbackRPC {
 			rebuiltSources = append(rebuiltSources,
