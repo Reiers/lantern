@@ -2162,7 +2162,10 @@ func daemonRPC(ctx context.Context, listen, token, method string, params any, ou
 // values. This version is network-aware and refuses to pretend.
 func walletSend(args []string) error {
 	fs := flag.NewFlagSet("wallet send", flag.ExitOnError)
-	networkFlag := fs.String("network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration | devnet")
+	// cmdWallet already resolved + stripped a wallet-level --network flag
+	// into cliWalletNetwork before dispatch; default to that so both
+	// `wallet --network X send` and `wallet send --network X` work.
+	networkFlag := fs.String("network", string(cliWalletNetwork), "Filecoin network: mainnet | calibration | devnet")
 	fromFlag := fs.String("from", "", "Sender address (default: daemon's default wallet address)")
 	yes := fs.Bool("yes", false, "Skip the interactive confirmation")
 	fs.Parse(args)
