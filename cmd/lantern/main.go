@@ -24,6 +24,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,6 +38,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -68,6 +70,7 @@ import (
 	"github.com/Reiers/lantern/net/hello"
 	"github.com/Reiers/lantern/net/hsync"
 	llibp2p "github.com/Reiers/lantern/net/libp2p"
+	"github.com/Reiers/lantern/net/mpool"
 	"github.com/Reiers/lantern/pkg/nodeprofile"
 	"github.com/Reiers/lantern/rpc/handlers"
 	"github.com/Reiers/lantern/rpc/server"
@@ -1569,6 +1572,89 @@ func cmdDaemon(args []string) error {
 		}
 	}
 
+	// Wire the mempool publisher so the STANDALONE daemon can push
+	// messages: MpoolPush / MpoolPushMessage / local eth_sendRawTransaction.
+	//
+	// Historically only the embedded daemon (pkg/daemon/start.go) wired
+	// this; the standalone CLI daemon left chainAPI.Mpool nil, so every
+	// push on a `lantern daemon` node returned ErrMpoolNotWired — the node
+	// could read the chain but never write to it. This block ports the
+	// pkg/daemon wiring: gossipsub /fil/msgs/<network> publisher, #119
+	// durable pending journal, and the #47 confirm/rebroadcast reconcile
+	// loop driven by head advances.
+	//
+	// Devnet uses a lotus-RPC sink instead (single-node devnet has no
+	// gossipsub mesh to publish onto) — identical Pool semantics, only the
+	// wire transport differs (lantern#123).
+	if chainAPI.Mpool == nil {
+		mpoolPersist := filepath.Join(netDir, "mpool", "pending.jsonl")
+		var (
+			mp    *mpool.Pool
+			mperr error
+		)
+		switch {
+		case network == build.Devnet && build.IsDevnetConfigured():
+			devnetCfg := build.GetDevnetConfig()
+			if devnetCfg != nil && devnetCfg.LotusRPC != "" {
+				lotusClient := glif.New(devnetCfg.LotusRPC, 15*time.Second)
+				sink := func(sctx context.Context, sm *types.SignedMessage, _ []byte) (cid.Cid, error) {
+					return lotusClient.MpoolPush(sctx, sm)
+				}
+				mp, mperr = mpool.New(ctx, nil, mpool.Config{
+					Topic:       network.GossipTopicMessages(),
+					PersistPath: mpoolPersist,
+					Sink:        sink,
+				})
+			}
+		case p2pHost != nil && p2pHost.PubSub != nil:
+			mp, mperr = mpool.New(ctx, p2pHost.PubSub, mpool.Config{
+				Topic:       network.GossipTopicMessages(),
+				PersistPath: mpoolPersist,
+			})
+		}
+		switch {
+		case mperr != nil:
+			fmt.Printf("  mpool: wiring failed (%v) — message push unavailable\n", mperr)
+		case mp != nil:
+			chainAPI.Mpool = mp
+			fmt.Printf("  mpool: publisher wired (topic %s, journal %s, restored %d pending)\n",
+				network.GossipTopicMessages(), mpoolPersist, mp.Stats().Restored)
+			// #47: confirm/rebroadcast loop on every head advance.
+			// StateSearchMsg is local; a published-but-unmined tx gets
+			// rebroadcast (identical bytes, same nonce) instead of
+			// stalling silently. Single-flight so a slow reconcile
+			// never piles up behind fast head advances.
+			if store != nil {
+				search := func(sctx context.Context, msgCID cid.Cid) (mpool.SearchResult, error) {
+					lk, serr := chainAPI.StateSearchMsg(sctx, types.TipSetKey{}, msgCID, 0, false)
+					if serr != nil {
+						return mpool.SearchUnknown, serr
+					}
+					if lk != nil {
+						return mpool.SearchFound, nil
+					}
+					return mpool.SearchUnknown, nil
+				}
+				var reconciling int32
+				store.OnHeadChange(func(ts *types.TipSet) {
+					if ts == nil {
+						return
+					}
+					if !atomic.CompareAndSwapInt32(&reconciling, 0, 1) {
+						return
+					}
+					height := int64(ts.Height())
+					go func() {
+						defer atomic.StoreInt32(&reconciling, 0)
+						mp.Reconcile(ctx, height, search)
+					}()
+				})
+			}
+		default:
+			fmt.Printf("  mpool: not wired (no libp2p pubsub available) — message push unavailable\n")
+		}
+	}
+
 	// Phase 10 Part B: real Bitswap as primary fetch path. We rebuild
 	// the combined fetcher with Bitswap inserted between cache and HTTP
 	// gateway, so the order is: cache → bitswap (fast deadline) →
@@ -1982,69 +2068,155 @@ func walletBalance(args []string) error {
 	return nil
 }
 
-func walletSend(args []string) error {
-	if len(args) != 2 {
-		return fmt.Errorf("usage: lantern wallet send <to> <amount-FIL>")
-	}
-	to, err := addr.NewFromString(args[0])
+// daemonRPC is a minimal JSON-RPC 2.0 client for CLI→local-daemon calls.
+// Returns the raw `result` JSON. A non-2xx response or a JSON-RPC error
+// object becomes a Go error.
+func daemonRPC(ctx context.Context, listen, token, method string, params any, out any) error {
+	body, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": 1, "method": method, "params": params,
+	})
 	if err != nil {
 		return err
 	}
-	fil, err := types.ParseFIL(args[1])
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+listen+"/rpc/v1", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	var envelope struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		return fmt.Errorf("decode rpc response (http %d): %w", resp.StatusCode, err)
+	}
+	if envelope.Error != nil {
+		return fmt.Errorf("rpc %s: %s (code %d)", method, envelope.Error.Message, envelope.Error.Code)
+	}
+	if out != nil {
+		if err := json.Unmarshal(envelope.Result, out); err != nil {
+			return fmt.Errorf("decode %s result: %w", method, err)
+		}
+	}
+	return nil
+}
+
+// walletSend sends FIL through the RUNNING daemon's MpoolPushMessage:
+// the daemon holds the same keystore, estimates gas from live chain
+// state, signs, publishes on /fil/msgs/<network>, journals the pending
+// message (#119), and rebroadcasts until included (#47).
+//
+// The previous implementation built an offline in-process ChainAPI with
+// a nil mpool: it signed the message, then ALWAYS failed the publish
+// with ErrMpoolNotWired and exited 0 ("WARN: ... would-be CID") — a
+// silent no-op send. It was also hardcoded to mainnet + hardcoded gas
+// values. This version is network-aware and refuses to pretend.
+func walletSend(args []string) error {
+	fs := flag.NewFlagSet("wallet send", flag.ExitOnError)
+	networkFlag := fs.String("network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration | devnet")
+	fromFlag := fs.String("from", "", "Sender address (default: daemon's default wallet address)")
+	yes := fs.Bool("yes", false, "Skip the interactive confirmation")
+	fs.Parse(args)
+	rest := fs.Args()
+	if len(rest) != 2 {
+		return fmt.Errorf("usage: lantern wallet send [--network <net>] [--from <addr>] [--yes] <to> <amount-FIL>")
+	}
+	network := build.Network(*networkFlag)
+	if !network.Valid() {
+		return fmt.Errorf("invalid --network %q: want one of mainnet, calibration, devnet", *networkFlag)
+	}
+	to, err := addr.NewFromString(rest[0])
+	if err != nil {
+		return err
+	}
+	fil, err := types.ParseFIL(rest[1])
 	if err != nil {
 		return fmt.Errorf("parse amount: %w", err)
 	}
-	w, err := openWalletDefault()
-	if err != nil {
-		return err
-	}
-	from, err := w.Default(context.Background())
-	if err != nil {
-		return err
-	}
-	tr, err := fetchTrustedHead(context.Background(), defaultGateway, build.Mainnet)
-	if err != nil {
-		return err
-	}
-	bg, _ := gatewayClient(defaultGateway)
-	chainAPI := handlers.New(tr, bg, w, nil, "mainnet")
-	nonce, _ := chainAPI.MpoolGetNonce(context.Background(), from)
 
-	msg := &types.Message{
-		From:       from,
-		To:         to,
-		Value:      big.Int(fil),
-		Method:     0,
-		Nonce:      nonce,
-		GasLimit:   10_000_000,
-		GasFeeCap:  big.NewInt(100_000_000),
-		GasPremium: big.NewInt(100_000),
+	netDir := networkDataDir(network)
+	listen := readRPCListen(netDir)
+	if listen == "" {
+		listen = defaultListen
+	}
+	token, err := readAdminToken(network)
+	if err != nil {
+		return fmt.Errorf("read admin token: %w (run `lantern init --filecoin-network %s` first)", err, network)
 	}
 
-	fmt.Println("--- DRY RUN ---")
-	fmt.Println("Would send the following message:")
-	b, _ := json.MarshalIndent(msg, "", "  ")
-	fmt.Println(string(b))
-	fmt.Println()
-	fmt.Println("Type 'send' to broadcast (or anything else to abort):")
-	rdr := bufio.NewReader(os.Stdin)
-	line, _ := rdr.ReadString('\n')
-	if strings.TrimSpace(line) != "send" {
-		fmt.Println("aborted")
-		return nil
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	// Reach the daemon first — fail loud and early when it isn't running.
+	var headJSON struct {
+		Height int64 `json:"Height"`
+	}
+	if err := daemonRPC(ctx, listen, token, "Filecoin.ChainHead", []any{}, &headJSON); err != nil {
+		return fmt.Errorf("no running daemon at %s: %w\n  start one with: lantern daemon --network %s", listen, err, network)
 	}
 
-	sm, err := chainAPI.WalletSignMessage(context.Background(), from, msg)
-	if err != nil {
-		return err
+	from := *fromFlag
+	if from == "" {
+		if err := daemonRPC(ctx, listen, token, "Filecoin.WalletDefaultAddress", []any{}, &from); err != nil {
+			return fmt.Errorf("resolve default wallet address: %w", err)
+		}
 	}
-	cid, err := chainAPI.MpoolPush(context.Background(), sm)
-	if err != nil {
-		fmt.Println("WARN:", err)
-		fmt.Println("Signed message CID (would-be):", sm.Cid())
-		return nil
+
+	msg := map[string]any{
+		"Version": 0,
+		"To":      to.String(),
+		"From":    from,
+		"Nonce":   0,
+		"Value":   big.Int(fil).String(),
+		// Zero gas fields: the daemon's MpoolPushMessage estimates them
+		// from live chain state (premium percentile + head base fee).
+		"GasLimit": 0, "GasFeeCap": "0", "GasPremium": "0",
+		"Method": 0, "Params": nil,
 	}
-	fmt.Println("sent:", cid)
+
+	fmt.Printf("Send %s FIL\n  from: %s\n  to:   %s\n  net:  %s (daemon %s, head %d)\n",
+		types.FIL(big.Int(fil)).Unitless(), from, to, network, listen, headJSON.Height)
+	if !*yes {
+		fmt.Println("Type 'send' to broadcast (or anything else to abort):")
+		rdr := bufio.NewReader(os.Stdin)
+		line, _ := rdr.ReadString('\n')
+		if strings.TrimSpace(line) != "send" {
+			fmt.Println("aborted")
+			return nil
+		}
+	}
+
+	var signed struct {
+		Message struct {
+			Nonce      uint64 `json:"Nonce"`
+			GasLimit   int64  `json:"GasLimit"`
+			GasFeeCap  string `json:"GasFeeCap"`
+			GasPremium string `json:"GasPremium"`
+		}
+		CID struct {
+			Root string `json:"/"`
+		} `json:"CID"`
+	}
+	if err := daemonRPC(ctx, listen, token, "Filecoin.MpoolPushMessage", []any{msg, nil}, &signed); err != nil {
+		return fmt.Errorf("push: %w", err)
+	}
+	fmt.Printf("sent: nonce=%d gasLimit=%d feeCap=%s premium=%s\n",
+		signed.Message.Nonce, signed.Message.GasLimit, signed.Message.GasFeeCap, signed.Message.GasPremium)
+	if signed.CID.Root != "" {
+		fmt.Println("message CID:", signed.CID.Root)
+	}
+	fmt.Println("The daemon journals + rebroadcasts this message until it lands (lantern#47/#119).")
 	return nil
 }
 
