@@ -37,7 +37,12 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'
-          cache: true
+          # Self-hosted runners persist ~/go/pkg/mod across runs on
+          # local disk, so we don't need actions/cache's GitHub-side
+          # cache service. Disabling avoids the flaky 1.6 GB round-trip
+          # to productionresultssa6.blob.core.windows.net over our home
+          # WiFi, which was DNS-failing (EAI_AGAIN) on ~40% of restores.
+          cache: false
 
       - name: go vet
         run: go vet ./...
@@ -107,8 +112,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.26.x'
-          cache: true
-          cache-dependency-path: research/fvm/go.sum
+          cache: false  # see note in build-test job
 
       - name: go build
         working-directory: research/fvm
