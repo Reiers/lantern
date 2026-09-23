@@ -49,6 +49,7 @@ import (
 	gstnetwork "github.com/filecoin-project/go-state-types/network"
 	"github.com/ipfs/go-cid"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
 
 	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/anchorverify"
@@ -72,6 +73,7 @@ import (
 	"github.com/Reiers/lantern/net/hsync"
 	llibp2p "github.com/Reiers/lantern/net/libp2p"
 	"github.com/Reiers/lantern/net/mpool"
+	"github.com/Reiers/lantern/net/peerheads"
 	"github.com/Reiers/lantern/pkg/nodeprofile"
 	"github.com/Reiers/lantern/rpc/handlers"
 	"github.com/Reiers/lantern/rpc/server"
@@ -1515,10 +1517,23 @@ func cmdDaemon(args []string) error {
 				effCorroPeers = 0
 			}
 		}
-		var corroTracker *blockpub.CorroborationTracker
-		if effCorroPeers > 0 {
-			corroTracker = blockpub.NewCorroborationTracker(network.GossipTopicBlocks())
-		}
+		// #154: the tracker is always on so every forwarded block feeds the
+		// peer head book (continuous, RPC-free head votes). Head-adoption
+		// corroboration below still only engages when effCorroPeers > 0.
+		corroTracker := blockpub.NewCorroborationTracker(network.GossipTopicBlocks())
+		peerBook := peerheads.New(func(p peer.ID) multiaddr.Multiaddr {
+			if p2pHost == nil {
+				return nil
+			}
+			conns := p2pHost.H.Network().ConnsToPeer(p)
+			if len(conns) == 0 {
+				return nil
+			}
+			return conns[0].RemoteMultiaddr()
+		})
+		corroTracker.SetObserver(func(from peer.ID, c cid.Cid, h abi.ChainEpoch, parents []cid.Cid) {
+			peerBook.ObserveBlock(from, c, h, parents)
+		})
 		p2pHost, err = llibp2p.New(ctx, llibp2p.HostConfig{
 			ListenAddrs:    listeners,
 			BootstrapPeers: network.BootstrapPeers(),
@@ -1565,6 +1580,10 @@ func cmdDaemon(args []string) error {
 			}
 			helloSvc = hello.NewService(p2pHost.H, genCID, head)
 			helloSvc.Register()
+			// #154: connect-time peer heads feed the peer head book.
+			helloSvc.SetOnHead(func(p peer.ID, cids []cid.Cid, h int64) {
+				peerBook.Observe(p, cids, abi.ChainEpoch(h))
+			})
 			go helloSvc.WatchNewConns(ctx)
 			fmt.Printf("  hello:    /fil/hello/1.0.0 active (genesis %s…)\n", network.GenesisCID()[:18])
 		} else {
@@ -1644,7 +1663,7 @@ func cmdDaemon(args []string) error {
 				// distinct scored peers (trusted floor peers super-vote;
 				// requirement clamps to connected-peer count so a small
 				// node never wedges).
-				if corroTracker != nil {
+				if effCorroPeers > 0 {
 					hostRef := p2pHost
 					ing.SetHeadCorroboration(blockpub.CorroborationGate(
 						corroTracker, effCorroPeers,
@@ -1670,7 +1689,8 @@ func cmdDaemon(args []string) error {
 						FallbackRPC:   *fallbackRPCFlag,
 						NoFallbackRPC: *noFallbackRPC,
 					})
-					if mon := headcheck.StartGated(ctx, ing, store, hcSources, nil); mon != nil {
+					if mon := headcheck.StartGated(ctx, ing, store, hcSources, nil,
+						headcheck.WithPeerVotes(headcheck.PeerVotesFrom(peerBook, store, 10*time.Minute))); mon != nil {
 						headMonitor = mon
 						fmt.Printf("  head-check: on (%d sources, lookback %d, tipset-key agreement)\n", len(hcSources), headcheck.DefaultLookback)
 					} else {

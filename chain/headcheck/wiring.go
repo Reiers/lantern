@@ -12,13 +12,16 @@ import (
 	"context"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	abi "github.com/filecoin-project/go-state-types/abi"
+	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 
 	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/bootstrap"
 	ltypes "github.com/Reiers/lantern/chain/types"
+	"github.com/Reiers/lantern/net/peerheads"
 )
 
 var log = logging.Logger("lantern/headcheck")
@@ -101,8 +104,12 @@ type TipSetStore interface {
 // gate, AGREE reopens it, INSUFFICIENT keeps it open (a lightly-sourced
 // node must not freeze). Returns nil when there are no sources. onResult,
 // if non-nil, is called after the gate is updated (metrics/dashboard).
-func StartGated(ctx context.Context, ing GatedIngestor, store TipSetStore, sources []HeadSource, onResult func(Result)) *Monitor {
-	if len(sources) == 0 || ing == nil {
+func StartGated(ctx context.Context, ing GatedIngestor, store TipSetStore, sources []HeadSource, onResult func(Result), opts ...GateOption) *Monitor {
+	var probe Config
+	for _, o := range opts {
+		o(&probe)
+	}
+	if ing == nil || (len(sources) == 0 && probe.PeerVotes == nil) {
 		return nil
 	}
 	var diverged atomic.Bool
@@ -163,12 +170,78 @@ func StartGated(ctx context.Context, ing GatedIngestor, store TipSetStore, sourc
 			return TipSetRef{Epoch: ts.Height(), Key: ts.Key(), ParentWeight: ts.ParentWeight()}, true
 		}
 	}
+	cfg.PeerVotes = probe.PeerVotes
 	mon := New(cfg)
 	mon.Start(ctx)
 	names := make([]string, 0, len(sources))
 	for _, s := range sources {
 		names = append(names, s.Name())
 	}
-	log.Infow("running-head divergence monitor started", "sources", names, "lookback", mon.cfg.Lookback, "minAgree", mon.cfg.MinAgree)
+	log.Infow("running-head divergence monitor started", "sources", names, "peerVotes", cfg.PeerVotes != nil, "lookback", mon.cfg.Lookback, "minAgree", mon.cfg.MinAgree)
 	return mon
+}
+
+// GateOption tunes StartGated.
+type GateOption func(*Config)
+
+// WithPeerVotes adds libp2p peer-group voters (#154).
+func WithPeerVotes(fn func(local abi.ChainEpoch) []PeerVote) GateOption {
+	return func(c *Config) { c.PeerVotes = fn }
+}
+
+// PeerHeadBook is the slice of net/peerheads.Book the monitor needs.
+type PeerHeadBook interface {
+	Recent(maxAge time.Duration) []peerheads.Head
+}
+
+// PeerVotesFrom turns recently observed peer heads into classified votes
+// (#154). Each head is checked against OUR canonical chain in the header
+// store: sharing a block CID with our tipset at its height, or (gossip
+// blocks) sharing a parent CID with our tipset below it, is on-chain (1);
+// a gossip block whose parents are provably not our canonical tipset,
+// at a height we have, is forked (-1); anything else is height-only (0).
+func PeerVotesFrom(book PeerHeadBook, store TipSetStore, maxAge time.Duration) func(abi.ChainEpoch) []PeerVote {
+	return func(local abi.ChainEpoch) []PeerVote {
+		heads := book.Recent(maxAge)
+		out := make([]PeerVote, 0, len(heads))
+		for _, h := range heads {
+			out = append(out, PeerVote{Voter: h.Group, Epoch: h.Height, OnChain: onOurChain(store, h)})
+		}
+		return out
+	}
+}
+
+func shareCID(ts *ltypes.TipSet, cs []cid.Cid) bool {
+	for _, c := range cs {
+		if ts.Contains(c) {
+			return true
+		}
+	}
+	return false
+}
+
+func onOurChain(store TipSetStore, h peerheads.Head) int {
+	if store == nil {
+		return 0
+	}
+	ourHead := store.HeadEpoch()
+	if h.Height <= ourHead {
+		if ts, err := store.GetTipSetByHeight(h.Height); err == nil && ts != nil && ts.Height() == h.Height && shareCID(ts, h.Cids) {
+			return 1
+		}
+	}
+	if len(h.Parents) == 0 || h.Height < 1 {
+		return 0
+	}
+	if h.Height-1 > ourHead {
+		return 0 // parent is beyond what we have: can't tell
+	}
+	below, err := store.GetTipSetByHeight(h.Height - 1)
+	if err != nil || below == nil {
+		return 0
+	}
+	if shareCID(below, h.Parents) {
+		return 1
+	}
+	return -1
 }

@@ -29,6 +29,7 @@ import (
 	"bytes"
 	"sync"
 
+	abi "github.com/filecoin-project/go-state-types/abi"
 	"github.com/ipfs/go-cid"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -54,6 +55,17 @@ type CorroborationTracker struct {
 	order   []cid.Cid // FIFO eviction
 
 	recorded uint64 // lifetime votes recorded (incl. repeat peers)
+
+	// observer (#154) sees every (forwarding peer, block) pair, outside mu.
+	observer func(from peer.ID, c cid.Cid, h abi.ChainEpoch, parents []cid.Cid)
+}
+
+// SetObserver registers a callback for every block copy a peer forwards
+// (#154: feeds the bridge-off peer head book). Call before the host starts.
+func (t *CorroborationTracker) SetObserver(fn func(from peer.ID, c cid.Cid, h abi.ChainEpoch, parents []cid.Cid)) {
+	t.mu.Lock()
+	t.observer = fn
+	t.mu.Unlock()
 }
 
 // NewCorroborationTracker builds a tracker that only counts messages on
@@ -87,6 +99,13 @@ func (t *CorroborationTracker) record(msg *pubsub.Message) {
 	from := msg.ReceivedFrom
 	if from == "" {
 		return
+	}
+
+	t.mu.Lock()
+	obs := t.observer
+	t.mu.Unlock()
+	if obs != nil {
+		obs(from, c, blk.Header.Height, blk.Header.Parents)
 	}
 
 	t.mu.Lock()

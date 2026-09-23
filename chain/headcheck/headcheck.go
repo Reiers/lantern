@@ -101,6 +101,17 @@ func voterKey(src HeadSource) string {
 	return "kind:" + string(src.Kind())
 }
 
+// PeerVote is one libp2p peer's head, pre-classified against our chain
+// (#154). Voter is the peer's network group (see net/peerheads.GroupOf);
+// peers in one group are ONE voter. OnChain: 1 = the peer's head (or its
+// parent tipset) is on our canonical chain, -1 = provably on another
+// chain, 0 = can't tell (height-only vote).
+type PeerVote struct {
+	Voter   string
+	Epoch   abi.ChainEpoch
+	OnChain int
+}
+
 // TipSetRef identifies one tipset as seen by a source (or locally).
 type TipSetRef struct {
 	Epoch        abi.ChainEpoch
@@ -178,6 +189,7 @@ type Result struct {
 	Agreeing      int             // distinct-Kind sources within Lookback
 	Disagreeing   int             // distinct-Kind sources outside Lookback
 	Lagging       int             // #162: disagreeing voters that are only ahead of us on our chain
+	PeerVoters    int             // #154: distinct libp2p peer groups that voted
 	Reachable     int             // sources that answered at all
 	Total         int             // sources configured
 	MedianExtHead abi.ChainEpoch  // median external head (−1 if none)
@@ -208,6 +220,10 @@ type Config struct {
 	LocalTipSetAt func(abi.ChainEpoch) (TipSetRef, bool)
 	// Sources are the external observers. Polled in parallel each round.
 	Sources []HeadSource
+	// PeerVotes (#154), when set, adds libp2p peer groups as voters each
+	// round. This is what gives bridge-off (--no-fallback-rpc) a running
+	// quorum with zero RPC. Called with our local head epoch.
+	PeerVotes func(local abi.ChainEpoch) []PeerVote
 	// Lookback tolerance in epochs (default DefaultLookback).
 	Lookback abi.ChainEpoch
 	// Interval between rounds (default DefaultInterval).
@@ -397,6 +413,35 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 		}
 	}
 
+	// #154: libp2p peer-group votes. A peer far BEHIND us is not evidence
+	// of anything (peers sync, hello heads are connect-time), so it's
+	// skipped unless it's provably on another chain. Forked peers always
+	// count: that's the eclipse signal.
+	peerVoters := map[string]bool{}
+	if m.cfg.PeerVotes != nil {
+		for _, pv := range m.cfg.PeerVotes(local) {
+			if pv.Voter == "" {
+				continue
+			}
+			if pv.OnChain != -1 && local >= 0 && pv.Epoch < local-m.cfg.Lookback {
+				continue
+			}
+			k := "net:" + pv.Voter
+			peerVoters[k] = true
+			reachable++
+			extHeads = append(extHeads, pv.Epoch)
+			kindAnswered[k] = true
+			switch {
+			case pv.OnChain == -1:
+				kindForked[k] = true
+			case withinLookback(local, pv.Epoch, m.cfg.Lookback):
+				kindAgreed[k] = true
+			case pv.Epoch > local+m.cfg.Lookback:
+				kindLag[k] = true
+			}
+		}
+	}
+
 	agreeing := 0
 	disagreeing := 0
 	lagging := 0
@@ -435,6 +480,7 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 		Agreeing:      agreeing,
 		Disagreeing:   disagreeing,
 		Lagging:       lagging,
+		PeerVoters:    len(peerVoters),
 		Reachable:     reachable,
 		Total:         len(m.cfg.Sources),
 		MedianExtHead: median(extHeads),
