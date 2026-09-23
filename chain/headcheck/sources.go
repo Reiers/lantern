@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	abi "github.com/filecoin-project/go-state-types/abi"
@@ -55,6 +56,10 @@ func NewRPCHeadSource(name string, kind bootstrap.Kind, url, token string, timeo
 func (s *RPCHeadSource) Name() string         { return s.name }
 func (s *RPCHeadSource) Kind() bootstrap.Kind { return s.kind }
 
+// Operator implements OperatorSource (#153): the endpoint's registrable
+// domain, so three Glif URLs (or mainnet + calibration Glif) are one voter.
+func (s *RPCHeadSource) Operator() string { return bootstrap.OperatorOf(s.url) }
+
 // GatewayHeadSource is a HeadSource backed by the Lantern gateway's HTTP
 // /state/root endpoint (net/hsync shape), which returns an Epoch field.
 // The gateway speaks HTTP, not Filecoin.ChainHead JSON-RPC, so it needs
@@ -67,6 +72,11 @@ type GatewayHeadSource struct {
 	url     string // gateway base URL
 	timeout time.Duration
 	client  *http.Client
+
+	// upstream is the operator the gateway last advertised in /state/root
+	// (#153). Guarded by mu; empty until the first successful probe.
+	mu       sync.Mutex
+	upstream string
 }
 
 // NewGatewayHeadSource builds a gateway-backed head source. url is the
@@ -83,6 +93,20 @@ func NewGatewayHeadSource(url string, timeout time.Duration) *GatewayHeadSource 
 
 func (s *GatewayHeadSource) Name() string         { return s.name }
 func (s *GatewayHeadSource) Kind() bootstrap.Kind { return bootstrap.KindLanternGateway }
+
+// Operator implements OperatorSource (#153). The gateway does not observe
+// the chain itself: /state/root is proxied to an upstream RPC. It votes as
+// that upstream's operator, so gateway + Glif is ONE voter. A gateway that
+// doesn't advertise its upstream is attributed to DefaultGatewayUpstream
+// (Glif, the lantern-gateway default) rather than counted as independent.
+func (s *GatewayHeadSource) Operator() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.upstream != "" {
+		return s.upstream
+	}
+	return bootstrap.DefaultGatewayUpstream
+}
 
 func (s *GatewayHeadSource) HeadEpoch(ctx context.Context) (abi.ChainEpoch, error) {
 	cctx, cancel := context.WithTimeout(ctx, s.timeout)
@@ -101,10 +125,16 @@ func (s *GatewayHeadSource) HeadEpoch(ctx context.Context) (abi.ChainEpoch, erro
 		return 0, fmt.Errorf("headcheck gateway %s: HTTP %d", s.url, resp.StatusCode)
 	}
 	var head struct {
-		Epoch abi.ChainEpoch `json:"Epoch"`
+		Epoch    abi.ChainEpoch `json:"Epoch"`
+		Upstream string         `json:"upstream"`
 	}
 	if err := json.Unmarshal(raw, &head); err != nil {
 		return 0, fmt.Errorf("headcheck gateway %s: decode: %w", s.url, err)
+	}
+	if op := bootstrap.OperatorOf(head.Upstream); op != "" {
+		s.mu.Lock()
+		s.upstream = op
+		s.mu.Unlock()
 	}
 	return head.Epoch, nil
 }

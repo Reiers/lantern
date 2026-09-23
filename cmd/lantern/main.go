@@ -700,8 +700,16 @@ func (g gatewayHeadFetcher) FetchCandidate(ctx context.Context) (anchorverify.Ca
 		}
 	}
 	pw, _ := big.FromString(head.ParentWeight)
+	// #153: the gateway proxies /state/root to an upstream RPC; it votes
+	// as that operator. Pre-#153 gateways don't advertise it and are
+	// attributed to the lantern-gateway default upstream (Glif).
+	op := bootstrap.OperatorOf(head.Upstream)
+	if op == "" {
+		op = bootstrap.DefaultGatewayUpstream
+	}
 	return anchorverify.Candidate{
 		Source:       "gateway",
+		Operator:     op,
 		Epoch:        abi.ChainEpoch(head.Epoch),
 		StateRoot:    sr,
 		TipSetKey:    types.NewTipSetKey(tskCids...),
@@ -709,21 +717,46 @@ func (g gatewayHeadFetcher) FetchCandidate(ctx context.Context) (anchorverify.Ca
 	}, nil
 }
 
-type glifHeadFetcher struct{ url string }
+// glifHeadFetcher reads ChainHead from any Lotus-compatible RPC (the glif
+// client is a generic Filecoin JSON-RPC client). name is the display label.
+type glifHeadFetcher struct{ url, name string }
 
 func (g glifHeadFetcher) FetchCandidate(ctx context.Context) (anchorverify.Candidate, error) {
+	name := g.name
+	if name == "" {
+		name = "glif"
+	}
 	gc := glif.New(g.url, 10*time.Second)
 	gh, err := gc.FetchHead(ctx)
 	if err != nil {
-		return anchorverify.Candidate{}, fmt.Errorf("glif head: %w", err)
+		return anchorverify.Candidate{}, fmt.Errorf("%s head: %w", name, err)
+	}
+	u := g.url
+	if u == "" {
+		u = glif.DefaultURL
 	}
 	return anchorverify.Candidate{
-		Source:       "glif",
+		Source:       name,
+		Operator:     bootstrap.OperatorOf(u),
 		Epoch:        gh.Epoch,
 		StateRoot:    gh.StateRoot,
 		TipSetKey:    gh.TipSetKey,
 		ParentWeight: gh.ParentWeight,
 	}, nil
+}
+
+// independentAnchorRPCForNetwork is a public Lotus-compatible RPC run by a
+// different operator than Glif (#153), used as the second independent
+// voter for the boot anchor. chain.love has no calibration endpoint, so
+// calibration uses Filfox.
+func independentAnchorRPCForNetwork(n build.Network) string {
+	switch n {
+	case build.Calibration:
+		return "https://calibration.filfox.info/rpc/v1"
+	case build.Mainnet:
+		return "https://api.chain.love/rpc/v1"
+	}
+	return "" // devnet/other: no public second operator
 }
 
 // fetchVerifiedTrustedHead is the hardened boot anchor selection (#54).
@@ -745,10 +778,17 @@ func fetchVerifiedTrustedHead(ctx context.Context, gw string, network build.Netw
 		},
 	}
 
-	cands := anchorverify.Gather(ctx, pol,
+	// #153: agreement is counted per distinct upstream operator. The
+	// gateway proxies Glif, so gateway + Glif alone is ONE voter; add an
+	// independently operated RPC so a default boot still has two.
+	fetchers := []anchorverify.HeadFetcher{
 		gatewayHeadFetcher{gw: gw},
-		glifHeadFetcher{url: glifURLForNetwork(network)},
-	)
+		glifHeadFetcher{url: glifURLForNetwork(network), name: "glif"},
+	}
+	if u := independentAnchorRPCForNetwork(network); u != "" {
+		fetchers = append(fetchers, glifHeadFetcher{url: u, name: "independent-rpc"})
+	}
+	cands := anchorverify.Gather(ctx, pol, fetchers...)
 
 	// Best-effort F3 latest cert for the finality cross-check.
 	var f3 anchorverify.F3Finalized

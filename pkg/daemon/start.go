@@ -722,7 +722,8 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 	// operator RPC URLs. We add, when available: the operator's HeadCheckRPCs
 	// (KindForest), the Lantern gateway (KindLanternGateway, HTTP /state/root),
 	// and the fallback RPC / Glif (KindForest). headcheck counts agreement by
-	// Kind, so N URLs of one kind = 1 source - this gives an honest multi-kind
+	// operator (#153; Kind when unknown), so N URLs of one operator = 1
+	// voter and the gateway votes as its upstream - this gives an honest multi-operator
 	// quorum on the running head instead of boot-only. The monitor starts
 	// whenever at least one corroborating source exists; it self-reports
 	// StatusInsufficient (a no-op alarm) until enough distinct kinds are
@@ -754,6 +755,19 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 				}
 			}
 			hcSources = append(hcSources, headcheck.NewRPCHeadSource("glif", bootstrap.KindForest, hcFallback, "", 0))
+			// #153: the gateway proxies Glif, so gateway + Glif is ONE
+			// voter by operator. Add a differently-operated public RPC
+			// (skipped if the operator already points FallbackRPC there).
+			var indep string
+			switch network {
+			case build.Mainnet:
+				indep = "https://api.chain.love/rpc/v1"
+			case build.Calibration:
+				indep = "https://calibration.filfox.info/rpc/v1"
+			}
+			if indep != "" && bootstrap.OperatorOf(indep) != bootstrap.OperatorOf(hcFallback) {
+				hcSources = append(hcSources, headcheck.NewRPCHeadSource("independent-rpc", bootstrap.KindForest, indep, "", 0))
+			}
 		}
 		if len(hcSources) > 0 {
 			// #79 item 2: feed the divergence verdict back to the ingestor

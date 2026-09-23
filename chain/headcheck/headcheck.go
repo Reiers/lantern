@@ -80,6 +80,27 @@ type HeadSource interface {
 	HeadEpoch(ctx context.Context) (abi.ChainEpoch, error)
 }
 
+// OperatorSource is an optional HeadSource extension (#153). A source that
+// knows which upstream operator actually answers it (e.g. an RPC URL's
+// registrable domain, or the upstream a Lantern gateway proxies to)
+// reports it here, and independence is counted per operator instead of
+// per transport Kind. This stops one upstream (Glif reached directly and
+// via the gateway) from casting two votes.
+type OperatorSource interface {
+	Operator() string
+}
+
+// voterKey is the independence key a source votes under: its operator
+// when known, else its Kind.
+func voterKey(src HeadSource) string {
+	if os, ok := src.(OperatorSource); ok {
+		if op := os.Operator(); op != "" {
+			return "op:" + op
+		}
+	}
+	return "kind:" + string(src.Kind())
+}
+
 // TipSetRef identifies one tipset as seen by a source (or locally).
 type TipSetRef struct {
 	Epoch        abi.ChainEpoch
@@ -104,11 +125,12 @@ type TipSetAtSource interface {
 }
 
 // ChainVote is one chain (tipset key at the checkpoint) and the distinct
-// independent Kinds that reported it. Used for cross-source fork choice.
+// independent voters (see voterKey) that reported it. Used for
+// cross-source fork choice.
 type ChainVote struct {
-	Ref   TipSetRef
-	Kinds []string // sorted
-	Local bool     // this is Lantern's own chain
+	Ref    TipSetRef
+	Voters []string // sorted voter keys
+	Local  bool     // this is Lantern's own chain
 }
 
 // Status is the outcome of one check round.
@@ -151,7 +173,7 @@ type Result struct {
 	Total         int             // sources configured
 	MedianExtHead abi.ChainEpoch  // median external head (−1 if none)
 	At            time.Time       // when this round completed
-	PerKind       map[string]bool // Kind -> agreed (for dashboard)
+	PerKind       map[string]bool // voter key ("op:<operator>" or "kind:<Kind>") -> agreed (#153)
 
 	// #152 tipset-key agreement. CheckpointEpoch is -1 on a height-only
 	// round (no LocalTipSetAt, local head too low, or local tipset
@@ -288,7 +310,7 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 	}
 
 	type answer struct {
-		kind  bootstrap.Kind
+		kind  string // voter key (#153)
 		epoch abi.ChainEpoch
 		ok    bool
 		keyed bool // tipset key compared at the checkpoint
@@ -303,7 +325,7 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 			cctx, cancel := context.WithTimeout(ctx, m.cfg.PerSourceTimeout)
 			defer cancel()
 			ep, err := src.HeadEpoch(cctx)
-			a := answer{kind: src.Kind(), epoch: ep, ok: err == nil}
+			a := answer{kind: voterKey(src), epoch: ep, ok: err == nil}
 			if a.ok && checkpoint >= 0 {
 				if ks, capable := src.(TipSetAtSource); capable {
 					ref, rerr := ks.TipSetAt(cctx, checkpoint)
@@ -325,12 +347,12 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 	// is within Lookback of local (and, when key-checked, on our chain at
 	// the checkpoint); it disagrees only if it answered and no source of
 	// that Kind agreed. This makes N Glif URLs count once.
-	kindAgreed := map[bootstrap.Kind]bool{}
-	kindAnswered := map[bootstrap.Kind]bool{}
-	kindKeyed := map[bootstrap.Kind]bool{}
-	kindForked := map[bootstrap.Kind]bool{}
+	kindAgreed := map[string]bool{}
+	kindAnswered := map[string]bool{}
+	kindKeyed := map[string]bool{}
+	kindForked := map[string]bool{}
 	votes := map[ltypes.TipSetKey]*ChainVote{}
-	voteKinds := map[ltypes.TipSetKey]map[bootstrap.Kind]bool{}
+	voteKinds := map[ltypes.TipSetKey]map[string]bool{}
 	var extHeads []abi.ChainEpoch
 	reachable := 0
 	for _, a := range answers {
@@ -352,7 +374,7 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 			if !ok {
 				v = &ChainVote{Ref: a.ref, Local: a.ref.Key == localRef.Key}
 				votes[a.ref.Key] = v
-				voteKinds[a.ref.Key] = map[bootstrap.Kind]bool{}
+				voteKinds[a.ref.Key] = map[string]bool{}
 			}
 			voteKinds[a.ref.Key][a.kind] = true
 		}
@@ -368,10 +390,10 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 	for k := range kindAnswered {
 		if kindAgreed[k] {
 			agreeing++
-			perKind[string(k)] = true
+			perKind[k] = true
 		} else {
 			disagreeing++
-			perKind[string(k)] = false
+			perKind[k] = false
 			if kindForked[k] {
 				forked++
 			}
@@ -381,9 +403,9 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 	var canonical *ChainVote
 	for key, v := range votes {
 		for k := range voteKinds[key] {
-			v.Kinds = append(v.Kinds, string(k))
+			v.Voters = append(v.Voters, k)
 		}
-		sort.Strings(v.Kinds)
+		sort.Strings(v.Voters)
 		if canonical == nil || betterVote(v, canonical) {
 			canonical = v
 		}
@@ -443,8 +465,8 @@ func classify(agreeing, disagreeing, reachable, minAgree int) Status {
 // Kinds wins; ties go to the heavier ParentWeight (Filecoin fork choice);
 // remaining ties to the lexically smaller key so the pick is deterministic.
 func betterVote(a, b *ChainVote) bool {
-	if len(a.Kinds) != len(b.Kinds) {
-		return len(a.Kinds) > len(b.Kinds)
+	if len(a.Voters) != len(b.Voters) {
+		return len(a.Voters) > len(b.Voters)
 	}
 	if c := cmpWeight(a.Ref.ParentWeight, b.Ref.ParentWeight); c != 0 {
 		return c > 0

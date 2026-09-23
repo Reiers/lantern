@@ -172,6 +172,9 @@ type StateHead struct {
 	TipsetKey    []string `json:"tipsetKey"`
 	StateRoot    string   `json:"stateRoot"`
 	ParentWeight string   `json:"parentWeight"`
+	// Upstream is the host of the RPC the gateway proxied /state/root to
+	// (#153). Empty on gateways older than #153.
+	Upstream string `json:"upstream,omitempty"`
 }
 
 // GetStateHead probes /state/root on the first gateway. Useful for cold-
