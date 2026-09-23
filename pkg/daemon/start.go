@@ -764,7 +764,16 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 			var hcDiverged atomic.Bool
 			ing.SetHeadAdoptionGate(func() bool { return !hcDiverged.Load() })
 			mon := headcheck.New(headcheck.Config{
-				Local:   func() abi.ChainEpoch { return ing.ObservedHead() },
+				Local: func() abi.ChainEpoch { return ing.ObservedHead() },
+				// #152: compare tipset keys at head-lookback, not just
+				// height, so a same-height eclipse fork is a DIVERGE.
+				LocalTipSetAt: func(ep abi.ChainEpoch) (headcheck.TipSetRef, bool) {
+					ts, err := store.GetTipSetByHeight(ep)
+					if err != nil || ts == nil {
+						return headcheck.TipSetRef{}, false
+					}
+					return headcheck.TipSetRef{Epoch: ts.Height(), Key: ts.Key(), ParentWeight: ts.ParentWeight()}, true
+				},
 				Sources: hcSources,
 				OnResult: func(r headcheck.Result) {
 					switch r.Status {
@@ -772,7 +781,8 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 						hcDiverged.Store(true)
 						log.Warnw("headcheck: running head DIVERGES from independent sources (possible eclipse/fork); HOLDING head adoption",
 							"localHead", r.LocalHead, "medianExtHead", r.MedianExtHead,
-							"agreeing", r.Agreeing, "disagreeing", r.Disagreeing, "reachable", r.Reachable)
+							"agreeing", r.Agreeing, "disagreeing", r.Disagreeing, "reachable", r.Reachable,
+							"checkpoint", r.CheckpointEpoch, "forkedKinds", r.ForkedKinds)
 					case headcheck.StatusAgree:
 						if hcDiverged.Swap(false) {
 							log.Infow("headcheck: running head re-corroborated; resuming head adoption",

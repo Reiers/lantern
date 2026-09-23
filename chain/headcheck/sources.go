@@ -11,8 +11,10 @@ import (
 	"time"
 
 	abi "github.com/filecoin-project/go-state-types/abi"
+	"github.com/ipfs/go-cid"
 
 	"github.com/Reiers/lantern/chain/bootstrap"
+	ltypes "github.com/Reiers/lantern/chain/types"
 )
 
 // RPCHeadSource is a HeadSource backed by a Lotus-compatible JSON-RPC
@@ -151,4 +153,66 @@ func (s *RPCHeadSource) HeadEpoch(ctx context.Context) (abi.ChainEpoch, error) {
 		return 0, fmt.Errorf("headcheck rpc %s: nil head", s.url)
 	}
 	return env.Result.Height, nil
+}
+
+// TipSetAt implements TipSetAtSource (#152) via
+// Filecoin.ChainGetTipSetByHeight(epoch, EmptyTSK): the canonical tipset at
+// epoch on the endpoint's heaviest chain, or the tipset below a null round
+// (same semantics as hstore.GetTipSetByHeight on the local side).
+func (s *RPCHeadSource) TipSetAt(ctx context.Context, epoch abi.ChainEpoch) (TipSetRef, error) {
+	cctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	reqBody, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "Filecoin.ChainGetTipSetByHeight",
+		"params":  []any{epoch, nil},
+	})
+	req, err := http.NewRequestWithContext(cctx, "POST", s.url, bytes.NewReader(reqBody))
+	if err != nil {
+		return TipSetRef{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if s.token != "" {
+		req.Header.Set("Authorization", "Bearer "+s.token)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return TipSetRef{}, fmt.Errorf("headcheck rpc %s: %w", s.url, err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return TipSetRef{}, fmt.Errorf("headcheck rpc %s: HTTP %d", s.url, resp.StatusCode)
+	}
+	var env struct {
+		Result *struct {
+			Cids   []cid.Cid      `json:"Cids"`
+			Height abi.ChainEpoch `json:"Height"`
+			Blocks []struct {
+				ParentWeight string `json:"ParentWeight"`
+			} `json:"Blocks"`
+		} `json:"result"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return TipSetRef{}, fmt.Errorf("headcheck rpc %s: decode tipset: %w", s.url, err)
+	}
+	if env.Error != nil {
+		return TipSetRef{}, fmt.Errorf("headcheck rpc %s: %s", s.url, env.Error.Message)
+	}
+	if env.Result == nil || len(env.Result.Cids) == 0 || len(env.Result.Blocks) == 0 {
+		return TipSetRef{}, fmt.Errorf("headcheck rpc %s: empty tipset at %d", s.url, epoch)
+	}
+	w, err := ltypes.BigFromString(env.Result.Blocks[0].ParentWeight)
+	if err != nil {
+		return TipSetRef{}, fmt.Errorf("headcheck rpc %s: parent weight: %w", s.url, err)
+	}
+	return TipSetRef{
+		Epoch:        env.Result.Height,
+		Key:          ltypes.NewTipSetKey(env.Result.Cids...),
+		ParentWeight: w,
+	}, nil
 }

@@ -48,6 +48,7 @@ import (
 	abi "github.com/filecoin-project/go-state-types/abi"
 
 	"github.com/Reiers/lantern/chain/bootstrap"
+	ltypes "github.com/Reiers/lantern/chain/types"
 )
 
 // DefaultLookback is the head-agreement tolerance in epochs. #85
@@ -77,6 +78,37 @@ type HeadSource interface {
 	Kind() bootstrap.Kind
 	// HeadEpoch returns the source's current head epoch.
 	HeadEpoch(ctx context.Context) (abi.ChainEpoch, error)
+}
+
+// TipSetRef identifies one tipset as seen by a source (or locally).
+type TipSetRef struct {
+	Epoch        abi.ChainEpoch
+	Key          ltypes.TipSetKey
+	ParentWeight ltypes.BigInt
+}
+
+// TipSetAtSource is an optional HeadSource extension (#152). A source that
+// can report WHICH tipset it has at an epoch (Lotus
+// ChainGetTipSetByHeight semantics: null rounds resolve to the tipset
+// below) is checked for chain agreement, not just head height.
+//
+// Why: height alone cannot distinguish an eclipse fork from the real
+// chain. An attacker feeding a self-consistent fork keeps our head at the
+// right height, so every honest source "agrees" within the lookback. The
+// tipset key at a checkpoint a few epochs below our head is the same on
+// every honest node (tip churn from late blocks only affects the last
+// epoch or two) and differs on any fork deeper than the lookback.
+type TipSetAtSource interface {
+	HeadSource
+	TipSetAt(ctx context.Context, epoch abi.ChainEpoch) (TipSetRef, error)
+}
+
+// ChainVote is one chain (tipset key at the checkpoint) and the distinct
+// independent Kinds that reported it. Used for cross-source fork choice.
+type ChainVote struct {
+	Ref   TipSetRef
+	Kinds []string // sorted
+	Local bool     // this is Lantern's own chain
 }
 
 // Status is the outcome of one check round.
@@ -120,12 +152,29 @@ type Result struct {
 	MedianExtHead abi.ChainEpoch  // median external head (−1 if none)
 	At            time.Time       // when this round completed
 	PerKind       map[string]bool // Kind -> agreed (for dashboard)
+
+	// #152 tipset-key agreement. CheckpointEpoch is -1 on a height-only
+	// round (no LocalTipSetAt, local head too low, or local tipset
+	// unknown).
+	CheckpointEpoch abi.ChainEpoch
+	KeyChecked      int // distinct Kinds whose tipset key was compared
+	ForkedKinds     int // Kinds within height tolerance but on another chain
+	// Canonical is the cross-source fork-choice winner at the checkpoint:
+	// the chain reported by the most distinct Kinds, ties broken by
+	// heavier ParentWeight, then by key bytes (deterministic). nil when no
+	// source was key-checked.
+	Canonical *ChainVote
 }
 
 // Config configures a Monitor.
 type Config struct {
 	// Local reports Lantern's own (gossip-derived) head epoch. Required.
 	Local func() abi.ChainEpoch
+	// LocalTipSetAt resolves Lantern's own canonical tipset at or below an
+	// epoch. When set, sources implementing TipSetAtSource are checked for
+	// tipset-key agreement at checkpoint = local head - Lookback (#152).
+	// nil = height-only corroboration (pre-#152 behaviour).
+	LocalTipSetAt func(abi.ChainEpoch) (TipSetRef, bool)
 	// Sources are the external observers. Polled in parallel each round.
 	Sources []HeadSource
 	// Lookback tolerance in epochs (default DefaultLookback).
@@ -228,10 +277,22 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 		local = m.cfg.Local()
 	}
 
+	// #152: resolve our own tipset at the checkpoint once per round.
+	checkpoint := abi.ChainEpoch(-1)
+	var localRef TipSetRef
+	if m.cfg.LocalTipSetAt != nil && local >= m.cfg.Lookback {
+		if ref, ok := m.cfg.LocalTipSetAt(local - m.cfg.Lookback); ok {
+			checkpoint = local - m.cfg.Lookback
+			localRef = ref
+		}
+	}
+
 	type answer struct {
 		kind  bootstrap.Kind
 		epoch abi.ChainEpoch
 		ok    bool
+		keyed bool // tipset key compared at the checkpoint
+		ref   TipSetRef
 	}
 	answers := make([]answer, len(m.cfg.Sources))
 	var wg sync.WaitGroup
@@ -242,16 +303,34 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 			cctx, cancel := context.WithTimeout(ctx, m.cfg.PerSourceTimeout)
 			defer cancel()
 			ep, err := src.HeadEpoch(cctx)
-			answers[i] = answer{kind: src.Kind(), epoch: ep, ok: err == nil}
+			a := answer{kind: src.Kind(), epoch: ep, ok: err == nil}
+			if a.ok && checkpoint >= 0 {
+				if ks, capable := src.(TipSetAtSource); capable {
+					ref, rerr := ks.TipSetAt(cctx, checkpoint)
+					if rerr == nil {
+						a.keyed = true
+						a.ref = ref
+					}
+					// On error (e.g. source lagging below the checkpoint)
+					// the source degrades to a height-only vote, which keeps
+					// the pre-#152 far-behind => disagree semantics.
+				}
+			}
+			answers[i] = a
 		}(i, src)
 	}
 	wg.Wait()
 
 	// Collapse to distinct Kind: a Kind agrees if ANY source of that Kind
-	// is within Lookback of local; it disagrees only if it answered and
-	// no source of that Kind agreed. This makes N Glif URLs count once.
+	// is within Lookback of local (and, when key-checked, on our chain at
+	// the checkpoint); it disagrees only if it answered and no source of
+	// that Kind agreed. This makes N Glif URLs count once.
 	kindAgreed := map[bootstrap.Kind]bool{}
 	kindAnswered := map[bootstrap.Kind]bool{}
+	kindKeyed := map[bootstrap.Kind]bool{}
+	kindForked := map[bootstrap.Kind]bool{}
+	votes := map[ltypes.TipSetKey]*ChainVote{}
+	voteKinds := map[ltypes.TipSetKey]map[bootstrap.Kind]bool{}
 	var extHeads []abi.ChainEpoch
 	reachable := 0
 	for _, a := range answers {
@@ -261,13 +340,30 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 		reachable++
 		extHeads = append(extHeads, a.epoch)
 		kindAnswered[a.kind] = true
-		if withinLookback(local, a.epoch, m.cfg.Lookback) {
+		heightOK := withinLookback(local, a.epoch, m.cfg.Lookback)
+		keyOK := true
+		if a.keyed {
+			kindKeyed[a.kind] = true
+			keyOK = a.ref.Key == localRef.Key
+			if heightOK && !keyOK {
+				kindForked[a.kind] = true
+			}
+			v, ok := votes[a.ref.Key]
+			if !ok {
+				v = &ChainVote{Ref: a.ref, Local: a.ref.Key == localRef.Key}
+				votes[a.ref.Key] = v
+				voteKinds[a.ref.Key] = map[bootstrap.Kind]bool{}
+			}
+			voteKinds[a.ref.Key][a.kind] = true
+		}
+		if heightOK && keyOK {
 			kindAgreed[a.kind] = true
 		}
 	}
 
 	agreeing := 0
 	disagreeing := 0
+	forked := 0
 	perKind := map[string]bool{}
 	for k := range kindAnswered {
 		if kindAgreed[k] {
@@ -276,6 +372,20 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 		} else {
 			disagreeing++
 			perKind[string(k)] = false
+			if kindForked[k] {
+				forked++
+			}
+		}
+	}
+
+	var canonical *ChainVote
+	for key, v := range votes {
+		for k := range voteKinds[key] {
+			v.Kinds = append(v.Kinds, string(k))
+		}
+		sort.Strings(v.Kinds)
+		if canonical == nil || betterVote(v, canonical) {
+			canonical = v
 		}
 	}
 
@@ -290,6 +400,11 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 		MedianExtHead: median(extHeads),
 		At:            time.Now(),
 		PerKind:       perKind,
+
+		CheckpointEpoch: checkpoint,
+		KeyChecked:      len(kindKeyed),
+		ForkedKinds:     forked,
+		Canonical:       canonical,
 	}
 	if status == StatusDiverge {
 		m.diverged.Add(1)
@@ -322,6 +437,30 @@ func classify(agreeing, disagreeing, reachable, minAgree int) Status {
 		return StatusAgree
 	}
 	return StatusInsufficient
+}
+
+// betterVote is cross-source fork choice (#152): more distinct independent
+// Kinds wins; ties go to the heavier ParentWeight (Filecoin fork choice);
+// remaining ties to the lexically smaller key so the pick is deterministic.
+func betterVote(a, b *ChainVote) bool {
+	if len(a.Kinds) != len(b.Kinds) {
+		return len(a.Kinds) > len(b.Kinds)
+	}
+	if c := cmpWeight(a.Ref.ParentWeight, b.Ref.ParentWeight); c != 0 {
+		return c > 0
+	}
+	return string(a.Ref.Key.Bytes()) < string(b.Ref.Key.Bytes())
+}
+
+// cmpWeight compares two weights, treating an unset weight as zero.
+func cmpWeight(a, b ltypes.BigInt) int {
+	if a.Nil() {
+		a = ltypes.NewInt(0)
+	}
+	if b.Nil() {
+		b = ltypes.NewInt(0)
+	}
+	return a.Int.Cmp(b.Int)
 }
 
 // withinLookback reports whether external head `ext` is within `tol`

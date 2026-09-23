@@ -7,8 +7,10 @@ package headcheck
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	abi "github.com/filecoin-project/go-state-types/abi"
@@ -49,5 +51,36 @@ func TestGatewayHeadSource_HTTPErrorSurfaces(t *testing.T) {
 	src := NewGatewayHeadSource(srv.URL, 0)
 	if _, err := src.HeadEpoch(context.Background()); err == nil {
 		t.Fatal("expected error on HTTP 502, got nil")
+	}
+}
+
+func TestRPCHeadSource_TipSetAtParses(t *testing.T) {
+	c := "bafy2bzacecnamqgqmifpluoeldx7zzglxcljo6oja4vrmtj7432rphldpdmm2"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "ChainGetTipSetByHeight") {
+			t.Errorf("unexpected method: %s", body)
+		}
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"Cids":[{"/":"` + c + `"}],"Height":97,"Blocks":[{"ParentWeight":"123456"}]}}`))
+	}))
+	defer srv.Close()
+	s := NewRPCHeadSource("t", bootstrap.KindForest, srv.URL, "", 0)
+	ref, err := s.TipSetAt(context.Background(), 97)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Epoch != 97 || ref.ParentWeight.String() != "123456" || len(ref.Key.Cids()) != 1 || ref.Key.Cids()[0].String() != c {
+		t.Fatalf("bad ref: %+v", ref)
+	}
+}
+
+func TestRPCHeadSource_TipSetAtEmptyErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"Cids":[],"Height":97,"Blocks":[]}}`))
+	}))
+	defer srv.Close()
+	s := NewRPCHeadSource("t", bootstrap.KindForest, srv.URL, "", 0)
+	if _, err := s.TipSetAt(context.Background(), 97); err == nil {
+		t.Fatal("empty tipset must error")
 	}
 }
