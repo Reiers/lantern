@@ -15,7 +15,10 @@
 // from a Lotus full node without ambiguous compat suffixes.
 package buildinfo
 
-import "sync/atomic"
+import (
+	"runtime/debug"
+	"sync/atomic"
+)
 
 // defaultVersion is the fall-through identifier when neither ldflags nor
 // SetVersion has populated the live version. We deliberately use "dev"
@@ -54,6 +57,51 @@ func BuildVersion() string {
 		return v
 	}
 	return defaultVersion
+}
+
+// readBuildInfo is swappable in tests.
+var readBuildInfo = debug.ReadBuildInfo
+
+// Commit returns the VCS revision the binary was built from (#156), with a
+// "-dirty" suffix for modified trees, or "" when the toolchain didn't stamp
+// VCS info (go build -buildvcs=false, or outside a git checkout). This is
+// what identifies a hand-built production binary whose ldflags tag is
+// missing.
+func Commit() string {
+	bi, ok := readBuildInfo()
+	if !ok || bi == nil {
+		return ""
+	}
+	var rev string
+	var dirty bool
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if rev == "" {
+		return ""
+	}
+	if len(rev) > 12 {
+		rev = rev[:12]
+	}
+	if dirty {
+		rev += "-dirty"
+	}
+	return rev
+}
+
+// FullVersion is BuildVersion plus the commit when known, e.g.
+// "v1.9.2 (6e29b34abcde)" or "dev (6e29b34abcde-dirty)" (#156).
+func FullVersion() string {
+	v := BuildVersion()
+	if c := Commit(); c != "" {
+		return v + " (" + c + ")"
+	}
+	return v
 }
 
 // Network returns the active Filecoin network name. Defaults to "mainnet".

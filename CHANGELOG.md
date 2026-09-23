@@ -2,7 +2,21 @@
 
 All notable changes to Lantern.
 
-## Unreleased (v1.9.0)
+## Unreleased (Milestone 1: trustless multi-source head quorum)
+
+Not yet tagged. Hardening of the running-head quorum on top of v1.9.2.
+
+- **#155** Backfill paths persist ancestors only; head adoption (fork choice + divergence gate) is one guarded decision on the tip. Previously a lighter/diverged candidate could walk head onto its ancestors during backfill.
+- **#152** headcheck corroborates the **tipset key** at head-lookback, not just height, and runs cross-source fork choice (most independent voters, then heaviest ParentWeight). A same-height eclipse fork is now a DIVERGE.
+- **#153** Independence is counted per **upstream operator**. The gateway (which proxies Glif) and Glif are one voter. Boot anchor + headcheck add a differently-operated RPC (chain.love mainnet, Filfox calibration). The gateway advertises `upstream` in `/state/root`.
+- **#160** The standalone `lantern daemon` now runs the headcheck monitor + adoption gate (previously embedded-only). New flags: `--head-check-rpc`, `--no-head-check`.
+- **#162** The adoption gate no longer deadlocks a fresh or lagging node. New `behind` status; local head = max(store head, gossip head).
+- **#154** Bridge-off (`--no-fallback-rpc`) gets a running quorum from libp2p peer groups (Hello + gossip forwarders, grouped by IPv4 /16 / IPv6 /32).
+- **#156** Weight-monotonic guard (child ParentWeight must exceed parent's). `lantern version` prints tag + VCS commit. `/metrics` exports `lantern_build_info`, `lantern_headcheck_*`, `lantern_head_rejected_total{reason}`.
+
+## v1.9.0 .. v1.9.2 (2026-07-23)
+
+_Notes below were written as "Unreleased (v1.9.0)" and shipped in v1.9.0; v1.9.1/v1.9.2 were fix releases (#143-#151)._
 
 ### Setup UX / bootstrap reliability
 
