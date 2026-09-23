@@ -93,6 +93,7 @@ type GatedIngestor interface {
 // TipSetStore is the slice of the header store the monitor needs.
 type TipSetStore interface {
 	GetTipSetByHeight(abi.ChainEpoch) (*ltypes.TipSet, error)
+	HeadEpoch() abi.ChainEpoch
 }
 
 // StartGated starts a Monitor over sources and feeds its verdict back to
@@ -106,8 +107,22 @@ func StartGated(ctx context.Context, ing GatedIngestor, store TipSetStore, sourc
 	}
 	var diverged atomic.Bool
 	ing.SetHeadAdoptionGate(func() bool { return !diverged.Load() })
+	// #162: our head is the store head (advanced by polling Sync AND
+	// gossip), not just what gossip installed. ObservedHead alone is -1 on
+	// a fresh node and frozen while the gate is closed, which deadlocked
+	// the gate.
+	local := ing.ObservedHead
+	if store != nil {
+		local = func() abi.ChainEpoch {
+			h := store.HeadEpoch()
+			if o := ing.ObservedHead(); o > h {
+				h = o
+			}
+			return h
+		}
+	}
 	cfg := Config{
-		Local:   ing.ObservedHead,
+		Local:   local,
 		Sources: sources,
 		OnResult: func(r Result) {
 			switch r.Status {
@@ -123,6 +138,11 @@ func StartGated(ctx context.Context, ing GatedIngestor, store TipSetStore, sourc
 						"localHead", r.LocalHead, "agreeing", r.Agreeing)
 				}
 				log.Debugw("head corroborated", "localHead", r.LocalHead, "agreeing", r.Agreeing, "keyChecked", r.KeyChecked)
+			case StatusBehind:
+				// #162: lag, not eclipse. Keep adopting so we catch up.
+				diverged.Store(false)
+				log.Infow("running head behind independent voters on the same chain; catching up",
+					"localHead", r.LocalHead, "medianExtHead", r.MedianExtHead, "lagging", r.Lagging)
 			case StatusInsufficient:
 				diverged.Store(false)
 				log.Debugw("head uncorroborated (too few reachable independent voters)",

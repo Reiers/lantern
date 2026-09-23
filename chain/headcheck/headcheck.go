@@ -148,6 +148,12 @@ const (
 	// StatusInsufficient: too few sources were reachable to make a call.
 	// Not an alarm by itself, but means the head is uncorroborated.
 	StatusInsufficient
+	// StatusBehind (#162): a quorum of independent voters is AHEAD of us on
+	// our own chain (tipset key matches at the checkpoint, or height-only
+	// sources). That is lag (fresh start, restart, network blip), not an
+	// eclipse. Closing the adoption gate would freeze the node behind
+	// forever, so Behind keeps the gate open and lets Sync/gossip catch up.
+	StatusBehind
 )
 
 func (s Status) String() string {
@@ -158,6 +164,8 @@ func (s Status) String() string {
 		return "diverge"
 	case StatusInsufficient:
 		return "insufficient"
+	case StatusBehind:
+		return "behind"
 	default:
 		return "unknown"
 	}
@@ -169,6 +177,7 @@ type Result struct {
 	LocalHead     abi.ChainEpoch
 	Agreeing      int             // distinct-Kind sources within Lookback
 	Disagreeing   int             // distinct-Kind sources outside Lookback
+	Lagging       int             // #162: disagreeing voters that are only ahead of us on our chain
 	Reachable     int             // sources that answered at all
 	Total         int             // sources configured
 	MedianExtHead abi.ChainEpoch  // median external head (−1 if none)
@@ -351,6 +360,7 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 	kindAnswered := map[string]bool{}
 	kindKeyed := map[string]bool{}
 	kindForked := map[string]bool{}
+	kindLag := map[string]bool{} // #162: ahead of us, on our chain
 	votes := map[ltypes.TipSetKey]*ChainVote{}
 	voteKinds := map[ltypes.TipSetKey]map[string]bool{}
 	var extHeads []abi.ChainEpoch
@@ -367,7 +377,9 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 		if a.keyed {
 			kindKeyed[a.kind] = true
 			keyOK = a.ref.Key == localRef.Key
-			if heightOK && !keyOK {
+			if !keyOK {
+				// On another chain at our checkpoint, at any height:
+				// never mere lag (#162).
 				kindForked[a.kind] = true
 			}
 			v, ok := votes[a.ref.Key]
@@ -380,11 +392,14 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 		}
 		if heightOK && keyOK {
 			kindAgreed[a.kind] = true
+		} else if keyOK && a.epoch > local+m.cfg.Lookback {
+			kindLag[a.kind] = true
 		}
 	}
 
 	agreeing := 0
 	disagreeing := 0
+	lagging := 0
 	forked := 0
 	perKind := map[string]bool{}
 	for k := range kindAnswered {
@@ -396,6 +411,8 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 			perKind[k] = false
 			if kindForked[k] {
 				forked++
+			} else if kindLag[k] {
+				lagging++
 			}
 		}
 	}
@@ -411,12 +428,13 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 		}
 	}
 
-	status := classify(agreeing, disagreeing, reachable, m.cfg.MinAgree)
+	status := classify(agreeing, disagreeing-lagging, lagging, reachable, m.cfg.MinAgree)
 	res := Result{
 		Status:        status,
 		LocalHead:     local,
 		Agreeing:      agreeing,
 		Disagreeing:   disagreeing,
+		Lagging:       lagging,
 		Reachable:     reachable,
 		Total:         len(m.cfg.Sources),
 		MedianExtHead: median(extHeads),
@@ -441,22 +459,28 @@ func (m *Monitor) runRound(ctx context.Context) Result {
 	return res
 }
 
-// classify turns the agree/disagree tallies into a Status.
+// classify turns the tallies into a Status.
 //
-//   - DIVERGE: a quorum of distinct independent Kinds disagree AND they
-//     out-number the agreeing Kinds. A real eclipse shows up as the
-//     external world (multiple Kinds) clustering away from our head.
-//   - AGREE: at least MinAgree distinct Kinds are within Lookback.
-//   - INSUFFICIENT: otherwise (too few corroborating observers).
-func classify(agreeing, disagreeing, reachable, minAgree int) Status {
+//   - DIVERGE: a quorum of independent voters is on another chain at the
+//     checkpoint, or clusters BEHIND us (we are ahead of the independent
+//     world), and they out-number the agreeing voters. Eclipse alarm.
+//   - AGREE: at least MinAgree independent voters are within Lookback and
+//     (when key-checked) on our chain.
+//   - BEHIND (#162): the remaining disagreement is voters AHEAD of us on
+//     our chain. Lag, not an eclipse; must not close the adoption gate.
+//   - INSUFFICIENT: otherwise.
+func classify(agreeing, diverging, lagging, reachable, minAgree int) Status {
 	if reachable == 0 {
 		return StatusInsufficient
 	}
-	if disagreeing >= minAgree && disagreeing >= agreeing {
+	if diverging >= minAgree && diverging >= agreeing {
 		return StatusDiverge
 	}
 	if agreeing >= minAgree {
 		return StatusAgree
+	}
+	if lagging >= minAgree {
+		return StatusBehind
 	}
 	return StatusInsufficient
 }

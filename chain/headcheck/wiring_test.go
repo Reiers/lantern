@@ -89,11 +89,12 @@ func (s switchSource) HeadEpoch(context.Context) (abi.ChainEpoch, error) {
 type nilStore struct{}
 
 func (nilStore) GetTipSetByHeight(abi.ChainEpoch) (*ltypes.TipSet, error) { return nil, nil }
+func (nilStore) HeadEpoch() abi.ChainEpoch                                { return -1 }
 
 func TestStartGated_DivergeClosesAgreeReopens(t *testing.T) {
 	ing := &fakeIng{head: 100}
 	var mu sync.Mutex
-	ext := abi.ChainEpoch(200) // far ahead => diverge
+	ext := abi.ChainEpoch(40) // independent world far BEHIND us => diverge (#162: ahead would be Behind)
 	srcs := []HeadSource{
 		switchSource{"a", bootstrap.KindForest, &mu, &ext},
 		switchSource{"b", bootstrap.KindUser, &mu, &ext},

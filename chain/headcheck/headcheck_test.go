@@ -49,10 +49,12 @@ func TestAgree_TwoDistinctKindsWithinLookback(t *testing.T) {
 }
 
 func TestDiverge_QuorumOfKindsOutsideLookback(t *testing.T) {
-	// local is way behind; two independent kinds cluster at the real tip.
-	m := newMon(100,
-		mockSource{"forest", bootstrap.KindForest, 140, nil},
-		mockSource{"user", bootstrap.KindUser, 141, nil},
+	// #162: local is way AHEAD of two independent kinds (we are ahead of
+	// the independent world). Local-behind is StatusBehind, see
+	// TestBehind_QuorumAheadIsLagNotEclipse.
+	m := newMon(140,
+		mockSource{"forest", bootstrap.KindForest, 100, nil},
+		mockSource{"user", bootstrap.KindUser, 101, nil},
 	)
 	r := m.CheckOnce(context.Background())
 	if r.Status != StatusDiverge {
@@ -119,11 +121,29 @@ func TestNoLocalHead_NeverWithinTolerance(t *testing.T) {
 		mockSource{"user", bootstrap.KindUser, 100, nil},
 	)
 	r := m.CheckOnce(context.Background())
-	// local=-1 can't agree with anything; both answered+disagree => with
-	// 2 disagreeing kinds and 0 agreeing this is a diverge signal (we have
-	// no corroborated head while the world has one).
-	if r.Status != StatusDiverge {
-		t.Fatalf("no-local-head vs live external quorum should diverge, got %s", r.Status)
+	// #162: local=-1 can't agree with anything, but the world simply being
+	// ahead of a node with no head is lag, not an eclipse. Pre-#162 this
+	// was DIVERGE, which closed the adoption gate and deadlocked a fresh
+	// node forever.
+	if r.Status != StatusBehind {
+		t.Fatalf("no-local-head vs live external quorum should be behind, got %s", r.Status)
+	}
+	if r.Agreeing != 0 || r.Lagging != 2 {
+		t.Fatalf("want agree=0 lagging=2, got %d/%d", r.Agreeing, r.Lagging)
+	}
+}
+
+func TestBehind_QuorumAheadIsLagNotEclipse(t *testing.T) {
+	m := newMon(100,
+		mockSource{"forest", bootstrap.KindForest, 140, nil},
+		mockSource{"user", bootstrap.KindUser, 141, nil},
+	)
+	r := m.CheckOnce(context.Background())
+	if r.Status != StatusBehind {
+		t.Fatalf("world ahead of us on height-only sources => behind, got %s", r.Status)
+	}
+	if _, dv := m.Stats(); dv != 0 {
+		t.Fatalf("behind must not count as a divergence, got %d", dv)
 	}
 }
 
