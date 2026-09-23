@@ -142,18 +142,20 @@ type Ingestor struct {
 	corroRetries map[cid.Cid]int
 	corroPending map[cid.Cid]struct{}
 
-	received         atomic.Uint64
-	dedup            atomic.Uint64
-	installed        atomic.Uint64
-	skipped          atomic.Uint64
-	rejected         atomic.Uint64
-	rejectedLighter  atomic.Uint64 // #79: candidates rejected by heaviest-weight fork choice
-	heldDiverged     atomic.Uint64 // #79: head adoptions held while the divergence gate was closed
-	heldUncorrob     atomic.Uint64 // #80: head adoptions held awaiting multi-peer corroboration
-	backfilled       atomic.Uint64
-	backfillFailed   atomic.Uint64
-	lastInstallEpoch atomic.Int64
-	lastInstallNanos atomic.Int64 // wall-clock UnixNano of the last successful install (#71)
+	received        atomic.Uint64
+	dedup           atomic.Uint64
+	installed       atomic.Uint64
+	skipped         atomic.Uint64
+	rejected        atomic.Uint64
+	rejectedLighter atomic.Uint64 // #79: candidates rejected by heaviest-weight fork choice
+	// #156: rejected because ParentWeight didn't exceed the parent's.
+	rejectedNonMonotonic atomic.Uint64
+	heldDiverged         atomic.Uint64 // #79: head adoptions held while the divergence gate was closed
+	heldUncorrob         atomic.Uint64 // #80: head adoptions held awaiting multi-peer corroboration
+	backfilled           atomic.Uint64
+	backfillFailed       atomic.Uint64
+	lastInstallEpoch     atomic.Int64
+	lastInstallNanos     atomic.Int64 // wall-clock UnixNano of the last successful install (#71)
 }
 
 // SetHeadAdoptionGate wires a predicate consulted before each head
@@ -319,6 +321,25 @@ func (g *Ingestor) process(ctx context.Context, blk *ltypes.BlockMsg) {
 		if !cw.Nil() && !nw.Nil() && nw.LessThanEqual(cw) {
 			g.rejectedLighter.Add(1)
 			return
+		}
+	}
+
+	// #156: weight-monotonic guard. ParentWeight is taken from the header
+	// (full recompute needs power state, out of scope for a light node),
+	// but every honest child has strictly more weight than its parent
+	// tipset. A header whose ParentWeight doesn't exceed its parent's is
+	// malformed or forged; never let it win fork choice. Only checked
+	// when the parent is in store (backfill above makes that the norm).
+	// Runs after #79 so lighter-than-head candidates keep counting as
+	// RejectedLighter; this catches the ones that beat our head but not
+	// their own parent.
+	if len(bh.Parents) > 0 {
+		if pb, perr := g.store.Get(bh.Parents[0]); perr == nil && pb != nil {
+			pw, cw := pb.ParentWeight, bh.ParentWeight
+			if !pw.Nil() && !cw.Nil() && cw.LessThanEqual(pw) {
+				g.rejectedNonMonotonic.Add(1)
+				return
+			}
 		}
 	}
 
@@ -694,33 +715,36 @@ func (g *Ingestor) markSeenImpl(c cid.Cid) {
 
 // Stats is a snapshot of ingestor counters for observability.
 type Stats struct {
-	Received         uint64
-	Dedup            uint64
-	Installed        uint64
-	Skipped          uint64
-	Rejected         uint64
-	RejectedLighter  uint64 // #79: rejected by heaviest-ParentWeight fork choice
-	HeldDiverged     uint64 // #79: head adoptions held while divergence gate closed
-	HeldUncorrob     uint64 // #80: head adoptions held awaiting multi-peer corroboration
-	Backfilled       uint64
-	BackfillFailed   uint64
-	LastInstallEpoch abi.ChainEpoch
+	Received        uint64
+	Dedup           uint64
+	Installed       uint64
+	Skipped         uint64
+	Rejected        uint64
+	RejectedLighter uint64 // #79: rejected by heaviest-ParentWeight fork choice
+	// #156: rejected because ParentWeight <= parent tipset's ParentWeight.
+	RejectedNonMonotonic uint64
+	HeldDiverged         uint64 // #79: head adoptions held while divergence gate closed
+	HeldUncorrob         uint64 // #80: head adoptions held awaiting multi-peer corroboration
+	Backfilled           uint64
+	BackfillFailed       uint64
+	LastInstallEpoch     abi.ChainEpoch
 }
 
 // Stats returns a snapshot of counters.
 func (g *Ingestor) Stats() Stats {
 	return Stats{
-		Received:         g.received.Load(),
-		Dedup:            g.dedup.Load(),
-		Installed:        g.installed.Load(),
-		Skipped:          g.skipped.Load(),
-		Rejected:         g.rejected.Load(),
-		RejectedLighter:  g.rejectedLighter.Load(),
-		HeldDiverged:     g.heldDiverged.Load(),
-		HeldUncorrob:     g.heldUncorrob.Load(),
-		Backfilled:       g.backfilled.Load(),
-		BackfillFailed:   g.backfillFailed.Load(),
-		LastInstallEpoch: abi.ChainEpoch(g.lastInstallEpoch.Load()),
+		Received:             g.received.Load(),
+		Dedup:                g.dedup.Load(),
+		Installed:            g.installed.Load(),
+		Skipped:              g.skipped.Load(),
+		Rejected:             g.rejected.Load(),
+		RejectedLighter:      g.rejectedLighter.Load(),
+		RejectedNonMonotonic: g.rejectedNonMonotonic.Load(),
+		HeldDiverged:         g.heldDiverged.Load(),
+		HeldUncorrob:         g.heldUncorrob.Load(),
+		Backfilled:           g.backfilled.Load(),
+		BackfillFailed:       g.backfillFailed.Load(),
+		LastInstallEpoch:     abi.ChainEpoch(g.lastInstallEpoch.Load()),
 	}
 }
 

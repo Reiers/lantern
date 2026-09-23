@@ -142,8 +142,8 @@ func main() {
 	case "node-type":
 		err = cmdNodeType(rest)
 	case "version", "--version", "-v":
-		fmt.Printf("lantern %s Lantern+%s (Phase 11 — installer + quorum bootstrap)\n",
-			buildinfo.BuildVersion(), buildinfo.Network())
+		// #156: print tag + commit so a running binary identifies itself.
+		fmt.Printf("lantern %s Lantern+%s\n", buildinfo.FullVersion(), buildinfo.Network())
 	case "help", "--help", "-h":
 		usage()
 	default:
@@ -1479,8 +1479,7 @@ func cmdDaemon(args []string) error {
 	// AmbientAutoNAT subsystem on the host respectively.
 	var p2pHost *llibp2p.Host
 	var gossipIngestor *gossipBlockIngestor
-	var headMonitor *headcheck.Monitor // #160
-	_ = headMonitor
+	var headMonitor *headcheck.Monitor // #160; exported on /metrics (#156)
 	var helloSvc *hello.Service
 	var xchgSvc *chainxchg.Service
 	var xchgClient *chainxchg.Client
@@ -1979,7 +1978,7 @@ func cmdDaemon(args []string) error {
 			}
 			dashboardURL = fmt.Sprintf("http://%s/dashboard/", *metricsListen)
 		}
-		go serveMetrics(ctx, *metricsListen, dashToken, fetcher, bsClient, p2pHost, dash)
+		go serveMetrics(ctx, *metricsListen, dashToken, fetcher, bsClient, p2pHost, dash, headMonitor, gossipIngestor)
 		fmt.Printf("  metrics:  http://%s/metrics\n", *metricsListen)
 		if dashboardURL != "" {
 			fmt.Printf("  dashboard: %s\n", dashboardURL)
