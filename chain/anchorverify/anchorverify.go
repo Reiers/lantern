@@ -49,7 +49,12 @@ import (
 // fields the verifier compares. Sources that cannot supply a field leave it
 // at its zero value; only StateRoot + TipSetKey + Epoch are load-bearing.
 type Candidate struct {
-	Source       string // human label, e.g. "gateway", "glif"
+	Source string // human label, e.g. "gateway", "glif"
+	// Operator is the independence key (#153): the upstream operator that
+	// actually produced this view (bootstrap.OperatorOf). Agreement is
+	// counted per distinct Operator, so the gateway (which proxies Glif)
+	// and Glif itself are one vote. Empty = falls back to Source.
+	Operator     string
 	Epoch        abi.ChainEpoch
 	StateRoot    cid.Cid
 	TipSetKey    ltypes.TipSetKey
@@ -60,6 +65,23 @@ type Candidate struct {
 // share to be considered "in agreement".
 func (c Candidate) identityKey() string {
 	return c.StateRoot.String() + "|" + c.TipSetKey.String()
+}
+
+// voter returns the independence key the candidate votes under.
+func (c Candidate) voter() string {
+	if c.Operator != "" {
+		return "op:" + c.Operator
+	}
+	return "src:" + c.Source
+}
+
+// distinctVoters counts the distinct independence keys in cs (#153).
+func distinctVoters(cs []Candidate) int {
+	seen := map[string]struct{}{}
+	for _, c := range cs {
+		seen[c.voter()] = struct{}{}
+	}
+	return len(seen)
 }
 
 func (c Candidate) valid() bool {
@@ -211,8 +233,9 @@ func Verify(cands []Candidate, f3 F3Finalized, pol Policy) (Result, error) {
 		gs = append(gs, grp{key: k, cands: cs})
 	}
 	sort.Slice(gs, func(i, j int) bool {
-		if len(gs[i].cands) != len(gs[j].cands) {
-			return len(gs[i].cands) > len(gs[j].cands)
+		vi, vj := distinctVoters(gs[i].cands), distinctVoters(gs[j].cands)
+		if vi != vj {
+			return vi > vj
 		}
 		// tie: heavier ParentWeight wins
 		wi := weightOf(gs[i].cands)
@@ -224,11 +247,11 @@ func Verify(cands []Candidate, f3 F3Finalized, pol Policy) (Result, error) {
 	})
 	top := gs[0]
 
-	if len(top.cands) >= pol.MinAgreeingSources {
+	if distinctVoters(top.cands) >= pol.MinAgreeingSources {
 		return Result{
 			Chosen:          top.cands[0],
 			Method:          "multi-source-agreement",
-			AgreeingSources: len(top.cands),
+			AgreeingSources: distinctVoters(top.cands),
 			F3Checked:       f3.Available,
 		}, nil
 	}
@@ -242,7 +265,7 @@ func Verify(cands []Candidate, f3 F3Finalized, pol Policy) (Result, error) {
 		return Result{
 			Chosen:          heaviest,
 			Method:          "f3-consistent-heaviest",
-			AgreeingSources: len(groups[heaviest.identityKey()]),
+			AgreeingSources: distinctVoters(groups[heaviest.identityKey()]),
 			F3Checked:       true,
 		}, nil
 	}

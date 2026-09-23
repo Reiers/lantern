@@ -85,7 +85,7 @@ func TestKey_HonestSourcesOnOurChainAgree(t *testing.T) {
 	if r.Status != StatusAgree {
 		t.Fatalf("want agree, got %s", r.Status)
 	}
-	if r.Canonical == nil || !r.Canonical.Local || len(r.Canonical.Kinds) != 2 {
+	if r.Canonical == nil || !r.Canonical.Local || len(r.Canonical.Voters) != 2 {
 		t.Fatalf("canonical should be our chain with 2 kinds, got %+v", r.Canonical)
 	}
 }
@@ -156,7 +156,7 @@ func TestKey_SameKindCountsOnceInVotes(t *testing.T) {
 	if r.Status == StatusAgree {
 		t.Fatalf("3 URLs of one kind must not satisfy MinAgree=2, got %s", r.Status)
 	}
-	if r.Canonical == nil || len(r.Canonical.Kinds) != 1 {
+	if r.Canonical == nil || len(r.Canonical.Voters) != 1 {
 		t.Fatalf("want 1 kind in vote, got %+v", r.Canonical)
 	}
 }

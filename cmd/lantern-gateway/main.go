@@ -39,6 +39,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -198,9 +199,23 @@ func (g *gateway) handleStateRoot(w http.ResponseWriter, r *http.Request) {
 		"tipsetKey":    tipsetKey,
 		"stateRoot":    out.Result.Blocks[0].ParentStateRoot.Slash,
 		"parentWeight": out.Result.Blocks[0].ParentWeight,
+		// #153: which operator actually answered. Head sources attribute
+		// the gateway's vote to this upstream so gateway + Glif is not
+		// counted as two independent observers. Host only (the URL may
+		// carry credentials).
+		"upstream": upstreamHost(g.cfg.glifRPC),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resJSON)
+}
+
+// upstreamHost returns just the hostname of the upstream RPC URL.
+func upstreamHost(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
 
 // fetch tries Glif first, then each IPFS gateway. Returns the first
