@@ -189,3 +189,30 @@ func TestKey_NoLocalResolverIsHeightOnly(t *testing.T) {
 		t.Fatalf("height-only mode expected, got status=%s cp=%d canon=%v", r.Status, r.CheckpointEpoch, r.Canonical)
 	}
 }
+
+// #162: voters ahead of us whose tipset at OUR checkpoint matches ours are
+// lag (we are on their chain, just behind).
+func TestKey_AheadOnOurChainIsBehind(t *testing.T) {
+	ours := ref(t, 97, "canonical", 1000)
+	m := newKeyMon(100, ours,
+		keySource{mockSource{"glif", bootstrap.KindForest, 150, nil}, ours, nil},
+		keySource{mockSource{"user", bootstrap.KindUser, 151, nil}, ours, nil},
+	)
+	if r := m.CheckOnce(context.Background()); r.Status != StatusBehind || r.ForkedKinds != 0 {
+		t.Fatalf("ahead on our chain => behind, got %s forked=%d", r.Status, r.ForkedKinds)
+	}
+}
+
+// #162: voters ahead of us that are on a DIFFERENT chain at our checkpoint
+// are an eclipse/fork, not lag.
+func TestKey_AheadOnOtherChainDiverges(t *testing.T) {
+	ours := ref(t, 97, "attacker-fork", 900)
+	real := ref(t, 97, "canonical", 1000)
+	m := newKeyMon(100, ours,
+		keySource{mockSource{"glif", bootstrap.KindForest, 150, nil}, real, nil},
+		keySource{mockSource{"user", bootstrap.KindUser, 151, nil}, real, nil},
+	)
+	if r := m.CheckOnce(context.Background()); r.Status != StatusDiverge || r.ForkedKinds != 2 {
+		t.Fatalf("ahead on another chain => diverge, got %s forked=%d", r.Status, r.ForkedKinds)
+	}
+}
