@@ -464,8 +464,12 @@ func (g *Ingestor) inlineBackfill(ctx context.Context, bh *ltypes.BlockHeader) e
 		if err != nil {
 			return fmt.Errorf("backfill tipset @ %d: %w", ep, err)
 		}
-		if err := g.store.SetHead(ctx, ts); err != nil {
-			return fmt.Errorf("backfill set head @ %d: %w", ep, err)
+		// #155: persist only. Head adoption (fork choice + divergence
+		// gate + corroboration) happens once, on the gossip tip, in
+		// process(); the tip's SetHead rewires canonical pointers for
+		// these ancestors if and only if the tip is adopted.
+		if err := g.store.PutTipSet(ts); err != nil {
+			return fmt.Errorf("backfill put @ %d: %w", ep, err)
 		}
 	}
 	return nil
@@ -582,8 +586,9 @@ func (g *Ingestor) parentWalkBackfill(ctx context.Context, bh *ltypes.BlockHeade
 		if err != nil {
 			return fmt.Errorf("bridge-off backfill tipset @ %d: %w", h, err)
 		}
-		if err := g.store.SetHead(ctx, ts); err != nil {
-			return fmt.Errorf("bridge-off backfill set head @ %d: %w", h, err)
+		// #155: persist only; see inlineBackfill.
+		if err := g.store.PutTipSet(ts); err != nil {
+			return fmt.Errorf("bridge-off backfill put @ %d: %w", h, err)
 		}
 	}
 	return nil
@@ -649,8 +654,9 @@ func (g *Ingestor) chainExchangeBackfill(ctx context.Context, bh *ltypes.BlockHe
 		if terr != nil {
 			return fmt.Errorf("chainxchg backfill tipset @ %d: %w", blocks[0].Height, terr)
 		}
-		if serr := g.store.SetHead(ctx, ts); serr != nil {
-			return fmt.Errorf("chainxchg backfill set head @ %d: %w", blocks[0].Height, serr)
+		// #155: persist only; see inlineBackfill.
+		if serr := g.store.PutTipSet(ts); serr != nil {
+			return fmt.Errorf("chainxchg backfill put @ %d: %w", blocks[0].Height, serr)
 		}
 	}
 	return nil

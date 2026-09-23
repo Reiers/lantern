@@ -348,10 +348,24 @@ func (s *Store) SetHead(_ctx context.Context, ts *ltypes.TipSet) error {
 	if ts == nil {
 		return errors.New("header/store: nil tipset")
 	}
-	// Persist all of ts's blocks. Try Put first (strict parent linkage);
-	// fall back to a lenient direct write if the parents aren't yet in
-	// store (e.g. caller is doing a deep bootstrap where the parent
-	// chain hasn't been backfilled).
+	if err := s.PutTipSet(ts); err != nil {
+		return err
+	}
+	return s.rewireHead(ts)
+}
+
+// PutTipSet persists every block of ts (CID -> header, per-epoch index)
+// WITHOUT touching canonical pointers or the head. Backfill paths use this
+// so fetched ancestors land in the store while head adoption (fork choice
+// + divergence gate, #155) stays a single guarded decision on the tip.
+//
+// Try Put first (strict parent linkage); fall back to a lenient direct
+// write if the parents aren't yet in store (e.g. a deep bootstrap where the
+// parent chain hasn't been backfilled).
+func (s *Store) PutTipSet(ts *ltypes.TipSet) error {
+	if ts == nil {
+		return errors.New("header/store: nil tipset")
+	}
 	for _, b := range ts.Blocks() {
 		if err := s.Put(b); err != nil {
 			raw, serr := b.Serialize()
@@ -377,7 +391,11 @@ func (s *Store) SetHead(_ctx context.Context, ts *ltypes.TipSet) error {
 			}
 		}
 	}
+	return nil
+}
 
+// rewireHead makes an already-persisted ts the canonical head.
+func (s *Store) rewireHead(ts *ltypes.TipSet) error {
 	// Walk down from ts: at each epoch update canonical pointer until
 	// reaching a tipset whose canonical key already matches (= LCA) or
 	// height 0.
