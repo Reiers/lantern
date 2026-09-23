@@ -73,6 +73,19 @@ type Service struct {
 	helloRecv   atomic.Uint64 // counter: valid Hello messages received
 	helloSent   atomic.Uint64 // counter: Hello messages we sent
 	helloReject atomic.Uint64 // counter: rejected (genesis mismatch / read error)
+
+	// onHead (#154) receives each valid inbound Hello's announced head.
+	onHead atomic.Pointer[func(peer.ID, []cid.Cid, int64)]
+}
+
+// SetOnHead registers a callback for the head announced in every valid
+// (matching-genesis) inbound Hello (#154: bridge-off peer head quorum).
+func (s *Service) SetOnHead(fn func(p peer.ID, cids []cid.Cid, height int64)) {
+	if fn == nil {
+		s.onHead.Store(nil)
+		return
+	}
+	s.onHead.Store(&fn)
 }
 
 // Stats reports observable Hello activity. Exposed for the dashboard.
@@ -137,6 +150,9 @@ func (s *Service) handleStream(str network.Stream) {
 	// connmgr trim pass keeps them.
 	s.h.ConnManager().TagPeer(remote, PeerTag, PeerTagWeight)
 	log.Debugw("Hello received", "peer", remote, "epoch", hmsg.HeaviestTipSetHeight)
+	if fp := s.onHead.Load(); fp != nil {
+		(*fp)(remote, hmsg.HeaviestTipSet, int64(hmsg.HeaviestTipSetHeight))
+	}
 
 	// Close the stream cleanly. We don't bother with a LatencyMessage
 	// reply; we just need the remote to see a clean close so they
