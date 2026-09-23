@@ -126,6 +126,12 @@ jobs:
           files: |
             release/*
           generate_release_notes: true
+          # Tags with a pre-release suffix (v1.10.0-rc1, -beta, -alpha) are
+          # published as GitHub prereleases and never marked latest, so
+          # install.sh (releases/latest/download/...) keeps serving the last
+          # stable release.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}
           body: |
             # Lantern ${{ github.ref_name }}
 
