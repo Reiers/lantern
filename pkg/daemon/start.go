@@ -46,7 +46,6 @@ import (
 	logging "github.com/ipfs/go-log/v2"
 
 	"github.com/Reiers/lantern/build"
-	"github.com/Reiers/lantern/chain/bootstrap"
 	"github.com/Reiers/lantern/chain/ecfinality"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
 	"github.com/Reiers/lantern/chain/fullvalidate"
@@ -728,94 +727,19 @@ func (d *Daemon) startGossipHead(ctx context.Context, store *hstore.Store, src b
 	// whenever at least one corroborating source exists; it self-reports
 	// StatusInsufficient (a no-op alarm) until enough distinct kinds are
 	// reachable, so enabling it broadly is safe.
+	// #160: shared wiring with the standalone daemon (cmd/lantern).
 	{
-		var hcSources []headcheck.HeadSource
-		for _, u := range d.cfg.HeadCheckRPCs {
-			u = strings.TrimSpace(u)
-			if u == "" {
-				continue
-			}
-			hcSources = append(hcSources, headcheck.NewRPCHeadSource("", bootstrap.KindForest, u, "", 0))
-		}
-		// Gateway as an independent kind (unless the operator went
-		// gateway-less). Distinct Kind => real diversity even with one RPC.
-		// (Derived from cfg here since startGossipHead doesn't take the
-		// startInternal-local gw/fallback vars; same resolution logic.)
-		if d.cfg.Gateway != "" {
-			hcSources = append(hcSources, headcheck.NewGatewayHeadSource(d.cfg.Gateway, 0))
-		}
-		// Fallback RPC / Glif as another corroborating source, unless the
-		// operator explicitly went no-fallback (bridge-off purist).
-		if !d.cfg.NoFallbackRPC {
-			hcFallback := d.cfg.FallbackRPC
-			if hcFallback == "" {
-				hcFallback = "https://api.node.glif.io/rpc/v1"
-				if network == build.Calibration {
-					hcFallback = "https://api.calibration.node.glif.io/rpc/v1"
-				}
-			}
-			hcSources = append(hcSources, headcheck.NewRPCHeadSource("glif", bootstrap.KindForest, hcFallback, "", 0))
-			// #153: the gateway proxies Glif, so gateway + Glif is ONE
-			// voter by operator. Add a differently-operated public RPC
-			// (skipped if the operator already points FallbackRPC there).
-			var indep string
-			switch network {
-			case build.Mainnet:
-				indep = "https://api.chain.love/rpc/v1"
-			case build.Calibration:
-				indep = "https://calibration.filfox.info/rpc/v1"
-			}
-			if indep != "" && bootstrap.OperatorOf(indep) != bootstrap.OperatorOf(hcFallback) {
-				hcSources = append(hcSources, headcheck.NewRPCHeadSource("independent-rpc", bootstrap.KindForest, indep, "", 0))
-			}
-		}
-		if len(hcSources) > 0 {
-			// #79 item 2: feed the divergence verdict back to the ingestor
-			// as a head-adoption gate. While the running head diverges from
-			// the independent-source quorum, hold head (no-adopt) instead of
-			// only logging. StatusInsufficient does NOT close the gate: a
-			// node the operator gave too few sources must not freeze head.
-			var hcDiverged atomic.Bool
-			ing.SetHeadAdoptionGate(func() bool { return !hcDiverged.Load() })
-			mon := headcheck.New(headcheck.Config{
-				Local: func() abi.ChainEpoch { return ing.ObservedHead() },
-				// #152: compare tipset keys at head-lookback, not just
-				// height, so a same-height eclipse fork is a DIVERGE.
-				LocalTipSetAt: func(ep abi.ChainEpoch) (headcheck.TipSetRef, bool) {
-					ts, err := store.GetTipSetByHeight(ep)
-					if err != nil || ts == nil {
-						return headcheck.TipSetRef{}, false
-					}
-					return headcheck.TipSetRef{Epoch: ts.Height(), Key: ts.Key(), ParentWeight: ts.ParentWeight()}, true
-				},
-				Sources: hcSources,
-				OnResult: func(r headcheck.Result) {
-					switch r.Status {
-					case headcheck.StatusDiverge:
-						hcDiverged.Store(true)
-						log.Warnw("headcheck: running head DIVERGES from independent sources (possible eclipse/fork); HOLDING head adoption",
-							"localHead", r.LocalHead, "medianExtHead", r.MedianExtHead,
-							"agreeing", r.Agreeing, "disagreeing", r.Disagreeing, "reachable", r.Reachable,
-							"checkpoint", r.CheckpointEpoch, "forkedKinds", r.ForkedKinds)
-					case headcheck.StatusAgree:
-						if hcDiverged.Swap(false) {
-							log.Infow("headcheck: running head re-corroborated; resuming head adoption",
-								"localHead", r.LocalHead, "agreeing", r.Agreeing)
-						}
-					case headcheck.StatusInsufficient:
-						// Too few reachable sources to judge: do not close the
-						// gate (avoid freezing a lightly-corroborated node).
-						hcDiverged.Store(false)
-						log.Debugw("headcheck: head uncorroborated (too few reachable sources)",
-							"localHead", r.LocalHead, "reachable", r.Reachable)
-					}
-				},
-			})
-			mon.Start(ctx)
+		hcSources := headcheck.DefaultSources(headcheck.SourceOptions{
+			Network:       network,
+			ExtraRPCs:     d.cfg.HeadCheckRPCs,
+			Gateway:       d.cfg.Gateway,
+			FallbackRPC:   d.cfg.FallbackRPC,
+			NoFallbackRPC: d.cfg.NoFallbackRPC,
+		})
+		if mon := headcheck.StartGated(ctx, ing, store, hcSources, nil); mon != nil {
 			d.mu.Lock()
 			d.headcheck = mon
 			d.mu.Unlock()
-			log.Infow("running-head divergence monitor started", "sources", len(hcSources), "lookback", headcheck.DefaultLookback)
 		}
 	}
 

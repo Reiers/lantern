@@ -56,6 +56,7 @@ import (
 	"github.com/Reiers/lantern/chain/crosscheck"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
 	"github.com/Reiers/lantern/chain/fullvalidate"
+	"github.com/Reiers/lantern/chain/headcheck"
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	headnotify "github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
@@ -941,6 +942,8 @@ func cmdDaemon(args []string) error {
 	// pkg/daemon Config.NoFallbackRPC for the standalone CLI. The one-time
 	// boot anchor (#54) still uses multi-source agreement (gateway+Glif) and
 	// is separate from runtime fetch counters.
+	headCheckRPCs := fs.String("head-check-rpc", "", "#160: comma-separated extra Lotus-compatible RPC URLs used ONLY to corroborate the running head (never as a head source). Counted per operator (#153).")
+	noHeadCheck := fs.Bool("no-head-check", false, "#160: disable the running-head divergence monitor + adoption gate (NOT recommended).")
 	noFallbackRPC := fs.Bool("no-fallback-rpc", false, "#76 bridge-off: wire no upstream RPC (Glif) fallback. Head=gossipsub-only, cold-blocks=gateway+bitswap. Requires libp2p/gossipsub.")
 	raceFallbackRPC := fs.Bool("race-fallback-rpc", false, "Promote the Glif RPC fallback into the RACE tier (fired concurrently with the gateway/bitswap) instead of a sequential last resort. Use when the configured --gateway is unreachable or slow: otherwise every cold-block fetch pays the gateway's full race timeout before falling to Glif, which serializes a state HAMT walk into minutes. Increases Glif load, so it's off by default (keeps the #53 'Glif last resort' behavior).")
 	fallbackRPCFlag := fs.String("fallback-rpc", "", "Override the daemon's fallback JSON-RPC URL used for chain-fetch, cold-block and combined-source fallback (default: Glif public for the selected --network). Use when Glif rate-limits or blocks the daemon's egress IP; verified alternates for mainnet include https://api.chain.love/rpc/v1, https://filfox.info/rpc/v1, https://rpc.ankr.com/filecoin. Does NOT change the boot-anchor's Glif source (init still requires gateway+Glif agreement for the #54 two-operator anchor). Ignored when --no-fallback-rpc is set.")
@@ -1474,6 +1477,8 @@ func cmdDaemon(args []string) error {
 	// AmbientAutoNAT subsystem on the host respectively.
 	var p2pHost *llibp2p.Host
 	var gossipIngestor *gossipBlockIngestor
+	var headMonitor *headcheck.Monitor // #160
+	_ = headMonitor
 	var helloSvc *hello.Service
 	var xchgSvc *chainxchg.Service
 	var xchgClient *chainxchg.Client
@@ -1654,6 +1659,24 @@ func cmdDaemon(args []string) error {
 					chainAPI.SetBlockPublisher(blockPub)
 				}
 				fmt.Printf("  gossipsub-blocks: subscribed to %s (ingestor active, inline backfill on)\n", network.GossipTopicBlocks())
+				// #160: continuous N-source head quorum + adoption gate.
+				// Previously only the embedded daemon (pkg/daemon) ran this,
+				// so the standalone daemon had no running-head quorum.
+				if !*noHeadCheck {
+					hcSources := headcheck.DefaultSources(headcheck.SourceOptions{
+						Network:       network,
+						ExtraRPCs:     splitCSVFlag(*headCheckRPCs),
+						Gateway:       *gw,
+						FallbackRPC:   *fallbackRPCFlag,
+						NoFallbackRPC: *noFallbackRPC,
+					})
+					if mon := headcheck.StartGated(ctx, ing, store, hcSources, nil); mon != nil {
+						headMonitor = mon
+						fmt.Printf("  head-check: on (%d sources, lookback %d, tipset-key agreement)\n", len(hcSources), headcheck.DefaultLookback)
+					} else {
+						fmt.Printf("  head-check: no corroborating sources configured (running head uncorroborated)\n")
+					}
+				}
 				// #71: let the polling Sync skip its Glif HeadEpoch() poll while
 				// gossip is keeping the store head fresh, so a healthy node stops
 				// hammering (and getting 429'd by) Glif. Window = 60s (2x the
@@ -2576,4 +2599,15 @@ func portInUse(addr string) bool {
 	}
 	_ = c.Close()
 	return true
+}
+
+// splitCSVFlag splits a comma-separated flag value, dropping empties.
+func splitCSVFlag(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
