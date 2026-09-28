@@ -159,28 +159,17 @@ func cmdInit(args []string) error {
 			fmt.Println("  Run `lantern doctor` for a detailed per-source report.")
 			return err
 		}
-		// Wall-clock sanity gate: Filecoin epochs are wall-clock scheduled,
-		// so the expected head epoch is computable from genesis time alone.
-		// A quorum anchor far from it means the sources answered for the
-		// wrong network or served stale finality — either way, writing it
-		// would pin the node to a wrong chain view while claiming success.
-		if exp := filNet.ExpectedHeadEpoch(time.Now().Unix()); exp > 0 {
-			lag := exp - int64(fin.Epoch)
-			if lag < 0 {
-				lag = -lag
-			}
-			const maxAnchorLagEpochs = 2880 // 24h at 30s epochs
-			if lag > maxAnchorLagEpochs && !*allowStaleAnchor {
-				fmt.Println()
-				fmt.Println("✗ Anchor sanity check FAILED — refusing to write trust anchor.")
-				return fmt.Errorf("quorum anchor epoch %d is %d epochs (~%.1f days) away from the wall-clock expected head %d for %s; the sources likely answered for the wrong network or served stale finality (override with --allow-stale-anchor)",
-					fin.Epoch, lag, float64(lag)/2880.0, exp, filNet)
-			}
-			if lag > maxAnchorLagEpochs {
-				fmt.Printf("  ⚠ anchor is %d epochs from wall-clock expected head %d — accepted due to --allow-stale-anchor\n", lag, exp)
-			}
+		// Wall-clock sanity gate (#167): Filecoin epochs are wall-clock
+		// scheduled, so a quorum anchor far from the expected head means
+		// stale F3 finality (or the wrong network). resolveAnchor falls back
+		// to EC multi-source agreement at the live head, or refuses.
+		choice, err := resolveAnchor(ctx, fin, defaultAnchorResolveOpts(filNet, *gateway, *allowStaleAnchor))
+		if err != nil {
+			fmt.Println()
+			fmt.Println("✗ Anchor sanity check FAILED — refusing to write trust anchor.")
+			return err
 		}
-		if err := writeBootstrapAnchor(dir, fin, filNet); err != nil {
+		if err := writeBootstrapAnchorSource(dir, choice.Fin, filNet, choice.Source); err != nil {
 			return fmt.Errorf("persist bootstrap anchor: %w", err)
 		}
 		fmt.Println()
@@ -423,9 +412,16 @@ type BootstrapAnchor struct {
 	StateRoot  string    `json:"stateRoot"`
 	CapturedAt time.Time `json:"capturedAt"`
 	Network    string    `json:"network"`
+	// Source records how the anchor was chosen (#167): "f3-quorum" or
+	// "ec-multi-source". Empty on anchors written before v1.10.0.
+	Source string `json:"source,omitempty"`
 }
 
 func writeBootstrapAnchor(dir string, f bootstrap.Finality, network build.Network) error {
+	return writeBootstrapAnchorSource(dir, f, network, anchorSourceF3)
+}
+
+func writeBootstrapAnchorSource(dir string, f bootstrap.Finality, network build.Network, source string) error {
 	tsks := make([]string, len(f.TipSetKey))
 	for i, c := range f.TipSetKey {
 		tsks[i] = c.String()
@@ -441,6 +437,7 @@ func writeBootstrapAnchor(dir string, f bootstrap.Finality, network build.Networ
 		StateRoot:  f.StateRoot.String(),
 		CapturedAt: time.Now().UTC(),
 		Network:    netStr,
+		Source:     source,
 	}
 	raw, err := json.MarshalIndent(&a, "", "  ")
 	if err != nil {

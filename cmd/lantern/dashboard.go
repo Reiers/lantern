@@ -247,7 +247,15 @@ func (d *dashboardDeps) actionRenewAnchor(ctx context.Context) actionResult {
 			Detail:  map[string]any{"sources": progressLog},
 		}
 	}
-	if err := writeBootstrapAnchor(d.dataDirPath, fin, build.Network(d.network)); err != nil {
+	// #167: never persist stale F3 finality; fall back to EC agreement.
+	choice, err := resolveAnchor(ctx, fin, defaultAnchorResolveOpts(build.Network(d.network), gw, false))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dashboard action renew-anchor: %v\n", err)
+		return actionResult{Status: "error", Message: "anchor sanity check failed: " + err.Error(),
+			Detail: map[string]any{"sources": progressLog}}
+	}
+	fin = choice.Fin
+	if err := writeBootstrapAnchorSource(d.dataDirPath, fin, build.Network(d.network), choice.Source); err != nil {
 		fmt.Fprintf(os.Stderr, "dashboard action renew-anchor: anchor write failed: %v\n", err)
 		return actionResult{Status: "error", Message: "failed to write anchor: " + err.Error()}
 	}

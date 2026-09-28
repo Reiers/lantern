@@ -773,6 +773,29 @@ func independentAnchorRPCForNetwork(n build.Network) string {
 // behaviour for localhost/dev against a trusted endpoint.
 func fetchVerifiedTrustedHead(ctx context.Context, gw string, network build.Network, insecure bool) (*trustedroot.TrustedRoot, error) {
 	now := time.Now().UTC()
+	res, err := verifiedECHead(ctx, gw, network, insecure)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Printf("  anchor:   verified via %s (epoch %d, agreeing sources=%d, f3-checked=%t)\n",
+		res.Method, res.Chosen.Epoch, res.AgreeingSources, res.F3Checked)
+
+	tr := &trustedroot.TrustedRoot{
+		Epoch:        res.Chosen.Epoch,
+		StateRoot:    res.Chosen.StateRoot,
+		TipSetKey:    res.Chosen.TipSetKey,
+		ParentWeight: res.Chosen.ParentWeight,
+		AcceptedAt:   now,
+	}
+	attachF3LatestForNetwork(ctx, tr, network)
+	return tr, nil
+}
+
+// verifiedECHead gathers the live head from independent operators and runs
+// the #54 verifier (multi-source agreement per operator, F3 cross-check when
+// a cert is available). Shared by the daemon boot path and the #167
+// stale-F3 fallback in selectBootstrapAnchor. An empty gw skips the gateway.
+func verifiedECHead(ctx context.Context, gw string, network build.Network, insecure bool) (anchorverify.Result, error) {
 	pol := anchorverify.Policy{
 		MinAgreeingSources:        2,
 		InsecureAllowSingleSource: insecure,
@@ -784,10 +807,11 @@ func fetchVerifiedTrustedHead(ctx context.Context, gw string, network build.Netw
 	// #153: agreement is counted per distinct upstream operator. The
 	// gateway proxies Glif, so gateway + Glif alone is ONE voter; add an
 	// independently operated RPC so a default boot still has two.
-	fetchers := []anchorverify.HeadFetcher{
-		gatewayHeadFetcher{gw: gw},
-		glifHeadFetcher{url: glifURLForNetwork(network), name: "glif"},
+	var fetchers []anchorverify.HeadFetcher
+	if gw != "" {
+		fetchers = append(fetchers, gatewayHeadFetcher{gw: gw})
 	}
+	fetchers = append(fetchers, glifHeadFetcher{url: glifURLForNetwork(network), name: "glif"})
 	if u := independentAnchorRPCForNetwork(network); u != "" {
 		fetchers = append(fetchers, glifHeadFetcher{url: u, name: "independent-rpc"})
 	}
@@ -809,21 +833,10 @@ func fetchVerifiedTrustedHead(ctx context.Context, gw string, network build.Netw
 	res, err := anchorverify.Verify(cands, f3, pol)
 	if err != nil {
 		// Hard fail: do not silently fall back to trusting one source.
-		return nil, fmt.Errorf("boot anchor verification failed (#54): %w "+
+		return anchorverify.Result{}, fmt.Errorf("boot anchor verification failed (#54): %w "+
 			"(set --insecure-anchor to override on a single trusted endpoint)", err)
 	}
-	fmt.Printf("  anchor:   verified via %s (epoch %d, agreeing sources=%d, f3-checked=%t)\n",
-		res.Method, res.Chosen.Epoch, res.AgreeingSources, res.F3Checked)
-
-	tr := &trustedroot.TrustedRoot{
-		Epoch:        res.Chosen.Epoch,
-		StateRoot:    res.Chosen.StateRoot,
-		TipSetKey:    res.Chosen.TipSetKey,
-		ParentWeight: res.Chosen.ParentWeight,
-		AcceptedAt:   now,
-	}
-	attachF3LatestForNetwork(ctx, tr, network)
-	return tr, nil
+	return res, nil
 }
 
 // loadBootstrapAnchorForNetwork reads the persisted quorum anchor
@@ -1142,7 +1155,18 @@ func cmdDaemon(args []string) error {
 			bridgeOff: *noFallbackRPC,
 			maxAge:    *anchorMaxAge,
 			probe: func(pctx context.Context) (bootstrap.Finality, error) {
-				return runBootstrapQuorum(pctx, probeParams)
+				fin, err := runBootstrapQuorum(pctx, probeParams)
+				if err != nil {
+					return fin, err
+				}
+				// #167: a stale F3 winner must not overwrite the anchor.
+				// Bridge-off has no RPC fallback, so no EC head source here:
+				// a stale F3 result becomes a probe failure (fail-warn).
+				choice, err := resolveAnchor(pctx, fin, anchorResolveOpts{network: network})
+				if err != nil {
+					return bootstrap.Finality{}, err
+				}
+				return choice.Fin, nil
 			},
 			write: writeBootstrapAnchor,
 		}); rerr != nil {

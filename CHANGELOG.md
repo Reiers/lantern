@@ -12,6 +12,7 @@ Not yet tagged. Hardening of the running-head quorum on top of v1.9.2.
 - **#160** The standalone `lantern daemon` now runs the headcheck monitor + adoption gate (previously embedded-only). New flags: `--head-check-rpc`, `--no-head-check`.
 - **#162** The adoption gate no longer deadlocks a fresh or lagging node. New `behind` status; local head = max(store head, gossip head).
 - **#154** Bridge-off (`--no-fallback-rpc`) gets a running quorum from libp2p peer groups (Hello + gossip forwarders, grouped by IPv4 /16 / IPv6 /32).
+- **#167** Fresh installs work again while mainnet F3 finality is stale. `init`, `repair`, the dashboard renew action and the bridge-off auto-stale-reset all go through one anchor gate: an F3 quorum winner more than 24h behind the wall-clock head falls back to EC multi-source head agreement (independent operators, #54/#153) at the live head, or is refused. `bootstrap-anchor.json` records `source` (`f3-quorum` / `ec-multi-source`). `doctor` warns on stale F3 finality. `--allow-stale-anchor` keeps its old meaning.
 - **#156** Weight-monotonic guard (child ParentWeight must exceed parent's). `lantern version` prints tag + VCS commit. `/metrics` exports `lantern_build_info`, `lantern_headcheck_*`, `lantern_head_rejected_total{reason}`.
 
 ## v1.9.0 .. v1.9.2 (2026-07-23)
