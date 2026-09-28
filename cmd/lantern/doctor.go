@@ -93,6 +93,12 @@ func cmdDoctor(args []string) error {
 		}
 		return err
 	}
+	if lag, exp, ok := epochLag(filNet, time.Now(), fin.Epoch); ok && lag > maxAnchorLagEpochs {
+		fmt.Printf("✓ Quorum agrees: %s\n", fin)
+		fmt.Printf("⚠ but that F3 finality is %d epochs (~%.1f days) behind wall-clock head %d (#167).\n", lag, float64(lag)/2880.0, exp)
+		fmt.Println("  init/repair will anchor on EC multi-source agreement at the live head instead.")
+		return nil
+	}
 	fmt.Printf("✓ Healthy: %s\n", fin)
 	return nil
 }
@@ -150,11 +156,18 @@ func cmdRepair(args []string) error {
 		fmt.Println("✗ Refusing to overwrite trust anchor — quorum not reached.")
 		return err
 	}
-	if err := writeBootstrapAnchor(dir, fin, filNet); err != nil {
+	// #167: never persist stale F3 finality; fall back to EC agreement.
+	choice, err := resolveAnchor(ctx, fin, defaultAnchorResolveOpts(filNet, *gateway, false))
+	if err != nil {
+		fmt.Println()
+		fmt.Println("✗ Refusing to overwrite trust anchor — anchor sanity check failed.")
+		return err
+	}
+	if err := writeBootstrapAnchorSource(dir, choice.Fin, filNet, choice.Source); err != nil {
 		return err
 	}
 	fmt.Println()
-	fmt.Printf("✓ Trust anchor refreshed: %s\n", fin)
+	fmt.Printf("✓ Trust anchor refreshed (%s): %s\n", choice.Source, choice.Fin)
 	return nil
 }
 
