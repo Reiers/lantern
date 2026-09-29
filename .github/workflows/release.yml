@@ -140,7 +140,7 @@ jobs:
             ## Install (macOS / Linux)
 
             ```sh
-            curl -fsSL https://get.lantern.reiers.io | bash
+            curl -fsSL https://get.golantern.io | bash
             ```
 
             ## Binaries
