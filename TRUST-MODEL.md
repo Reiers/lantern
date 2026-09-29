@@ -134,6 +134,71 @@ semantics for consumers is `finalized = max(ec-finalized, f3-finalized)`.
 A node with a shallow observed window (< 30 epochs of history) reports
 "not computable" rather than an over-confident number.
 
+### 2.8 Running-head quorum (v1.10.0, Milestone 1)
+
+Past the boot anchor, Lantern follows the un-finalized tip from gossip.
+The running-head quorum (`chain/headcheck`) makes sure that tip is the
+one the rest of the network is on, without trusting any single source.
+
+**Every 30 s** (`DefaultInterval`) the monitor asks independent voters
+for their head and compares it with ours at a lookback of 3 epochs:
+
+* **Tipset key, not height** (#152). A voter agrees only if the tipset it
+  reports at the lookback epoch is the one on our canonical chain. A
+  same-height eclipse fork with a different key is a disagreement, not a
+  match.
+* **Independence per operator** (#153). RPC voters are counted per
+  upstream operator, not per URL: the Lantern gateway votes as its
+  upstream (it advertises `upstream` in `/state/root`), so gateway + Glif
+  is one voter. An operator-distinct RPC (chain.love on mainnet, Filfox on
+  calibration, or anything passed via `--head-check-rpc`) adds a second.
+* **Peer groups** (#154). Heads observed from libp2p peers (Hello
+  handshakes and gossip block forwarders) vote too, one vote per network
+  group: IPv4 /16, IPv6 /32. Non-IP transports are ignored (Sybil-cheap);
+  observations older than 10 minutes are dropped. A peer head agrees if
+  it is on our canonical chain or is a sibling of it (same parents);
+  otherwise it is forked. Peers behind our head are not counted unless
+  they are forked. This is what gives a bridge-off node
+  (`--no-fallback-rpc`) a quorum with zero trusted RPC.
+* **Fork choice across sources.** When voters disagree, the candidate
+  backed by the most independent voters wins, then the heaviest
+  `ParentWeight`. At least 2 independent agreeing voters are required
+  (`DefaultMinAgree`).
+
+**The adoption gate.** A `diverge` result closes the gate: the gossip
+head is not advanced until the quorum re-corroborates it. Backfill only
+persists ancestors (#155); moving the head is one guarded decision on the
+tip (fork choice, weight-monotonic check, gate). A node that is simply
+behind reports `behind` and keeps catching up rather than deadlocking
+(#162). Every adopted child must have a strictly larger `ParentWeight`
+than its parent (#156).
+
+**Where it runs.** The standalone `lantern daemon` (#160) with RPC voters
+and peer groups. The embedded `pkg/daemon` runs the RPC voters; it has no
+Hello service yet, so it does not collect peer-group votes (follow-up).
+Disable with `--no-head-check` (not recommended).
+
+**Observability.** `/metrics` exports `lantern_headcheck_status`,
+`lantern_headcheck_voters{outcome}` (agree, disagree, lagging, forked,
+peer_groups), `lantern_headcheck_rounds_total`,
+`lantern_headcheck_diverged_total` and
+`lantern_head_rejected_total{reason}`.
+
+**Boot anchor while F3 is stale** (#167). `init`, `repair`, the dashboard
+renew action and the bridge-off auto-reset anchor on the F3 bootstrap
+quorum when its finality is within 24 h of the wall-clock head. If F3
+finality is older, they anchor on EC multi-source agreement (independent
+operators, same per-operator counting) at the live head, or refuse.
+`bootstrap-anchor.json` records which (`source`).
+
+**Honest boundary.** Network groups raise the cost of faking a peer
+majority; they do not make it impossible. `ParentWeight` is taken from
+headers and only checked for monotonicity, not recomputed (that needs
+power state). The quorum is an eclipse and single-source defence on the
+un-finalized tip; F3 finality (section 2.2) is what fully closes it.
+
+---
+
 ## 3. What Lantern does NOT trust
 
 These are deliberately untrusted. A Lantern node treats responses from any
@@ -159,7 +224,7 @@ Inbound block + message gossip is decoded then validated by the consumer
 messages). Malformed traffic is dropped.
 
 Head adoption additionally applies (v1.9.0): heaviest-ParentWeight fork
-choice, the divergence gate (independent-source head monitor), and
+choice, the running-head quorum and adoption gate (section 2.8), and
 optional head-source corroboration (#80): a head advance requires
 forwarding by N distinct peers or one trusted floor peer. Peers earn
 score through first-delivery history on the blocks/msgs topics (#97) and
@@ -273,7 +338,7 @@ A short answer to "what can attackers controlling X do to a Lantern user?"
 | The default HTTPS gateway (gateway.lantern.reiers.io)         | DoS only. Every byte they serve is locally CID-verified. |
 | The Glif fallback RPC                                        | DoS only. Same verification. |
 | One or more libp2p Bitswap peers                              | DoS only. Same verification. |
-| All currently-connected gossipsub peers (eclipse)             | At most a stale/lighter fork on the *un-finalized* tip, never a chain-rule-violating or finalized-state lie. Defenses stack: heaviest-ParentWeight fork choice (#79) forces an attacker to out-*weight* the real chain (control real winning power) rather than just spam sybil peers; trusted bootstrap/beacon peers are connmgr-protected and un-evictable (#80) so the peer table can't simply be crowded out; the running-head divergence monitor (`chain/headcheck`, #85) cross-checks the head against a diversity of independent observers (counted by source kind) and raises an eclipse alarm on a >3-epoch divergence; and the header-propagation gate only re-gossips CID-verified blocks so a Lantern node can't be turned into an amplifier for a fake chain. F3 finality fully closes the tip exposure once active on mainnet. |
+| All currently-connected gossipsub peers (eclipse)             | At most a stale/lighter fork on the *un-finalized* tip, never a chain-rule-violating or finalized-state lie. Defenses stack: heaviest-ParentWeight fork choice (#79) forces an attacker to out-*weight* the real chain (control real winning power) rather than just spam sybil peers; trusted bootstrap/beacon peers are connmgr-protected and un-evictable (#80) so the peer table can't simply be crowded out; the running-head quorum (`chain/headcheck`, section 2.8) compares the head's tipset key against independent upstream operators and libp2p peer groups and closes the adoption gate on divergence; and the header-propagation gate only re-gossips CID-verified blocks so a Lantern node can't be turned into an amplifier for a fake chain. F3 finality fully closes the tip exposure once active on mainnet. |
 | The operator's wired Bridge (when configured)                 | Wrong `StateCall` receipts and wrong post-execution stateRoots for blocks the operator publishes. NOT: header acceptance, F3, state reads. |
 | The operator's local disk (Badger cache)                      | DoS by corruption. Reads still get re-verified on next access. Loss of mempool history. |
 | The operator's local network                                  | DoS only. Lantern doesn't talk plaintext for anything security-bearing (RPC + gossipsub are TLS / secio). |
