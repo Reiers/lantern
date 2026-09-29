@@ -2,18 +2,35 @@
 
 All notable changes to Lantern.
 
-## Unreleased (Milestone 1: trustless multi-source head quorum)
+## v1.10.0 (2026-09-29) - Milestone 1: trustless multi-source head quorum
 
-Not yet tagged. Hardening of the running-head quorum on top of v1.9.2.
+Lantern no longer trusts a single source for its chain head, neither at boot nor while running. Every head is corroborated by independent operators and libp2p peer groups, checked for fork choice and weight, and refused if it diverges. Upgrade from v1.9.x is drop-in; no config changes are required.
 
-- **#155** Backfill paths persist ancestors only; head adoption (fork choice + divergence gate) is one guarded decision on the tip. Previously a lighter/diverged candidate could walk head onto its ancestors during backfill.
-- **#152** headcheck corroborates the **tipset key** at head-lookback, not just height, and runs cross-source fork choice (most independent voters, then heaviest ParentWeight). A same-height eclipse fork is now a DIVERGE.
-- **#153** Independence is counted per **upstream operator**. The gateway (which proxies Glif) and Glif are one voter. Boot anchor + headcheck add a differently-operated RPC (chain.love mainnet, Filfox calibration). The gateway advertises `upstream` in `/state/root`.
-- **#160** The standalone `lantern daemon` now runs the headcheck monitor + adoption gate (previously embedded-only). New flags: `--head-check-rpc`, `--no-head-check`.
+Install / upgrade: `curl -fsSL https://get.golantern.io | bash`
+
+### Running-head quorum (the M1 deliverable)
+- **#152** headcheck corroborates the **tipset key** at head-lookback, not just the height, and runs cross-source fork choice (most independent voters, then heaviest ParentWeight). A same-height eclipse fork is now a DIVERGE.
+- **#153** Independence is counted per **upstream operator**. The gateway (which proxies Glif) and Glif are one voter. The boot anchor and headcheck add a differently operated RPC (chain.love on mainnet, Filfox on calibration). The gateway advertises `upstream` in `/state/root`.
+- **#154** Bridge-off (`--no-fallback-rpc`) gets a running quorum from libp2p peer groups (Hello + gossip forwarders, grouped by IPv4 /16 and IPv6 /32), so an RPC-free node still has independent corroboration.
+- **#155** Backfill paths only persist ancestors; head adoption (fork choice + divergence gate) is one guarded decision on the tip. Previously a lighter or diverged candidate could walk the head onto its ancestors during backfill.
+- **#156** Weight-monotonic guard: a child's ParentWeight must exceed its parent's.
+- **#160** The standalone `lantern daemon` (what production runs) now starts the headcheck monitor and adoption gate. Previously only the embedded daemon did. New flags: `--head-check-rpc`, `--no-head-check`.
 - **#162** The adoption gate no longer deadlocks a fresh or lagging node. New `behind` status; local head = max(store head, gossip head).
-- **#154** Bridge-off (`--no-fallback-rpc`) gets a running quorum from libp2p peer groups (Hello + gossip forwarders, grouped by IPv4 /16 / IPv6 /32).
-- **#167** Fresh installs work again while mainnet F3 finality is stale. `init`, `repair`, the dashboard renew action and the bridge-off auto-stale-reset all go through one anchor gate: an F3 quorum winner more than 24h behind the wall-clock head falls back to EC multi-source head agreement (independent operators, #54/#153) at the live head, or is refused. `bootstrap-anchor.json` records `source` (`f3-quorum` / `ec-multi-source`). `doctor` warns on stale F3 finality. `--allow-stale-anchor` keeps its old meaning.
-- **#156** Weight-monotonic guard (child ParentWeight must exceed parent's). `lantern version` prints tag + VCS commit. `/metrics` exports `lantern_build_info`, `lantern_headcheck_*`, `lantern_head_rejected_total{reason}`.
+
+### Boot anchor / installer
+- **#167** Fresh installs work while mainnet F3 finality is stale (the latest F3 certificate has been stuck at epoch 5824156, ~203 days behind the head). `init`, `repair`, the dashboard renew action and the bridge-off auto-stale-reset now share one anchor gate: an F3 quorum winner more than 24h behind the wall-clock head falls back to EC multi-source head agreement (independent operators, #54/#153) at the live head, or is refused. Before this, `init` (and so `install.sh`) failed, and the other three paths could persist the stale anchor. `bootstrap-anchor.json` records `source` (`f3-quorum` / `ec-multi-source`). `doctor` warns on stale F3 finality. `--allow-stale-anchor` is unchanged.
+
+### Observability
+- **#156** `lantern version` prints the tag and VCS commit. `/metrics` exports `lantern_build_info`, `lantern_headcheck_status`, `lantern_headcheck_voters{outcome}`, `lantern_headcheck_rounds_total`, `lantern_headcheck_diverged_total` and `lantern_head_rejected_total{reason}`.
+
+### Release process
+- **#166** Tags containing `-` (rc/beta/alpha) publish as GitHub prereleases and are never marked latest, so `install.sh` keeps serving the last stable release. Release notes point at the canonical installer `get.golantern.io`.
+
+### Verification
+- Mainnet soak of the M1 code on production (census + gateway + beacon, v1.10.0-rc1) from 2026-09-23 to 2026-09-29: 0 restarts, headcheck `agree` throughout, 16,548 quorum rounds, 0 diverges in the journal, 150+ libp2p peers.
+- `install.sh` tested on macOS arm64 and Linux amd64 (Mac Pro) from a clean home: anchor, daemon boot, head matching Glif, headcheck `agree` with 40-60 agreeing voters and 0 disagreeing.
+
+Pull requests: #157 #158 #159 #161 #163 #164 #165 #166 #168.
 
 ## v1.9.0 .. v1.9.2 (2026-07-23)
 
