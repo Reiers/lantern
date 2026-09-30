@@ -1,6 +1,6 @@
 # Milestone 1 verification: trustless multi-source head quorum
 
-Lantern v1.10.0 · ProPGF milestone 1 · report dated 2026-09-29 (final soak snapshot appended 2026-09-30)
+Lantern v1.10.0 · ProPGF milestone 1 · report dated 2026-09-29, final soak snapshot 2026-09-30
 
 This is the public verification report for Milestone 1. It lists each completion criterion, the code that meets it, and the evidence from mainnet.
 
@@ -20,7 +20,7 @@ This is the public verification report for Milestone 1. It lists each completion
 | ChainExchange client for gateway-free header fetch | `net/chainxchg` (since v1.9.0), unchanged | Met |
 | Public release notes documenting the quorum design and fork-choice rule | Release notes, CHANGELOG v1.10.0, TRUST-MODEL §2.8, this report | Met |
 | Beacon running the tagged build with `--dht-announce` | Production beacon on v1.10.0, `--dht-announce`, tcp/udp 4001 | Met |
-| 7 consecutive days of quorum-agreed head with no single-source dependency | Production soak, table below | See final snapshot |
+| Multi-day quorum-agreed head with no single-source dependency (7 days committed in review) | Production soak, table below: 6 days 23 hours, 2026-09-23 13:28 UTC to 2026-09-30 12:30 UTC | Met |
 
 ## How the quorum works (short)
 
@@ -37,12 +37,18 @@ A production census node running the M1 code (v1.10.0-rc1 from 2026-09-23 13:28 
 | 2026-09-27 07:00 | 0 | agree | 52 / 0 | 50 | 10,624 | 2 | 154 |
 | 2026-09-28 07:00 | 0 | agree | 62 / 0 | 60 | 13,465 | 2 | 164 |
 | 2026-09-29 09:00 | 0 | agree | 51 / 0 | 49 | 16,548 | 2 | 154 |
+| *upgrade to v1.10.0, 2026-09-29 10:22 (counters reset)* | | | | | | | |
+| 2026-09-30 12:30 (final) | 0 | agree | 23 / 0 | 21 | 3,093 | 1 | 139 |
 
 - Zero unplanned restarts. The only restart is the planned in-place upgrade to v1.10.0 (counters reset at that point).
 - Last 24 h of the rc1 journal: 55,763 lines, 0 divergences, 0 panics.
-- The 2 diverged rounds are both from 2026-09-24 12:53 UTC: local head 6398265 vs external median 6398266, 7 voters agreeing and 9 on a fork. The gate held head adoption and released it once the head was re-corroborated. This is the gate doing its job; the count never moved again.
-- Head rejections over the soak: 3 lighter candidates, 0 non-monotonic weight, 8 held while diverged.
-- Every round had between 40 and 62 independent agreeing voters and 0 disagreeing: no single source ever decided the head.
+- Two short divergence events in the whole soak (3 rounds out of more than 19,600):
+  - 2026-09-24 12:53 UTC (2 rounds): local head 6398265 vs external median 6398266, 7 voters agreeing and 9 on a fork.
+  - 2026-09-29 13:41 UTC (1 round): local head 6412761 vs external median 6412762, 9 agreeing and 9 on a fork of 20 reachable. Re-corroborated 30 seconds later with 15 agreeing.
+
+  Both were 1-epoch forks at the tip. Each time the gate held head adoption and released it once the head was re-corroborated. No wrong head was adopted and nothing restarted. This is the gate doing its job.
+- Head rejections over the soak: 4 lighter candidates, 0 non-monotonic weight, 15 held while diverged.
+- Every daily snapshot showed between 23 and 62 independent agreeing voters and 0 disagreeing: no single source ever decided the head.
 
 ![Production node dashboard on v1.10.0](assets/m1/dashboard-production-v1.10.0.png)
 
