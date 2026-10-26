@@ -178,7 +178,7 @@ most lightweight Filecoin tooling falls back to today.
 | Phase 3  | 1     | Local wallet + sign + send (read-modify-write loop)     |
 | Phase 4  | 1     | Lotus-compat RPC subset (read methods first)            |
 | Phase 5  | 1     | CLI wizard + installer UX                               |
-| Phase 6  | 1     | Hypersync gateway infrastructure on Hetzner             |
+| Phase 6  | 1     | Hypersync gateway infrastructure on a hosted VM          |
 | Phase 7  | 1     | Curio compatibility pass + SP testing                   |
 | Phase 8  | 2     | Polish, public release, docs, hypersync.io              |
 

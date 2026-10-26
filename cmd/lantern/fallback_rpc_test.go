@@ -7,7 +7,7 @@ import (
 )
 
 // fallbackRPCURL: an override always wins; empty override => per-network default.
-// Regression cover for the 2026-07-23 Hetzner census incident where Glif public
+// Regression cover for the 2026-07-23 census incident where Glif public
 // began 403'ing our egress IP and the chain-fetch source had no override path.
 func TestFallbackRPCURL(t *testing.T) {
 	cases := []struct {

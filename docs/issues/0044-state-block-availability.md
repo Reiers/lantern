@@ -4,7 +4,7 @@
 filcensus). Every `eth_call` served from local FEVM execution, zero Glif.
 
 **Engine status (recap):** lantern#43 Stages 1-5 done, v1.6.0→v1.6.4 live on
-cc-smoke. PDPVerifier reads serve locally. The only remaining bridge
+a calibration test deployment. PDPVerifier reads serve locally. The only remaining bridge
 fallbacks are `block not found` on KAMT storage nodes, i.e. the embedded
 Bitswap blockstore hasn't fetched a storage-trie node at the live head yet.
 
@@ -86,7 +86,7 @@ Bitswap RTT.
 
 ## Acceptance
 
-1. cc-smoke runs curio-core with `--vm-bridge-rpc-disable` and PDP +
+1. A calibration test deployment runs curio-core with `--vm-bridge-rpc-disable` and PDP +
    payments read paths complete with **no bridge fallbacks** over a
    sustained run (≥ 1h, ≥ 1 full proving window).
 2. Proof loop unaffected; head-advance latency unchanged within noise.
@@ -104,7 +104,7 @@ Bitswap RTT.
    proxy, then issue 5 read calls (`FIL_CLEANUP_DEPOSIT`,
    `dataSetLive`, `getNextChallengeEpoch`, etc.) and assert
    `bridge_fallback == 0`.
-4. cc-smoke soak: deploy, flip `--vm-bridge-rpc-disable` after the
+4. Calibration test deployment soak: deploy, flip `--vm-bridge-rpc-disable` after the
    prefetch warms, watch counters for 1h+ + 1 proving window.
 
 ## Sequencing
@@ -112,6 +112,6 @@ Bitswap RTT.
 1. Counters + retry wrapper (smallest, immediate value, low risk).
 2. Prefetcher + OnHeadChange hook + config plumbing.
 3. Defaults wiring for embedded mode (curio-core path).
-4. cc-smoke soak with bridge disabled.
+4. Calibration test deployment soak with bridge disabled.
 </content>
 </invoke>

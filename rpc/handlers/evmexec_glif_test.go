@@ -134,7 +134,7 @@ func TestEthCall_LocalIntegration(t *testing.T) {
 }
 
 // TestEthCall_LocalCancunOpcodes replays the two eth_call shapes that
-// missed locally in prod on lantern-m2 with "unsupported opcode 0x5e"
+// missed locally in prod on a calibration test node with "unsupported opcode 0x5e"
 // (MCOPY) and checks local FEVM exec now matches Glif eth_call at the
 // same state. Network-gated: LANTERN_EVM_GLIF_TEST=1.
 func TestEthCall_LocalCancunOpcodes(t *testing.T) {

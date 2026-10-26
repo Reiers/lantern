@@ -24,7 +24,7 @@ import (
 )
 
 // Real calibration fixture for the bridge-off receipt path (stock
-// Curio-PDP on lantern-m2): two txs Curio sent through Lantern.
+// Curio-PDP on a calibration test node): two txs Curio sent through Lantern.
 //
 //	tx1 0xfd05...8865  createDataSet  incl 4189904 (3-block tipset), 10 logs
 //	tx2 0xb3dc...9903  registerProvider incl 4189895 (2-block tipset; node2's

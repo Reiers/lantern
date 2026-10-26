@@ -85,8 +85,8 @@ var pythonReferenceResults = map[int]float64{
 }
 
 // nonFMAReferenceResults are the values produced by Go's math package on
-// x86_64 CPUs without FMA3 (Ivy Bridge and older, e.g. E5-16xx v2 in the
-// Reiers home cluster runner). Generated on `node1-lantern` (10.20.0.11)
+// x86_64 CPUs without FMA3 (Ivy Bridge and older, e.g. E5-16xx v2 on our
+// self-hosted CI runner). Generated on that runner
 // running Go 1.26.4 on 2026-07-23 using tools/refgen/main.go against the
 // same chain data and parameters as the Python reference.
 //

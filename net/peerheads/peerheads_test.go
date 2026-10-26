@@ -34,7 +34,7 @@ func TestGroupOf(t *testing.T) {
 		"/ip4/9.9.9.9/tcp/1":        "ip4:9.9.0.0/16",
 		"/ip6/2001:db8:1::1/tcp/1":  "ip6:2001:db8::/32",
 		"/ip4/127.0.0.1/tcp/1":      "ip:127.0.0.1",
-		"/ip4/10.20.0.11/tcp/1":     "ip:10.20.0.11",
+		"/ip4/10.0.0.11/tcp/1":      "ip:10.0.0.11",
 	}
 	for in, want := range cases {
 		if got := GroupOf(ma(t, in)); got != want {

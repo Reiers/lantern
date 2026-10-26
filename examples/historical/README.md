@@ -9,7 +9,7 @@ one-shot demo that proved a specific capability against live mainnet
 They are kept for historical reference and as worked examples of driving
 the lower-level packages directly. They are **not** part of the product
 build: `cmd/lantern` is the daemon, and live validation now happens via the
-unit/integration tests plus the calibration `cc-smoke` deployment.
+unit/integration tests plus a calibration test deployment.
 
 | Demo | Proved |
 |------|--------|

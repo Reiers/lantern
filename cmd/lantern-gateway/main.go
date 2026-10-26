@@ -24,7 +24,7 @@
 // silently corrupt downstream state.
 //
 // See PHASE2-BLOCKERS.md item B7 for why this isn't a full Forest on the
-// Hetzner box.
+// gateway host.
 
 package main
 

@@ -4,7 +4,7 @@ Status: **SCOPED, not started** · Depends on: #43, #44 (both done) · Blocks: f
 
 ## Why
 After #44 (adaptive warming + deep-trie walk), the **read** path is zero-Glif:
-contract-state `eth_call` serves 100% locally on cc-smoke. The remaining
+contract-state `eth_call` serves 100% locally on a calibration test deployment. The remaining
 bridge dependency is entirely the **write** path. A writing SP (the proof
 loop: InitPP / NextPP / Prove / dataset create / delete) still needs:
 
@@ -86,7 +86,7 @@ reconstruct an ETH-shaped receipt from a Filecoin `MsgLookup`. Lotus's
 - getLogs: scan the header store's receipt/event index for the requested
   range. (Larger; may stay bridge-backed longest.)
 
-### Stage 7 — flip `--vm-bridge-rpc-disable` on cc-smoke
+### Stage 7 — flip `--vm-bridge-rpc-disable` on a calibration test deployment
 - Only after Stages 1-5 verified. Run a full proving window + a
   dataset-create + a delete with the bridge OFF. Watch the #81 watcher
   confirm every tx locally. Calibration before any mainnet claim.
@@ -104,5 +104,5 @@ reconstruct an ETH-shaped receipt from a Filecoin `MsgLookup`. Lotus's
 
 ## Done = 
 `--vm-bridge-rpc-disable` runs a full proof loop (sign → estimate → send →
-confirm) on cc-smoke with zero Glif traffic, verified by the #81 watcher
+confirm) on a calibration test deployment with zero Glif traffic, verified by the #81 watcher
 confirming every tx locally over a full proving window.
