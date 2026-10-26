@@ -1,10 +1,13 @@
 // Package bootstrap implements Lantern's multi-source trust-bootstrap
 // quorum, as specified in INSTALLER-SPEC.md §3.
 //
-// The premise: no single source determines Lantern's trust anchor. We
-// query N independent sources in parallel, ask each "what is the current
-// F3-finalized tipset?", and only accept the answer when ≥quorum sources
-// cryptographically agree on the same (instance, tipsetKey, stateRoot).
+// The premise: no single operator determines Lantern's trust anchor. We
+// query N sources in parallel, ask each "what is the current F3-finalized
+// tipset?", and only accept the answer when sources run by at least
+// quorum DISTINCT OPERATORS agree on the same (instance, tipsetKey,
+// stateRoot) and no responder gave a different answer for the same
+// instance (F10). Several endpoints run by one operator (for example the
+// chain.love RPC and the chain.love libp2p bootstrap peer) are one vote.
 //
 // This is the trust foundation for V1.2 GA: the installer mathematically
 // cannot be fooled by a single compromised gateway, RPC provider, or
@@ -51,6 +54,26 @@ type Source interface {
 	// Implementations should respect ctx and return promptly on
 	// cancellation. Network errors should be wrapped to be diagnosable.
 	LatestFinality(ctx context.Context) (Finality, error)
+}
+
+// OperatorSource is implemented by sources that know which operator runs
+// them (F10). The returned key is compared for equality only; use
+// OperatorOf / OperatorOfMultiaddr to derive it so aliases are applied.
+type OperatorSource interface {
+	Operator() string
+}
+
+// OperatorKey returns the independence key the quorum counts a source
+// under: its Operator() when implemented and non-empty, otherwise a key
+// unique to the source name (an unattributable source is its own
+// operator, which is no worse than the pre-F10 per-endpoint count).
+func OperatorKey(s Source) string {
+	if o, ok := s.(OperatorSource); ok {
+		if op := strings.TrimSpace(o.Operator()); op != "" {
+			return op
+		}
+	}
+	return "source:" + s.Name()
 }
 
 // Kind groups sources for quorum-policy decisions.
@@ -130,6 +153,7 @@ func shortCid(c cid.Cid) string {
 type SourceResult struct {
 	Name     string
 	Kind     Kind
+	Operator string
 	Finality Finality
 	Error    error
 	Duration time.Duration
@@ -144,42 +168,81 @@ func (r SourceResult) OK() bool { return r.Error == nil }
 
 // QuorumResult is the full output of a quorum probe.
 type QuorumResult struct {
-	// Reached is true iff at least Quorum sources agreed on the same
-	// finality.
+	// Reached is true iff sources run by at least Required distinct
+	// operators agreed on the same finality AND no responder returned a
+	// conflicting finality for the same instance.
 	Reached bool
-	// Required is the quorum threshold that was asked for.
+	// Required is the quorum threshold that was asked for, in distinct
+	// operators.
 	Required int
 	// Winning is the finality that reached quorum (zero-value if none).
 	Winning Finality
 	// Agreeing is the names of sources that agreed on Winning.
 	Agreeing []string
+	// AgreeingOperators is the distinct operators behind Agreeing.
+	AgreeingOperators []string
 	// Results is per-source detail (all sources, in completion order).
 	Results []SourceResult
 	// Counted is the number of sources whose answers were actually
 	// tallied (i.e. counted=true and OK).
 	Counted int
-	// Buckets summarises the distinct finalities seen, by count.
+	// CountableOperators is the number of distinct operators among the
+	// sources that could count toward the quorum.
+	CountableOperators int
+	// Buckets summarises the distinct finalities seen, most operators
+	// first.
 	Buckets []Bucket
+	// Conflicts lists every pair of answers that named different
+	// tipsets for the same F3 instance. Any conflict fails the probe.
+	Conflicts []Conflict
 	// Elapsed is the wall-clock time the probe took.
 	Elapsed time.Duration
 }
 
 // Bucket is one distinct (instance, tsk, stateroot) tuple seen during a
-// probe, plus the names of sources that returned it.
+// probe, plus the names and distinct operators of sources that returned
+// it.
 type Bucket struct {
-	Finality Finality
-	Sources  []string
+	Finality  Finality
+	Sources   []string
+	Operators []string
 }
+
+// Conflict records two responders that disagree about the same F3
+// instance. F3 finality is unique per instance (GPBFT safety), so two
+// honest, correctly configured nodes can never produce this; it means a
+// source is lying, broken, or on a different network.
+type Conflict struct {
+	Instance uint64
+	A, B     Bucket
+}
+
+func (c Conflict) String() string {
+	return fmt.Sprintf("instance %d: {%s} say %s, {%s} say %s",
+		c.Instance, strings.Join(c.A.Sources, ", "), c.A.Finality,
+		strings.Join(c.B.Sources, ", "), c.B.Finality)
+}
+
+// DefaultQuorum is the default number of distinct agreeing operators.
+const DefaultQuorum = 3
+
+// DefaultGrace is how long Quorum keeps listening after the threshold is
+// met so a late conflicting answer still fails the probe.
+const DefaultGrace = 3 * time.Second
 
 // QuorumOptions configures a Quorum() run.
 type QuorumOptions struct {
-	// Quorum is the minimum number of agreeing, counted sources required.
-	// Default: 5. Required is enforced before any source is queried;
-	// Quorum() returns ErrInsufficientSources if len(sources_counted) <
-	// Quorum.
+	// Quorum is the minimum number of DISTINCT OPERATORS (see
+	// OperatorKey) whose sources must agree. Default: DefaultQuorum (3).
+	// Quorum() returns ErrInsufficientSources up front if the countable
+	// sources span fewer operators than this.
 	Quorum int
 	// Timeout is the total wall-clock budget. Default: 60s.
 	Timeout time.Duration
+	// Grace is how long to keep collecting answers after the threshold
+	// is met, so a conflicting responder is still seen. Default
+	// DefaultGrace; negative disables (stop as soon as quorum is met).
+	Grace time.Duration
 	// CountGateway: if true, KindLanternGateway sources count toward
 	// quorum. Default false; the Lantern gateway is used for fast block
 	// fetch but is not part of the trust quorum unless the operator opts
@@ -190,130 +253,266 @@ type QuorumOptions struct {
 	Progress func(SourceResult)
 }
 
-// ErrInsufficientSources is returned when fewer countable sources are
-// supplied than the quorum threshold.
-var ErrInsufficientSources = errors.New("bootstrap: fewer countable sources than quorum")
+// ErrInsufficientSources is returned when the countable sources span
+// fewer distinct operators than the quorum threshold.
+var ErrInsufficientSources = errors.New("bootstrap: fewer countable operators than quorum")
 
 // ErrQuorumNotReached is returned when sources respond but no single
-// finality reaches the quorum threshold.
+// finality is backed by enough distinct operators.
 var ErrQuorumNotReached = errors.New("bootstrap: quorum not reached")
 
+// ErrConflict is returned when two responders name different tipsets for
+// the same F3 instance. It is never retried and never overridden by a
+// large agreeing majority: the bootstrap refuses to pick a side.
+var ErrConflict = errors.New("bootstrap: conflicting finality answers")
+
 // Quorum runs all sources in parallel under a single deadline, tallies
-// their answers, and returns a QuorumResult. If at least opts.Quorum
-// counted sources agreed on the same finality, Reached is true and err
-// is nil. Otherwise err is one of ErrInsufficientSources,
-// ErrQuorumNotReached, or context.DeadlineExceeded.
+// their answers by distinct operator, and returns a QuorumResult.
 //
-// Quorum never panics on a misbehaving source; per-source failures are
-// recorded in Results and surface to opts.Progress as they happen.
+// Success requires both:
+//   - one finality backed by >= opts.Quorum distinct operators, and
+//   - zero conflicts: no responder (counted or not) named a different
+//     tipset for an instance some other responder answered.
+//
+// Answers for a different (older or newer) instance are lag, not
+// conflict: they do not count toward the winner and do not fail the probe.
+//
+// Otherwise err is one of ErrInsufficientSources, ErrQuorumNotReached or
+// ErrConflict. Quorum never panics on a misbehaving source; per-source
+// failures are recorded in Results and surface to opts.Progress.
 func Quorum(ctx context.Context, sources []Source, opts QuorumOptions) (*QuorumResult, error) {
 	if opts.Quorum <= 0 {
-		opts.Quorum = 5
+		opts.Quorum = DefaultQuorum
 	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 60 * time.Second
 	}
+	if opts.Grace == 0 {
+		opts.Grace = DefaultGrace
+	}
 
-	// Count how many sources will be tallied at all.
+	counts := func(s Source) bool { return s.Kind() != KindLanternGateway || opts.CountGateway }
+
+	// Count how many distinct operators can be tallied at all.
+	countableOps := map[string]bool{}
 	countable := 0
 	for _, s := range sources {
-		if s.Kind() == KindLanternGateway && !opts.CountGateway {
+		if !counts(s) {
 			continue
 		}
 		countable++
+		countableOps[OperatorKey(s)] = true
 	}
-	if countable < opts.Quorum {
+	if len(countableOps) < opts.Quorum {
 		return &QuorumResult{
-				Required: opts.Quorum,
-			}, fmt.Errorf("%w: have %d countable sources, need %d",
-				ErrInsufficientSources, countable, opts.Quorum)
+				Required:           opts.Quorum,
+				CountableOperators: len(countableOps),
+			}, fmt.Errorf("%w: have %d countable sources from %d distinct operators, need %d operators",
+				ErrInsufficientSources, countable, len(countableOps), opts.Quorum)
 	}
 
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
 
-	type signal struct {
-		i   int
-		res SourceResult
-	}
-	ch := make(chan signal, len(sources))
+	ch := make(chan SourceResult, len(sources))
 	var wg sync.WaitGroup
-	for i, s := range sources {
+	for _, s := range sources {
 		wg.Add(1)
-		go func(i int, s Source) {
+		go func(s Source) {
 			defer wg.Done()
 			t0 := time.Now()
 			fin, err := s.LatestFinality(ctx)
-			counted := s.Kind() != KindLanternGateway || opts.CountGateway
-			ch <- signal{i: i, res: SourceResult{
+			ch <- SourceResult{
 				Name:     s.Name(),
 				Kind:     s.Kind(),
+				Operator: OperatorKey(s),
 				Finality: fin,
 				Error:    err,
 				Duration: time.Since(t0),
-				Counted:  counted,
-			}}
-		}(i, s)
+				Counted:  counts(s),
+			}
+		}(s)
 	}
 	go func() { wg.Wait(); close(ch) }()
 
+	t := newTally()
 	results := make([]SourceResult, 0, len(sources))
-	buckets := map[string]*Bucket{}
 	countedOK := 0
-
-	// Short-circuit: as soon as the winning bucket reaches quorum we can
-	// cancel the context and stop waiting. Other in-flight responses
-	// still arrive via ch — we drain them so per-source detail is
-	// preserved for the user-facing report.
-	var winning *Bucket
-	for sig := range ch {
-		r := sig.res
-		results = append(results, r)
-		if opts.Progress != nil {
-			opts.Progress(r)
+	var graceC <-chan time.Time
+	stopped := false
+	stop := func() {
+		if !stopped {
+			stopped = true
+			cancel() // in-flight sources return promptly with ctx errors
 		}
-		if r.OK() && r.Counted {
-			countedOK++
-			k := r.Finality.Key()
-			b, ok := buckets[k]
+	}
+
+loop:
+	for {
+		select {
+		case r, ok := <-ch:
 			if !ok {
-				b = &Bucket{Finality: r.Finality}
-				buckets[k] = b
+				break loop
 			}
-			b.Sources = append(b.Sources, r.Name)
-			if len(b.Sources) >= opts.Quorum && winning == nil {
-				w := b
-				winning = w
-				cancel() // stop the deadline timer / in-flight queries
+			results = append(results, r)
+			if opts.Progress != nil {
+				opts.Progress(r)
 			}
+			if !r.OK() {
+				continue
+			}
+			if r.Counted {
+				countedOK++
+			}
+			t.add(r)
+			if len(t.conflicts) > 0 {
+				stop() // fail fast: nothing can make this probe succeed
+				continue
+			}
+			if graceC == nil && !stopped && t.bestOps() >= opts.Quorum {
+				if opts.Grace < 0 {
+					stop()
+				} else {
+					timer := time.NewTimer(opts.Grace)
+					defer timer.Stop()
+					graceC = timer.C
+				}
+			}
+		case <-graceC:
+			graceC = nil
+			stop()
 		}
 	}
 
 	out := &QuorumResult{
-		Required: opts.Quorum,
-		Results:  results,
-		Counted:  countedOK,
-		Elapsed:  time.Since(start),
+		Required:           opts.Quorum,
+		Results:            results,
+		Counted:            countedOK,
+		CountableOperators: len(countableOps),
+		Buckets:            t.sortedBuckets(),
+		Conflicts:          t.conflicts,
+		Elapsed:            time.Since(start),
 	}
-	for _, b := range buckets {
-		out.Buckets = append(out.Buckets, *b)
+	if len(out.Conflicts) > 0 {
+		msgs := make([]string, 0, len(out.Conflicts))
+		for _, c := range out.Conflicts {
+			msgs = append(msgs, c.String())
+		}
+		return out, fmt.Errorf("%w: %s", ErrConflict, strings.Join(msgs, "; "))
 	}
-	sort.Slice(out.Buckets, func(i, j int) bool {
-		return len(out.Buckets[i].Sources) > len(out.Buckets[j].Sources)
-	})
-	if winning != nil {
+	if len(out.Buckets) > 0 && len(out.Buckets[0].Operators) >= opts.Quorum {
+		w := out.Buckets[0]
 		out.Reached = true
-		out.Winning = winning.Finality
-		out.Agreeing = append([]string(nil), winning.Sources...)
+		out.Winning = w.Finality
+		out.Agreeing = append([]string(nil), w.Sources...)
+		out.AgreeingOperators = append([]string(nil), w.Operators...)
 		return out, nil
 	}
-	if ctx.Err() != nil && countedOK < opts.Quorum {
-		return out, fmt.Errorf("%w: %v (got %d/%d counted responses)",
-			ErrQuorumNotReached, ctx.Err(), countedOK, opts.Quorum)
+	best := 0
+	if len(out.Buckets) > 0 {
+		best = len(out.Buckets[0].Operators)
 	}
-	return out, fmt.Errorf("%w: no single tipset reached %d sources (countable=%d, counted=%d)",
-		ErrQuorumNotReached, opts.Quorum, countable, countedOK)
+	return out, fmt.Errorf("%w: best answer was backed by %d of %d required distinct operators (%d of %d sources answered, %d distinct operators reachable)",
+		ErrQuorumNotReached, best, opts.Quorum, countedOK, countable, respondingOperators(results))
+}
+
+// tally buckets answers and detects same-instance conflicts. Counted and
+// non-counted answers both feed conflict detection; only counted answers
+// back a bucket's operator set.
+type tally struct {
+	buckets   map[string]*bucketAcc
+	byInst    map[uint64][]string // instance -> bucket keys seen
+	conflicts []Conflict
+}
+
+type bucketAcc struct {
+	b   Bucket
+	ops map[string]bool
+}
+
+func newTally() *tally {
+	return &tally{buckets: map[string]*bucketAcc{}, byInst: map[uint64][]string{}}
+}
+
+func (t *tally) add(r SourceResult) {
+	k := r.Finality.Key()
+	acc, ok := t.buckets[k]
+	if !ok {
+		acc = &bucketAcc{b: Bucket{Finality: r.Finality}, ops: map[string]bool{}}
+		t.buckets[k] = acc
+		inst := r.Finality.Instance
+		for _, other := range t.byInst[inst] {
+			t.conflicts = append(t.conflicts, Conflict{Instance: inst, A: t.buckets[other].snapshot(), B: Bucket{Finality: r.Finality, Sources: []string{r.Name}}})
+		}
+		t.byInst[inst] = append(t.byInst[inst], k)
+	}
+	acc.b.Sources = append(acc.b.Sources, r.Name)
+	if r.Counted && !acc.ops[r.Operator] {
+		acc.ops[r.Operator] = true
+		acc.b.Operators = append(acc.b.Operators, r.Operator)
+		sort.Strings(acc.b.Operators)
+	}
+}
+
+func (a *bucketAcc) snapshot() Bucket {
+	b := a.b
+	b.Sources = append([]string(nil), a.b.Sources...)
+	b.Operators = append([]string(nil), a.b.Operators...)
+	return b
+}
+
+func (t *tally) bestOps() int {
+	best := 0
+	for _, a := range t.buckets {
+		if n := len(a.b.Operators); n > best {
+			best = n
+		}
+	}
+	return best
+}
+
+func (t *tally) sortedBuckets() []Bucket {
+	out := make([]Bucket, 0, len(t.buckets))
+	for _, a := range t.buckets {
+		out = append(out, a.snapshot())
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if len(out[i].Operators) != len(out[j].Operators) {
+			return len(out[i].Operators) > len(out[j].Operators)
+		}
+		if len(out[i].Sources) != len(out[j].Sources) {
+			return len(out[i].Sources) > len(out[j].Sources)
+		}
+		return out[i].Finality.Instance > out[j].Finality.Instance
+	})
+	return out
+}
+
+func respondingOperators(rs []SourceResult) int {
+	ops := map[string]bool{}
+	for _, r := range rs {
+		if r.OK() && r.Counted {
+			ops[r.Operator] = true
+		}
+	}
+	return len(ops)
+}
+
+// FailedSources returns the sources that errored, excluding the ones the
+// driver itself cancelled after the outcome was decided.
+func (r *QuorumResult) FailedSources() []SourceResult {
+	if r == nil {
+		return nil
+	}
+	var out []SourceResult
+	for _, s := range r.Results {
+		if s.Error == nil || (r.Reached && errors.Is(s.Error, context.Canceled)) {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // FormatReport renders a multi-line human-readable summary of a
@@ -324,32 +523,47 @@ func FormatReport(r *QuorumResult) string {
 		return "(no result)"
 	}
 	var b strings.Builder
-	if r.Reached {
-		fmt.Fprintf(&b, "✓ Quorum reached (%d/%d agree): %s\n",
-			len(r.Agreeing), r.Required, r.Winning)
-	} else {
-		fmt.Fprintf(&b, "✗ Quorum NOT reached: best bucket had %s\n", bestBucketSize(r))
+	switch {
+	case r.Reached:
+		fmt.Fprintf(&b, "✓ Quorum reached: %d distinct operators agree (need %d): %s\n",
+			len(r.AgreeingOperators), r.Required, r.Winning)
+		fmt.Fprintf(&b, "  Operators: %s\n", strings.Join(r.AgreeingOperators, ", "))
+	case len(r.Results) == 0 && r.CountableOperators < r.Required:
+		fmt.Fprintf(&b, "✗ Not probed: only %d distinct operators configured, %d required\n", r.CountableOperators, r.Required)
+		return b.String()
+	case len(r.Conflicts) > 0:
+		fmt.Fprintf(&b, "✗ CONFLICT: sources returned different finalized tipsets for the same F3 instance\n")
+	default:
+		fmt.Fprintf(&b, "✗ Quorum NOT reached: %s\n", bestBucketSize(r))
 	}
-	fmt.Fprintf(&b, "  Elapsed: %s, sources counted: %d/%d\n", r.Elapsed, r.Counted, len(r.Results))
+	fmt.Fprintf(&b, "  Elapsed: %s, sources answered: %d/%d, distinct operators reachable: %d/%d\n",
+		r.Elapsed.Round(time.Millisecond), r.Counted, len(r.Results), respondingOperators(r.Results), r.CountableOperators)
 	fmt.Fprintln(&b, "  Per-source:")
 	for _, s := range r.Results {
 		mark := "✓"
 		extra := s.Finality.String()
-		if s.Error != nil {
+		switch {
+		case s.Error != nil && r.Reached && errors.Is(s.Error, context.Canceled):
+			mark = "·"
+			extra = "not needed (quorum already reached)"
+		case s.Error != nil:
 			mark = "✗"
 			extra = s.Error.Error()
-		} else if !s.Counted {
+		case !s.Counted:
 			mark = "·"
 			extra = extra + " (not counted)"
 		}
-		fmt.Fprintf(&b, "    %s [%s] %s — %s (%s)\n",
-			mark, s.Kind, s.Name, extra, s.Duration.Round(time.Millisecond))
+		fmt.Fprintf(&b, "    %s [%s] %s {%s}: %s (%s)\n",
+			mark, s.Kind, s.Name, s.Operator, extra, s.Duration.Round(time.Millisecond))
+	}
+	for _, c := range r.Conflicts {
+		fmt.Fprintf(&b, "  CONFLICT %s\n", c)
 	}
 	if !r.Reached && len(r.Buckets) > 1 {
-		fmt.Fprintln(&b, "  Divergence — distinct answers:")
+		fmt.Fprintln(&b, "  Distinct answers:")
 		for i, bk := range r.Buckets {
-			fmt.Fprintf(&b, "    [%d] %s — %d sources: %s\n",
-				i, bk.Finality, len(bk.Sources), strings.Join(bk.Sources, ", "))
+			fmt.Fprintf(&b, "    [%d] %s: %d operators (%s) via %s\n",
+				i, bk.Finality, len(bk.Operators), strings.Join(bk.Operators, ", "), strings.Join(bk.Sources, ", "))
 		}
 	}
 	return b.String()
@@ -360,5 +574,6 @@ func bestBucketSize(r *QuorumResult) string {
 		return "no successful sources"
 	}
 	b := r.Buckets[0]
-	return fmt.Sprintf("%d/%d agree on %s", len(b.Sources), r.Required, b.Finality)
+	return fmt.Sprintf("best answer backed by %d/%d distinct operators (%s): %s",
+		len(b.Operators), r.Required, strings.Join(b.Operators, ", "), b.Finality)
 }

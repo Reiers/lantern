@@ -219,10 +219,10 @@ func (d *dashboardDeps) actionRenewAnchor(ctx context.Context) actionResult {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	fmt.Fprintln(os.Stderr, "dashboard action renew-anchor: running 5-of-N bootstrap quorum probe...")
+	fmt.Fprintln(os.Stderr, "dashboard action renew-anchor: running operator-aware bootstrap quorum probe...")
 	var progressLog []string
 	fin, err := runBootstrapQuorum(ctx, bootstrapParams{
-		Quorum:       5,
+		Quorum:       bootstrap.DefaultQuorum,
 		Timeout:      60 * time.Second,
 		Gateway:      gw,
 		CountGateway: false,

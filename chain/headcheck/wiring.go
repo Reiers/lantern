@@ -50,10 +50,14 @@ func GlifURL(n build.Network) string {
 
 // IndependentRPCURL returns a public Lotus-compatible RPC run by a
 // different operator than Glif (#153), or "" when none is known.
+//
+// F10: mainnet used chain.love here, but Glif is served from chain.love
+// infrastructure (bootstrap.operatorAliases), so that pair was one voter.
+// Filfox runs its own Lotus nodes on both networks.
 func IndependentRPCURL(n build.Network) string {
 	switch n {
 	case build.Mainnet:
-		return "https://api.chain.love/rpc/v1"
+		return "https://filfox.info/rpc/v1"
 	case build.Calibration:
 		return "https://calibration.filfox.info/rpc/v1"
 	}

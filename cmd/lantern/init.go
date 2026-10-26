@@ -120,7 +120,7 @@ func initNextSteps(n build.Network) []string {
 func cmdInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	noWallet := fs.Bool("no-wallet", false, "Skip creating a wallet")
-	quorum := fs.Int("bootstrap-quorum", 0, "Number of agreeing sources required before writing the trust anchor (≥1). Set to 0 to use the network-default (mainnet=5, calibration=3) or skip the quorum check with --bootstrap-quorum=-1 (NOT recommended outside testing).")
+	quorum := fs.Int("bootstrap-quorum", 0, "Number of DISTINCT OPERATORS whose sources must agree before writing the trust anchor (endpoints run by one operator count once; any conflicting answer fails regardless). 0 = network default (3). --bootstrap-quorum=-1 skips the check (NOT recommended outside testing; the daemon then refuses to boot without --allow-rpc-anchor).")
 	timeout := fs.Duration("bootstrap-timeout", 60*time.Second, "Total wall-clock budget for the bootstrap quorum")
 	gateway := fs.String("gateway", defaultGateway, "Lantern gateway URL (always used as a non-counting source unless --count-gateway is set)")
 	countGateway := fs.Bool("count-gateway", false, "Count the Lantern gateway in the quorum tally (default false; not recommended)")
@@ -138,16 +138,10 @@ func cmdInit(args []string) error {
 		return err
 	}
 	applyAddressNetwork(filNet)
-	// Resolve the quorum default based on the selected network. Mainnet
-	// has 5+ independent public sources; calibration today has 1
-	// (Glif calibration). We drop to 3-of-N for calibration to allow
-	// libp2p sources to make up the quorum.
+	// F10: the quorum counts distinct operators (see
+	// defaultBootstrapQuorum and TRUST-MODEL.md).
 	if *quorum == 0 {
-		if filNet == build.Calibration {
-			*quorum = 3
-		} else {
-			*quorum = 5
-		}
+		*quorum = defaultBootstrapQuorum(filNet)
 	} else if *quorum < 0 {
 		*quorum = 0 // explicit 'skip' signal
 	}
@@ -180,7 +174,7 @@ func cmdInit(args []string) error {
 
 	if *quorum > 0 {
 		fmt.Println("▸ Bootstrap quorum — establishing chain head from independent sources")
-		fmt.Printf("    Required agreement: %d sources, timeout %s\n", *quorum, *timeout)
+		fmt.Printf("    Required agreement: %d distinct operators, no conflicting answers, timeout %s\n", *quorum, *timeout)
 
 		fin, err := runBootstrapQuorum(ctx, bootstrapParams{
 			Quorum:       *quorum,
@@ -197,7 +191,7 @@ func cmdInit(args []string) error {
 		if err != nil {
 			fmt.Println()
 			fmt.Println("✗ Bootstrap quorum FAILED — refusing to write trust anchor.")
-			fmt.Println("  Run `lantern doctor` for a detailed per-source report.")
+			fmt.Println("  `lantern daemon` will not start until an anchor exists; see the hints above.")
 			return err
 		}
 		// Wall-clock sanity gate (#167): Filecoin epochs are wall-clock
@@ -341,8 +335,8 @@ func runBootstrapQuorum(ctx context.Context, p bootstrapParams) (bootstrap.Final
 		SourceTimeout:         min(p.Timeout, 25*time.Second),
 	})
 
-	fmt.Printf("    %d sources assembled (libp2p=%d, forest=%d, user=%d, gateway=%d)\n",
-		len(srcs), countKind(srcs, bootstrap.KindLibp2p),
+	fmt.Printf("    %d sources assembled from %d distinct operators (libp2p=%d, rpc=%d, user=%d, gateway=%d)\n",
+		len(srcs), countOperators(srcs, p.CountGateway), countKind(srcs, bootstrap.KindLibp2p),
 		countKind(srcs, bootstrap.KindForest),
 		countKind(srcs, bootstrap.KindUser),
 		countKind(srcs, bootstrap.KindLanternGateway))
@@ -376,13 +370,16 @@ func runBootstrapQuorum(ctx context.Context, p bootstrapParams) (bootstrap.Final
 		}
 		// Do not retry on user cancellation, arg errors, etc; only on
 		// quorum-shape errors that are known to be transient.
-		if !errors.Is(err, bootstrap.ErrQuorumNotReached) && !errors.Is(err, bootstrap.ErrInsufficientSources) {
+		// ErrInsufficientSources is static (too few operators configured)
+		// and ErrConflict is a security signal: neither is retried.
+		if !errors.Is(err, bootstrap.ErrQuorumNotReached) {
 			break
 		}
 	}
 	fmt.Println()
 	fmt.Print(bootstrap.FormatReport(res))
 	if err != nil {
+		fmt.Print(quorumFailureHint(res, err, p))
 		return bootstrap.Finality{}, err
 	}
 	return res.Winning, nil

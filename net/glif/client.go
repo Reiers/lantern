@@ -29,6 +29,7 @@ import (
 	"github.com/ipfs/go-cid"
 
 	"github.com/Reiers/lantern/chain/types"
+	"github.com/Reiers/lantern/internal/buildinfo"
 	"github.com/Reiers/lantern/state/hamt"
 )
 
@@ -65,6 +66,7 @@ func (c *Client) rpcCall(ctx context.Context, method string, params []any, out a
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", buildinfo.HTTPUserAgent())
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		return err

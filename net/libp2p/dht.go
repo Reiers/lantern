@@ -43,6 +43,7 @@ import (
 	"github.com/multiformats/go-multiaddr"
 
 	"github.com/Reiers/lantern/build"
+	"github.com/Reiers/lantern/net/dnsaddr"
 )
 
 // DHTOptions configures the Kademlia client.
@@ -139,6 +140,8 @@ func (h *Host) EnableDHT(ctx context.Context, opts DHTOptions) error {
 	}
 	h.mu.Unlock()
 	opts.applyDefaults()
+	// F10: /dnsaddr bootstrap roots -> /p2p multiaddrs (see host.New).
+	opts.BootstrapPeers = dnsaddr.ExpandStrings(ctx, opts.BootstrapPeers)
 
 	// Client mode: we participate in queries but don't serve them.
 	//

@@ -27,6 +27,7 @@ import (
 	"github.com/ipfs/go-cid"
 
 	"github.com/Reiers/lantern/chain/types"
+	"github.com/Reiers/lantern/internal/buildinfo"
 )
 
 // ForestBridge talks JSON-RPC to a Forest (or Lotus) full node.
@@ -106,6 +107,7 @@ func (f *ForestBridge) ComputeStateRoot(ctx context.Context, base cid.Cid, epoch
 		return cid.Undef, nil, fmt.Errorf("ForestBridge: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", buildinfo.HTTPUserAgent())
 	if f.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+f.Token)
 	}
@@ -248,6 +250,7 @@ func (f *ForestBridge) RawJSONRPC(ctx context.Context, method string, params jso
 		return nil, fmt.Errorf("ForestBridge: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", buildinfo.HTTPUserAgent())
 	if f.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+f.Token)
 	}
