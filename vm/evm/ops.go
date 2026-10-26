@@ -518,3 +518,79 @@ func min64safeShift(a *uint256.Int) uint64 {
 	}
 	return a.Uint64()
 }
+
+// mcopyMaxBytes caps a single MCOPY's memory expansion. Real FEVM gas
+// limits keep memory far below this; the cap only guards the local
+// interpreter (which does not meter memory gas) against a pathological
+// size operand.
+const mcopyMaxBytes = 32 << 20
+
+// opMcopy implements EIP-5656 MCOPY(dst, src, size): copy size bytes of
+// memory from src to dst with memmove semantics (overlap safe), expanding
+// memory to cover both ranges.
+func (ip *interpreter) opMcopy() error {
+	dst, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	src, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	size, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	if size.IsZero() {
+		return nil
+	}
+	if !size.IsUint64() || !src.IsUint64() || !dst.IsUint64() ||
+		size.Uint64() > mcopyMaxBytes || src.Uint64() > mcopyMaxBytes || dst.Uint64() > mcopyMaxBytes {
+		return fmt.Errorf("evm: MCOPY operands out of range (dst %s, src %s, size %s)", dst.Hex(), src.Hex(), size.Hex())
+	}
+	n := size.Uint64()
+	ip.mem.expand(src.Uint64(), n)
+	data := ip.mem.get(src.Uint64(), n) // copy, so overlap is safe
+	ip.mem.set(dst.Uint64(), data)
+	return nil
+}
+
+// opTload implements EIP-1153 TLOAD: transient storage reads, zero unless
+// written earlier in this call.
+func (ip *interpreter) opTload() error {
+	key, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	if ip.ov != nil && ip.ov.transient != nil {
+		if m, ok := ip.ov.transient[ip.self]; ok {
+			return ip.stack.push(m[key])
+		}
+	}
+	return ip.stack.push(uint256.Int{})
+}
+
+// opTstore implements EIP-1153 TSTORE into the ephemeral overlay.
+func (ip *interpreter) opTstore() error {
+	key, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	val, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	if ip.ov == nil {
+		return nil
+	}
+	if ip.ov.transient == nil {
+		ip.ov.transient = make(map[Address]map[uint256.Int]uint256.Int)
+	}
+	m, ok := ip.ov.transient[ip.self]
+	if !ok {
+		m = make(map[uint256.Int]uint256.Int)
+		ip.ov.transient[ip.self] = m
+	}
+	m[key] = val
+	return nil
+}

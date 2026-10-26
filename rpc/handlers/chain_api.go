@@ -95,6 +95,9 @@ type ChainAPI struct {
 	// eth_getTransactionReceipt / eth_getTransactionByHash walk. Zero means
 	// LANTERN_ETH_TX_LOOKBACK or the 2000-epoch default (eth_tx_local.go).
 	EthTxLookback abi.ChainEpoch
+	// EthTxLookupTimeout bounds one local receipt / tx-by-hash lookup. Zero
+	// means LANTERN_ETH_TX_LOOKUP_TIMEOUT (seconds) or 20s.
+	EthTxLookupTimeout time.Duration
 	// ethTxC caches per-tipset execution-ordered message indexes and
 	// emitter eth addresses for the local tx lookups.
 	ethTxCacheOnce sync.Once

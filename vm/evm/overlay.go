@@ -26,6 +26,10 @@ import "github.com/holiman/uint256"
 type overlay struct {
 	// storage maps contract address -> slot -> value for SSTORE writes.
 	storage map[Address]map[uint256.Int]uint256.Int
+	// transient maps contract address -> slot -> value for TSTORE writes
+	// (EIP-1153). Scoped to the whole top-level call like a tx, so shared
+	// by sub-calls; starts empty, discarded with the overlay.
+	transient map[Address]map[uint256.Int]uint256.Int
 }
 
 func newOverlay() *overlay {
