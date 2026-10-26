@@ -286,6 +286,8 @@ func TestEthTxLocal_ReceiptsMatchLotus(t *testing.T) {
 		if err := json.Unmarshal(glif[tc.glifKey], &want); err != nil {
 			t.Fatal(err)
 		}
+		// Glif may have served Forest; compare against the Lotus rendering.
+		want = asLotusShape(want)
 		if d := diffEthJSON(tc.glifKey, want, normJSON(t, got)); len(d) > 0 {
 			t.Errorf("%s: %d field diffs vs Lotus:\n  %s", tc.name, len(d), strings.Join(d, "\n  "))
 		}

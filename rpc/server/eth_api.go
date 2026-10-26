@@ -236,9 +236,25 @@ func keccak256(data []byte) []byte {
 	return h.Sum(nil)
 }
 
-// EthGetTransactionByBlockNumberAndIndex forwards to the VMBridge.
+// EthGetTransactionByBlockNumberAndIndex returns the index-th tx of a
+// block (local when a block getter is mounted, else the VMBridge).
 func (e *ethAPI) EthGetTransactionByBlockNumberAndIndex(ctx context.Context, blockParam string, index string) (any, error) {
 	return e.full.EthGetTransactionByBlockNumberAndIndex(ctx, blockParam, index)
+}
+
+// EthGetTransactionByBlockHashAndIndex is the by-hash variant.
+func (e *ethAPI) EthGetTransactionByBlockHashAndIndex(ctx context.Context, blockHash string, index string) (any, error) {
+	return e.full.EthGetTransactionByBlockHashAndIndex(ctx, blockHash, index)
+}
+
+// EthGetBlockTransactionCountByNumber returns a block's message count.
+func (e *ethAPI) EthGetBlockTransactionCountByNumber(ctx context.Context, blockParam string) (string, error) {
+	return e.full.EthGetBlockTransactionCountByNumber(ctx, blockParam)
+}
+
+// EthGetBlockTransactionCountByHash is the by-hash variant.
+func (e *ethAPI) EthGetBlockTransactionCountByHash(ctx context.Context, blockHash string) (string, error) {
+	return e.full.EthGetBlockTransactionCountByHash(ctx, blockHash)
 }
 
 // EthGetCode forwards to the VMBridge.

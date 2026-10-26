@@ -233,14 +233,20 @@ func (c *ChainAPI) NetListening(_ context.Context) (bool, error) {
 	return c.NetInfoSource.Listening(), nil
 }
 
-// EthBlockNumber returns the current head epoch as a 0x-prefixed hex
-// string. Lantern doesn't run an FEVM block-number index, so this just
-// mirrors the Filecoin chain epoch — which is what Curio's webui uses for
-// the "Eth block height" display when no separate index is available.
-func (c *ChainAPI) EthBlockNumber(_ context.Context) (string, error) {
+// EthBlockNumber returns the latest EXECUTED eth block number, like
+// Lotus: the height of the head's parent tipset. The head itself has no
+// receipts yet, so it is only reachable as "pending"; eth_getBlockByNumber
+// with this number (or "latest") resolves to the same tipset.
+func (c *ChainAPI) EthBlockNumber(ctx context.Context) (string, error) {
 	var epoch int64
 	if c.HeaderStore != nil {
 		epoch = int64(c.HeaderStore.HeadEpoch())
+		if head := c.HeaderStore.Head(); head != nil && !head.Parents().IsEmpty() {
+			epoch = int64(head.Height()) - 1
+			if bh, err := c.HeaderStore.Get(head.Parents().Cids()[0]); err == nil && bh != nil {
+				epoch = int64(bh.Height)
+			}
+		}
 	} else if c.Trusted != nil {
 		epoch = int64(c.Trusted.Epoch)
 	}
@@ -444,8 +450,13 @@ func (c *ChainAPI) EthGetBalance(ctx context.Context, addrHex string, _ any) (st
 // store doesn't carry full message bodies, only block headers and
 // chain structure.
 //
-// blockParam accepts: 0x-hex epoch, "latest", "earliest", "pending",
-// "safe", "finalized". All non-numeric values resolve to head.
+// blockParam accepts: 0x-hex epoch, "latest", "pending", "safe",
+// "finalized" with Lotus semantics (see eth_block_local.go): latest is
+// the head's parent, pending the head, "earliest" is unsupported.
+//
+// With a block getter the block is built locally with its transactions
+// (eth_block_local.go, Curio's reorg check needs them); otherwise the
+// bridge, then a header-only block, are used.
 //
 // Closes part of lantern#29.
 func (c *ChainAPI) EthGetBlockByNumber(ctx context.Context, blockParam string, fullTx bool) (any, error) {
@@ -472,6 +483,16 @@ func (c *ChainAPI) EthGetBlockByNumber(ctx context.Context, blockParam string, f
 		return nil, xerrors.New("header store not configured (and no VM bridge available for fallback)")
 	}
 
+	if out, served, err := c.localEthGetBlockByNumber(ctx, blockParam, fullTx); served {
+		return out, err
+	}
+	if c.BlockGetter != nil && c.Bridge != nil {
+		return c.forwardEth(ctx, "eth_getBlockByNumber", []any{blockParam, fullTx})
+	}
+
+	// Header-only fallback (no block getter mounted): transactions are
+	// not available, so the block claims none (transactionsRoot =
+	// EmptyRootHash keeps strict go-ethereum parsing consistent).
 	var epoch int64
 	switch blockParam {
 	case "earliest":
@@ -498,58 +519,26 @@ func (c *ChainAPI) EthGetBlockByNumber(ctx context.Context, blockParam string, f
 	return tipsetToEthBlock(ts), nil
 }
 
-// tipsetToEthBlock converts a Lantern TipSet to the ETH-shaped block
-// dict used by eth_getBlockByNumber + eth_subscribe(newHeads). Extracted
-// from EthGetBlockByNumber so both call sites share the exact same
-// reshape.
-//
-// All address + hash fields go through the ETH-shape helpers so strict
-// ETH parsers (e.g. go-ethereum types.Header) can JSON-unmarshal the
-// result. Filecoin CIDs become 32-byte hex hashes (via EthHashFromCid).
-// The miner f0-actor becomes 0xff||be64(id). The original CIDs are
-// surfaced in filecoinTipsetCids for callers that know about Filecoin.
-//
-// baseFeePerGas is the parent's base fee (same as the current's on
-// Filecoin since base fee is consensus-determined per tipset).
+// tipsetToEthBlock is the header-only eth block for ts (newHeads and the
+// no-block-getter fallback): the Lotus NewEthBlock header (hash = tipset
+// key CID, see eth_block_local.go) without transactions, gasUsed 0 and
+// the "unknown" full bloom. transactionsRoot is EmptyRootHash so strict
+// go-ethereum parsing accepts the empty list. The original block CIDs
+// are surfaced in filecoinTipsetCids for callers that know about
+// Filecoin.
 func tipsetToEthBlock(ts *types.TipSet) map[string]any {
 	blocks := ts.Blocks()
 	if len(blocks) == 0 {
 		return nil
 	}
-	b := blocks[0]
-
 	cidStrs := make([]string, len(blocks))
 	for i, blk := range blocks {
 		cidStrs[i] = blk.Cid().String()
 	}
-
-	baseFeeHex := "0x0"
-	if b.ParentBaseFee.Int != nil {
-		baseFeeHex = "0x" + b.ParentBaseFee.Int.Text(16)
-	}
-	return map[string]any{
-		"number":             fmt.Sprintf("0x%x", int64(b.Height)),
-		"hash":               EthHashFromCid(b.Cid()),
-		"parentHash":         firstCidHash(b.Parents),
-		"nonce":              "0x0000000000000000",
-		"sha3Uncles":         "0x0000000000000000000000000000000000000000000000000000000000000000",
-		"logsBloom":          "0x" + zeroPad(512),
-		"transactionsRoot":   "0x0000000000000000000000000000000000000000000000000000000000000000",
-		"stateRoot":          EthHashFromCid(b.ParentStateRoot),
-		"receiptsRoot":       EthHashFromCid(b.ParentMessageReceipts),
-		"miner":              EthAddressFromFilecoinIDActor(b.Miner),
-		"difficulty":         "0x0",
-		"totalDifficulty":    "0x0",
-		"extraData":          "0x",
-		"size":               "0x0",
-		"gasLimit":           fmt.Sprintf("0x%x", build.BlockGasLimit),
-		"gasUsed":            "0x0",
-		"baseFeePerGas":      baseFeeHex,
-		"timestamp":          fmt.Sprintf("0x%x", b.Timestamp),
-		"transactions":       []string{},
-		"uncles":             []string{},
-		"filecoinTipsetCids": cidStrs,
-	}
+	out := ethBlockHeader(ts, 0, ethFullBloom(), false)
+	out["transactions"] = []any{}
+	out["filecoinTipsetCids"] = cidStrs
+	return out
 }
 
 // --- FEVM bridge-forwarding handlers (lantern#30) -----------------------
@@ -910,6 +899,9 @@ func (c *ChainAPI) EthGetTransactionByHash(ctx context.Context, txHash string) (
 // EthGetTransactionByBlockNumberAndIndex returns a transaction in a
 // specific block by position.
 func (c *ChainAPI) EthGetTransactionByBlockNumberAndIndex(ctx context.Context, blockParam string, index string) (any, error) {
+	if out, served, err := c.localEthTxByBlockAndIndex(ctx, blockParam, "", index); served {
+		return out, err
+	}
 	return c.forwardEth(ctx, "eth_getTransactionByBlockNumberAndIndex", []any{blockParam, index})
 }
 

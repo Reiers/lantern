@@ -116,6 +116,10 @@ func (c *ChainAPI) heightForBlockHash(blockHash string, head abi.ChainEpoch) (ab
 	if want == "" || c.HeaderStore == nil {
 		return 0, false
 	}
+	// Lotus-shaped hashes (tipset key CID) from the canonical index.
+	if h, ok := c.ethHeightForHash(want); ok {
+		return h, true
+	}
 	low := head - localBlockByHashWindow
 	if low < 0 {
 		low = 0

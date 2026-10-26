@@ -4,6 +4,17 @@ All notable changes to Lantern.
 
 ## Unreleased
 
+### Bridge-off eth blocks include transactions (Curio reorg check)
+Stock Curio-PDP's reorg check (`tasks/pdpv0/task_reorg_check.go`) walks the chain with go-ethereum's ethclient: `eth_getBlockByNumber("latest", true)`, then `eth_getBlockByHash(parentHash, true)` block by block, looking for its tx hashes in each block's transactions. Bridge-off Lantern returned every block with `transactions: []` and `transactionsRoot` 0x00, which go-ethereum rejects outright ("server returned empty transaction list but block header indicates transactions"); even a parseable empty body would have made Curio believe its txs were reorged out.
+
+- **Local eth blocks with transactions, Lotus v1.38.3 parity** (`newEthBlockFromFilecoinTipSet`). Transactions are the messages included in the tipset (execution order, cross-block dedupe), delegated messages as their EIP-1559 or legacy (homestead / EIP-155) eth tx, secp / BLS messages through Lotus' native conversion (ABI-wrapped params, f410 / masked-ID addressing against the post-execution state, reverted-recipient sentinel, CID-derived hash). `fullTx=false` returns the hashes. `gasUsed` sums the receipts, `logsBloom` is the chain-indexer bloom (emitter + topics of every EVM-shaped event), `gasLimit` is 10B per block, and the header constants (sha3Uncles, zero roots/miner, `transactionsRoot` 0x00 with txs / EmptyRootHash without) match Lotus.
+- **Block hash = tipset key CID** (Lotus), not the first block CID; `parentHash` likewise. The canonical chain is rebuilt from parent links (never from the store's possibly partial per-height tipset) into an incrementally updated height / hash index, so Curio's head-to-depth walk is one map lookup per step. Hashes from older builds (single block CID) still resolve. `eth_getLogs` reports and accepts the same block hash.
+- **Lotus block tags.** `latest` (and `eth_blockNumber`) is the head's parent, the newest executed tipset; `pending` is the head (unexecuted: gasUsed 0, unknown bloom); numbers above latest are "requested a future epoch (beyond 'latest')", null rounds "requested epoch was a null round (N)", `earliest` is unsupported; `safe` / `finalized` use head-30 / head-900.
+- **Bounded cost.** Built blocks are cached by tipset key (a compact summary for 4096 tipsets, full tx bodies for 32); a cached summary skips the receipts / events walk on full-tx rebuilds. By-number lookups reach 20160 epochs, by-hash scans the tx lookback plus 900.
+- **Local `eth_getTransactionByBlockNumberAndIndex`, new `eth_getTransactionByBlockHashAndIndex`, `eth_getBlockTransactionCountByNumber` / `ByHash`.**
+- **`eth_getTransactionByHash` / receipts**: native messages and legacy txs are now served locally too, receipt `type` follows the tx, and delegated txs render `accessList: null` exactly like Lotus (Forest renders `[]`).
+- Verified field-for-field against Glif (Lotus 1.38.3 / Forest) on calibration blocks 0x3feed0, 0x3feec7 and 0x3feeb0 (native message), both `fullTx` modes, by number and by hash, with a replay of Curio's reorg walk (fixture tests).
+
 ### Mainnet bootstrap works out of the box (F10, F11)
 A fresh `lantern init --filecoin-network mainnet` (now `--network mainnet`) failed with "quorum not reached: no single tipset reached 5 sources (countable=9, counted=4)": most libp2p bootstrap peers were dead, and the 5-source default could not be met. The bar is now counted in distinct operators, which is both reachable and stronger.
 
