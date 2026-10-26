@@ -1,77 +1,94 @@
 name: release
 
+# Release binaries are built by scripts/repro-build.sh inside a digest-pinned
+# golang container, so anyone can reproduce the published bytes with the
+# same one-command script (see docs/REPRODUCIBLE-BUILDS.md).
+#
+# Every release builds the full target set twice, once on an amd64 host and
+# once on an arm64 host, and refuses to publish unless both builds are
+# byte-identical. Pull requests that touch the release recipe run the same
+# build and cross-check as a dry run (nothing is published).
+
 on:
   push:
     tags:
       - 'v*'
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'scripts/repro-build.sh'
+      - 'go.mod'
+      - 'go.sum'
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
-  GO_VERSION: '1.26.4'
+  # Version string embedded via -X main.versionTag. Real tag on tag pushes,
+  # a fixed placeholder for dry runs.
+  LANTERN_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.0.0-dryrun' }}
+  TARGETS: 'linux/amd64 linux/arm64 darwin/arm64'
+  # darwin/amd64 dropped 2026-05-22: arm64 covers every Mac since 2020.
+  # Intel Mac users build from source via install.sh.
 
 jobs:
   build:
-    name: build ${{ matrix.os }}/${{ matrix.arch }}
+    name: build (${{ matrix.host }} host)
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: darwin
-            arch: arm64
-            runner: macos-14   # Apple silicon
-          - os: linux
-            arch: amd64
-            runner: ubuntu-22.04
-          - os: linux
-            arch: arm64
-            runner: ubuntu-22.04-arm
-          # darwin/amd64 dropped 2026-05-22: macOS 13 runner queues are
-          # unreliable on GitHub-hosted runners; arm64 covers every Mac
-          # since 2020. Intel Mac users build from source via install.sh.
+          - host: amd64
+            runner: ubuntu-24.04
+          - host: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: false
-
-      - name: Build pure-Go (CGO_ENABLED=0)
-        env:
-          GOOS: ${{ matrix.os }}
-          GOARCH: ${{ matrix.arch }}
-          CGO_ENABLED: '0'
+      - name: Reproducible build (pinned container toolchain)
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME}"
-          mkdir -p dist
-          OUT="dist/lantern-${{ matrix.os }}-${{ matrix.arch }}"
-          go build \
-            -trimpath \
-            -ldflags "-s -w -X main.versionTag=${VERSION}" \
-            -o "${OUT}" \
-            ./cmd/lantern
-          # SHA-256 manifest
-          if command -v shasum >/dev/null 2>&1; then
-            shasum -a 256 "${OUT}" > "${OUT}.sha256"
-          else
-            sha256sum "${OUT}" > "${OUT}.sha256"
-          fi
-          # Show the manifest so it's in the workflow log too
-          cat "${OUT}.sha256"
+          # shellcheck disable=SC2086  # TARGETS is a word list on purpose
+          ./scripts/repro-build.sh --source . --out dist --no-verify \
+            "${LANTERN_VERSION}" ${TARGETS}
+          ls -la dist/
+          cat dist/*.sha256
 
-      - name: Upload artifact
+      - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
-          name: lantern-${{ matrix.os }}-${{ matrix.arch }}
+          name: binaries-${{ matrix.host }}
           path: |
-            dist/lantern-${{ matrix.os }}-${{ matrix.arch }}
-            dist/lantern-${{ matrix.os }}-${{ matrix.arch }}.sha256
+            dist/lantern-*
+          if-no-files-found: error
+
+  cross-check:
+    name: cross-check amd64-hosted vs arm64-hosted builds
+    needs: [build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          path: artifacts
+
+      - name: Require byte-identical outputs
+        run: |
+          set -euo pipefail
+          cd artifacts
+          ls -la binaries-amd64 binaries-arm64
+          for t in ${TARGETS}; do
+            name="lantern-${t%/*}-${t#*/}"
+            cmp "binaries-amd64/${name}" "binaries-arm64/${name}"
+            cmp "binaries-amd64/${name}.sha256" "binaries-arm64/${name}.sha256"
+            # Manifests must verify with a plain 'sha256sum -c' next to the asset.
+            (cd binaries-amd64 && sha256sum -c "${name}.sha256")
+          done
+          echo "amd64-hosted and arm64-hosted builds are byte-identical"
 
   source-tarball:
     name: source tarball
@@ -84,14 +101,13 @@ jobs:
       - name: Create reproducible source tarball
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME}"
-          PREFIX="lantern-${VERSION#v}"
+          PREFIX="lantern-${LANTERN_VERSION#v}"
           mkdir -p dist
-          # Use git archive for byte-deterministic source bundling.
+          # git archive is byte-deterministic for a given commit and git version.
           git archive --format=tar.gz --prefix="${PREFIX}/" \
-            -o "dist/lantern-${VERSION}-source.tar.gz" HEAD
-          (cd dist && sha256sum "lantern-${VERSION}-source.tar.gz" > "lantern-${VERSION}-source.tar.gz.sha256")
-          cat "dist/lantern-${VERSION}-source.tar.gz.sha256"
+            -o "dist/lantern-${LANTERN_VERSION}-source.tar.gz" HEAD
+          (cd dist && sha256sum "lantern-${LANTERN_VERSION}-source.tar.gz" > "lantern-${LANTERN_VERSION}-source.tar.gz.sha256")
+          cat "dist/lantern-${LANTERN_VERSION}-source.tar.gz.sha256"
 
       - name: Upload source tarball
         uses: actions/upload-artifact@v4
@@ -103,12 +119,15 @@ jobs:
 
   release:
     name: GitHub release
-    needs: [build, source-tarball]
+    needs: [cross-check, source-tarball]
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Collect all artifacts
+      - name: Collect artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -117,8 +136,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          find artifacts -type f \( -name 'lantern-*' \) -exec cp {} release/ \;
+          # Publish the amd64-hosted set; cross-check proved the arm64-hosted
+          # set is byte-identical.
+          cp artifacts/binaries-amd64/lantern-* release/
+          cp artifacts/source-tarball/lantern-* release/
           ls -la release/
+          (cd release && sha256sum -c ./*.sha256)
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
@@ -145,13 +168,21 @@ jobs:
 
             ## Binaries
 
-            All binaries are built `CGO_ENABLED=0` with `-trimpath`. SHA-256
-            manifests are published alongside each binary; see also
-            `docs/REPRODUCIBLE-BUILDS.md` for how to reproduce these bytes
-            from source.
+            Built `CGO_ENABLED=0 -trimpath` inside a digest-pinned
+            `golang:1.26.4` container, on both an amd64 and an arm64 host;
+            the release is only published if both builds are byte-identical.
+            Verify a download with `sha256sum -c lantern-<os>-<arch>.sha256`
+            and reproduce it from source with:
+
+            ```sh
+            git clone https://github.com/Reiers/lantern.git && cd lantern
+            ./scripts/repro-build.sh ${{ github.ref_name }} linux/amd64
+            ```
+
+            See `docs/REPRODUCIBLE-BUILDS.md`.
 
             ## Source tarball
 
             `lantern-${{ github.ref_name }}-source.tar.gz` is the
             byte-deterministic source archive produced by `git archive` at
-            this tag, suitable for reproducible-build verification.
+            this tag.
