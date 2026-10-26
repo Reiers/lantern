@@ -133,7 +133,9 @@ func (c *ChainAPI) localEthGetLogs(ctx context.Context, filterRaw any) (any, boo
 		if err != nil {
 			return nil, false, nil
 		}
-		blockHash := EthHashFromCid(ts.Blocks()[0].Cid())
+		// Lotus eth block hash: the tipset key CID. The child's Parents
+		// is the full key even if the store's tipset at ep is partial.
+		blockHash := ethTipsetHash(child.Parents())
 		blockNumHex := fmt.Sprintf("0x%x", int64(ep))
 
 		for idx := uint64(0); idx < uint64(len(msgCIDs)); idx++ {

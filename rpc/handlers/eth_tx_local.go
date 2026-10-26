@@ -431,12 +431,11 @@ func (c *ChainAPI) ensureEthHashes(ctx context.Context, bg hamt.BlockGetter, ix 
 				}
 				r := res{i: i, ok: true}
 				if sm.Signature.Type == statecrypto.SigTypeDelegated {
-					if tx, _, err := ethTxFromSignedMessage(sm, chainID); err == nil {
-						if h, err := tx.TxHash(); err == nil {
-							r.h, r.has = h, true
-						}
+					// EIP-1559 and legacy (homestead / EIP-155) txs.
+					if t, err := decodeDelegatedEthTx(sm, chainID); err == nil {
+						r.h, r.has = t.hash, true
 					}
-					// else: not an EIP-1559 tx we can rebuild; unreachable by hash.
+					// else: not an eth tx we can rebuild; unreachable by hash.
 				} else if d, ok := cidDigest(mc); ok {
 					r.h, r.has = d, true
 				}
@@ -964,7 +963,7 @@ type ethTxView struct {
 	from             string
 	to               any // string or nil
 	txType           string
-	tx               *ethtx.Eth1559Tx // nil for native messages
+	etx              *lotusEthTx
 	msg              *types.Message
 	blockHash        string
 	blockNumber      string
@@ -976,35 +975,25 @@ func (c *ChainAPI) ethTxViewFor(ctx context.Context, bg hamt.BlockGetter, acc *a
 	if err != nil {
 		return nil, err
 	}
+	// lotus newEthTxFromSignedMessage: delegated (1559 / legacy) or a
+	// native message converted against the post-execution state.
+	etx, err := c.ethTxForMessage(ctx, acc, sm, hit.msgCID, c.ethChainID())
+	if err != nil {
+		return nil, err
+	}
 	v := &ethTxView{
 		hash:             strings.ToLower(txHash),
-		txType:           "0x2",
+		txType:           "0x" + uint64Hex(etx.typ),
+		etx:              etx,
 		msg:              &sm.Message,
+		from:             "0x" + hex.EncodeToString(etx.from[:]),
 		blockHash:        ethTipsetHash(hit.incl.Key()),
 		blockNumber:      "0x" + abiEpochHex(hit.incl.Height()),
 		transactionIndex: "0x" + uint64Hex(uint64(hit.idx)),
 	}
-	if sm.Signature.Type == statecrypto.SigTypeDelegated {
-		tx, from, err := ethTxFromSignedMessage(sm, c.ethChainID())
-		if err != nil {
-			return nil, err
-		}
-		v.tx = tx
-		v.from = "0x" + hex.EncodeToString(from[:])
-		if tx.To != nil {
-			v.to = "0x" + hex.EncodeToString(tx.To[:])
-		}
-		return v, nil
+	if etx.to != nil {
+		v.to = "0x" + hex.EncodeToString(etx.to[:])
 	}
-	// Native message: lotus ethTxFromNativeMessage addressing.
-	if v.from, err = c.lookupEthAddress(ctx, acc, sm.Message.From); err != nil {
-		return nil, err
-	}
-	to, err := c.lookupEthAddress(ctx, acc, sm.Message.To)
-	if err != nil {
-		return nil, err
-	}
-	v.to = to
 	return v, nil
 }
 
@@ -1067,22 +1056,15 @@ func (c *ChainAPI) buildEthReceipt(ctx context.Context, bg hamt.BlockGetter, hit
 	}, nil
 }
 
-// buildEthTxObject shapes the Lotus EthTx JSON for a mined eth tx.
-// Native (non-delegated) messages are not rebuilt (returns nil, false).
+// buildEthTxObject shapes the Lotus EthTx JSON for a mined message
+// (delegated eth txs and native messages alike, like Lotus).
 func (c *ChainAPI) buildEthTxObject(ctx context.Context, bg hamt.BlockGetter, hit *ethTxHit, txHash string) (map[string]any, bool, error) {
 	acc := c.execAccessor(hit.exec, bg)
 	v, err := c.ethTxViewFor(ctx, bg, acc, hit, txHash)
 	if err != nil {
 		return nil, false, err
 	}
-	if v.tx == nil {
-		return nil, false, nil
-	}
-	obj := ethTxJSON(v.hash, v.from, v.tx)
-	obj["blockHash"] = v.blockHash
-	obj["blockNumber"] = v.blockNumber
-	obj["transactionIndex"] = v.transactionIndex
-	return obj, true, nil
+	return v.etx.toJSON(v.blockHash, v.blockNumber, v.transactionIndex), true, nil
 }
 
 // ethTxJSON is the Lotus EthTx field set for an EIP-1559 tx (block fields
@@ -1103,7 +1085,7 @@ func ethTxJSON(hash, from string, tx *ethtx.Eth1559Tx) map[string]any {
 		"gas":                  "0x" + uint64Hex(tx.GasLimit),
 		"maxFeePerGas":         "0x" + bigHex(&tx.MaxFeePerGas),
 		"maxPriorityFeePerGas": "0x" + bigHex(&tx.MaxPriorityFeePerGas),
-		"accessList":           []any{},
+		"accessList":           nil, // Lotus leaves AccessList nil for eth txs
 		"v":                    "0x" + bigHex(&tx.V),
 		"r":                    "0x" + bigHex(&tx.R),
 		"s":                    "0x" + bigHex(&tx.S),

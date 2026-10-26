@@ -102,6 +102,10 @@ type ChainAPI struct {
 	// emitter eth addresses for the local tx lookups.
 	ethTxCacheOnce sync.Once
 	ethTxC         *ethTxCache
+	// ethBlk holds the canonical-chain index and the eth block caches
+	// behind the local eth_getBlockBy* path (eth_block_local.go).
+	ethBlkOnce sync.Once
+	ethBlk     *ethBlockState
 
 	// OnLocalMiss, when set, is invoked with the lowercase 0x-prefixed
 	// `to` address every time an eth_call can't be served locally and
