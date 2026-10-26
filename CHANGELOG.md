@@ -14,6 +14,11 @@ Stock Curio-PDP against a bridge-off Lantern registered and sent txs fine, but d
 - **Message execution order fixed** (`chain/msgsearch`): per block, BLS then secp (Lotus `ApplyBlocks` / `MessagesForTipset`), not all-BLS-first. Affects receipt indexing in `StateSearchMsg` and `eth_getLogs` on multi-block tipsets. Order is cross-checked against the receipt count, with the Lotus nonce rule applied on mismatch.
 - **`eth_call` local-miss logging.** Each local miss logs at INFO, rate-limited per (to, selector, reason), with the reason (exec fault text, malformed input, ...), so bridge-off F8 gaps are visible in prod.
 - **`Filecoin.EthAddressToFilecoinAddress`** implemented (Curio calls it).
+### Byte-reproducible releases
+- **Root cause of non-reproducible v1.10.0 binaries found.** `-trimpath` does not rewrite assembler `#include` paths outside the including package, and gnark-crypto includes shared `.s` files from a sibling directory, so the runner's absolute module cache path (`/home/runner/go/pkg/mod`) was baked into `.gopclntab`. A rebuild with any other `GOMODCACHE` differed by millions of bytes with identical `go version -m` output.
+- **Pinned container toolchain.** Release binaries are now built by `scripts/repro-build.sh` in `golang:1.26.4` pinned by digest, with `GOTOOLCHAIN=local`, a fixed `GOMODCACHE`, a fresh clone of the tag and an explicit build environment. All targets are built on both an amd64 and an arm64 runner and the release is refused unless both are byte-identical.
+- **`.sha256` manifests contain only the asset filename,** so `sha256sum -c lantern-<os>-<arch>.sha256` works next to the download (previously `dist/lantern-...` broke it).
+- **`scripts/repro-build.sh <tag> [os/arch ...]`**: one docker command for operators; prints computed vs published SHA-256 and exits non-zero on mismatch. `docs/REPRODUCIBLE-BUILDS.md` rewritten to match, including what is not guaranteed and how v1.10.0 can still be checked.
 
 ### NV29 (Solstice) support
 Mainnet (epoch 6470279) and calibration (epoch 4109133) are both on network version 29 with builtin-actors v19. v1.10.0 stopped at actors v18 and NV27, so on both networks every FEVM contract (PDPVerifier, FWSS, ServiceProviderRegistry, USDFC, ...) was served as having no code by local `eth_getCode`, and stock Curio-PDP failed with `GetPDPConfig: no contract code at given address`.
