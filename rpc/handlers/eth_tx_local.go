@@ -75,6 +75,44 @@ const ethTxIndexCacheMax = 4096
 // errEthTxNotFound is the internal "walked the whole window, no match".
 var errEthTxNotFound = errors.New("eth tx not found within lookback")
 
+// defaultEthTxLookupTimeout bounds one receipt / tx-by-hash lookup so a
+// cold scan (e.g. after a restart, when the send index is empty and the
+// hash must be matched against message bodies fetched over bitswap) can
+// never hang an RPC call. Progress is cached per tipset, so repeated
+// polls resume where the last one stopped. Override with
+// ChainAPI.EthTxLookupTimeout or LANTERN_ETH_TX_LOOKUP_TIMEOUT (seconds).
+const defaultEthTxLookupTimeout = 20 * time.Second
+
+// ethTxScanConcurrency bounds parallel message-body fetches while matching
+// an eth tx hash against a tipset.
+const ethTxScanConcurrency = 16
+
+// errEthTxIncomplete reports a lookup that ran out of time budget or hit
+// blocks it could not fetch before covering the whole window. It is NOT a
+// definitive "not found": callers get an error (retry later), never a
+// null that could be mistaken for "dropped".
+type errEthTxIncomplete struct {
+	reason  string
+	scanned int
+	lowest  abi.ChainEpoch
+}
+
+func (e *errEthTxIncomplete) Error() string {
+	return fmt.Sprintf("eth tx lookup incomplete (%s) after scanning %d tipsets down to epoch %d; retry, progress is cached", e.reason, e.scanned, e.lowest)
+}
+
+func (c *ChainAPI) ethTxLookupTimeout() time.Duration {
+	if c.EthTxLookupTimeout > 0 {
+		return c.EthTxLookupTimeout
+	}
+	if v := strings.TrimSpace(os.Getenv("LANTERN_ETH_TX_LOOKUP_TIMEOUT")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return defaultEthTxLookupTimeout
+}
+
 func (c *ChainAPI) ethTxLookback() abi.ChainEpoch {
 	if c.EthTxLookback > 0 {
 		return c.EthTxLookback
@@ -105,9 +143,13 @@ type tsMsgIndex struct {
 	isSecp []bool
 	pos    map[cid.Cid]int
 
-	ethOnce sync.Once
-	ethErr  error
-	ethPos  map[[32]byte]int // eth tx hash -> idx (computed lazily)
+	// eth tx hash -> idx, computed lazily and incrementally: a message
+	// body that can't be fetched now is retried on a later lookup instead
+	// of failing the whole scan.
+	ethMu   sync.Mutex
+	ethPos  map[[32]byte]int
+	ethDone []bool
+	ethLeft int // messages whose eth hash is not known yet
 }
 
 type ethTxCache struct {
@@ -151,7 +193,10 @@ func (ec *ethTxCache) put(k string, ix *tsMsgIndex) {
 // Message / receipt / event blocks can lag the header by a beat on a
 // gossip-fed node (see StateSearchMsg, lantern#50).
 func (c *ChainAPI) ethTxBlockGetter() hamt.BlockGetter {
-	return newRetryingBlockGetter(c.BlockGetter, 2, 18*time.Second)
+	// One retry inside 8s per block: enough for a cold bitswap round, and
+	// small enough that a single unavailable block cannot eat the whole
+	// lookup budget.
+	return newRetryingBlockGetter(c.BlockGetter, 1, 8*time.Second)
 }
 
 // loadHeader returns a block header from the header store, or fetches it
@@ -338,46 +383,91 @@ func (c *ChainAPI) loadChainMsg(ctx context.Context, bg hamt.BlockGetter, mc cid
 
 // ensureEthHashes computes the eth tx hash of every message in ix (lotus
 // ethTxHashFromSignedMessage): delegated -> keccak of the rebuilt signed
-// EIP-1559 envelope; secp / BLS -> the CID digest.
-func (c *ChainAPI) ensureEthHashes(ctx context.Context, bg hamt.BlockGetter, ix *tsMsgIndex) error {
-	ix.ethOnce.Do(func() {
-		m := make(map[[32]byte]int, len(ix.msgs))
-		chainID := c.ethChainID()
+// EIP-1559 envelope; secp / BLS -> the CID digest. Message bodies are
+// fetched in parallel; ones that fail to fetch stay pending and are
+// retried on the next call. Returns the number still pending.
+func (c *ChainAPI) ensureEthHashes(ctx context.Context, bg hamt.BlockGetter, ix *tsMsgIndex) int {
+	ix.ethMu.Lock()
+	defer ix.ethMu.Unlock()
+	if ix.ethDone == nil {
+		ix.ethPos = make(map[[32]byte]int, len(ix.msgs))
+		ix.ethDone = make([]bool, len(ix.msgs))
+		ix.ethLeft = len(ix.msgs)
+		// BLS messages never carry a delegated signature: their eth hash
+		// is the CID digest, no fetch needed.
 		for i, mc := range ix.msgs {
-			var h [32]byte
-			if ix.isSecp[i] {
-				sm, err := c.loadChainMsg(ctx, bg, mc, true)
-				if err != nil {
-					ix.ethErr = err
-					return
+			if !ix.isSecp[i] {
+				if d, ok := cidDigest(mc); ok {
+					ix.ethPos[d] = i
 				}
-				if sm.Signature.Type == statecrypto.SigTypeDelegated {
-					tx, _, err := ethTxFromSignedMessage(sm, chainID)
-					if err != nil {
-						continue // not an eth tx we can rebuild (e.g. legacy); unreachable by hash
-					}
-					if h, err = tx.TxHash(); err != nil {
-						continue
-					}
-					m[h] = i
-					continue
-				}
-			}
-			if d, ok := cidDigest(mc); ok {
-				h = d
-				m[h] = i
+				ix.ethDone[i] = true
+				ix.ethLeft--
 			}
 		}
-		ix.ethPos = m
-	})
-	if ix.ethErr != nil {
-		// Let a later call retry (the failure was a fetch, not a decode).
-		ix.ethOnce = sync.Once{}
-		err := ix.ethErr
-		ix.ethErr = nil
-		return err
 	}
-	return nil
+	if ix.ethLeft == 0 {
+		return 0
+	}
+	chainID := c.ethChainID()
+	type res struct {
+		i   int
+		h   [32]byte
+		has bool
+		ok  bool
+	}
+	jobs := make(chan int)
+	out := make(chan res)
+	var wg sync.WaitGroup
+	for w := 0; w < ethTxScanConcurrency; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				mc := ix.msgs[i]
+				sm, err := c.loadChainMsg(ctx, bg, mc, true)
+				if err != nil {
+					out <- res{i: i}
+					continue
+				}
+				r := res{i: i, ok: true}
+				if sm.Signature.Type == statecrypto.SigTypeDelegated {
+					if tx, _, err := ethTxFromSignedMessage(sm, chainID); err == nil {
+						if h, err := tx.TxHash(); err == nil {
+							r.h, r.has = h, true
+						}
+					}
+					// else: not an EIP-1559 tx we can rebuild; unreachable by hash.
+				} else if d, ok := cidDigest(mc); ok {
+					r.h, r.has = d, true
+				}
+				out <- r
+			}
+		}()
+	}
+	go func() {
+		for i := range ix.msgs {
+			if !ix.ethDone[i] {
+				select {
+				case jobs <- i:
+				case <-ctx.Done():
+				}
+			}
+		}
+		close(jobs)
+		wg.Wait()
+		close(out)
+	}()
+	for r := range out {
+		if !r.ok {
+			continue
+		}
+		ix.ethDone[r.i] = true
+		ix.ethLeft--
+		if r.has {
+			ix.ethPos[r.h] = r.i
+		}
+	}
+	return ix.ethLeft
 }
 
 func cidDigest(c cid.Cid) ([32]byte, bool) {
@@ -425,8 +515,13 @@ type ethTxHit struct {
 
 // findEthTx walks the canonical chain from head looking for the tx.
 // knownCID (from our send index) short-circuits hash recomputation.
-// Returns errEthTxNotFound when the window holds no match.
 // minEpoch >= 0 raises the lower bound of the walk (never lowers it).
+//
+// Outcomes: a hit; errEthTxNotFound when every tipset in the window was
+// fully checked (definitive, the caller answers null like Lotus); or
+// *errEthTxIncomplete when the time budget ran out or some tipset could
+// not be fully checked (not definitive, the caller returns an error).
+// The walk is bounded by ethTxLookupTimeout and never hangs.
 func (c *ChainAPI) findEthTx(ctx context.Context, bg hamt.BlockGetter, hash [32]byte, knownCID cid.Cid, minEpoch abi.ChainEpoch) (*ethTxHit, error) {
 	if c.HeaderStore == nil || c.BlockGetter == nil {
 		return nil, errors.New("header store / block getter not configured")
@@ -435,39 +530,67 @@ func (c *ChainAPI) findEthTx(ctx context.Context, bg hamt.BlockGetter, hash [32]
 	if exec == nil {
 		return nil, errors.New("no local head")
 	}
+	ctx, cancel := context.WithTimeout(ctx, c.ethTxLookupTimeout())
+	defer cancel()
+
 	minH := exec.Height() - c.ethTxLookback()
 	if minEpoch > minH {
 		minH = minEpoch
 	}
 	nativeCID, _ := cidFromEthHash(hash)
+	scanned := 0
+	holes := 0        // tipsets that could not be fully checked
+	var gaps []string // first few hole descriptions, for the error
+	addHole := func(desc string) {
+		holes++
+		if len(gaps) < 4 {
+			gaps = append(gaps, desc)
+		}
+	}
+	incomplete := func(reason string) error {
+		if len(gaps) > 0 {
+			reason += fmt.Sprintf("; %d unchecked tipsets, e.g. %s", holes, strings.Join(gaps, ", "))
+		}
+		return &errEthTxIncomplete{reason: reason, scanned: scanned, lowest: exec.Height()}
+	}
 	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+		if ctx.Err() != nil {
+			return nil, incomplete(fmt.Sprintf("time budget %s exhausted", c.ethTxLookupTimeout()))
 		}
 		pk := exec.Parents()
 		if pk.IsEmpty() {
-			return nil, errEthTxNotFound
+			break
 		}
 		incl, err := c.loadFullTipSet(ctx, bg, pk)
 		if err != nil {
-			return nil, fmt.Errorf("load parent tipset of %d: %w", exec.Height(), err)
+			// Can't go further back without the parent headers.
+			addHole(fmt.Sprintf("parent of %d (%v)", exec.Height(), err))
+			return nil, incomplete("parent tipset unavailable")
 		}
 		if incl.Height() < minH {
-			return nil, errEthTxNotFound
+			break
 		}
+		scanned++
 		ix, err := c.tipsetMsgIndex(ctx, bg, incl, exec)
 		if err != nil {
-			return nil, fmt.Errorf("index tipset %d: %w", incl.Height(), err)
+			// The tx may be in this tipset; remember the hole, keep walking
+			// (a match further back is still a correct answer).
+			addHole(fmt.Sprintf("%d (%v)", incl.Height(), err))
+			exec = incl
+			continue
 		}
 		idx, ok := -1, false
 		if knownCID.Defined() {
 			idx, ok = ix.pos[knownCID]
 		} else {
 			if idx, ok = ix.pos[nativeCID]; !ok {
-				if err := c.ensureEthHashes(ctx, bg, ix); err != nil {
-					return nil, fmt.Errorf("eth hashes for tipset %d: %w", incl.Height(), err)
-				}
+				left := c.ensureEthHashes(ctx, bg, ix)
+				ix.ethMu.Lock()
 				idx, ok = ix.ethPos[hash]
+				ix.ethMu.Unlock()
+				if !ok && left > 0 {
+					addHole(fmt.Sprintf("%d (%d message bodies unavailable)", incl.Height(), left))
+				}
 			}
 		}
 		if ok {
@@ -483,6 +606,10 @@ func (c *ChainAPI) findEthTx(ctx context.Context, bg hamt.BlockGetter, hash [32]
 		}
 		exec = incl
 	}
+	if holes > 0 {
+		return nil, incomplete("some tipsets could not be fully checked")
+	}
+	return nil, errEthTxNotFound
 }
 
 // --- eth tx reconstruction ---------------------------------------------

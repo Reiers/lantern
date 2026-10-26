@@ -152,3 +152,39 @@ func TestInterp_UnsupportedOpcodeErrors(t *testing.T) {
 		t.Error("expected error on undefined opcode")
 	}
 }
+
+// MCOPY (EIP-5656), seen in prod: PDPVerifier / SP registry view calls
+// compiled for Cancun failed locally with "unsupported opcode 0x5e".
+func TestInterp_Mcopy(t *testing.T) {
+	word := "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+	// PUSH32 word, PUSH1 0, MSTORE; MCOPY(dst=0x20, src=0, size=0x20);
+	// RETURN(0x20, 0x20)
+	code := "7f" + word + "600052" + "6020600060205e" + "60206020f3"
+	res := runCode(t, code, &nullBackend{})
+	if hex.EncodeToString(res.Return) != word {
+		t.Fatalf("MCOPY: got %x", res.Return)
+	}
+	// Overlapping copy, memmove semantics: MCOPY(dst=1, src=0, size=8),
+	// RETURN(0, 0x20).
+	code = "7f" + word + "600052" + "6008600060015e" + "60206000f3"
+	res = runCode(t, code, &nullBackend{})
+	want := "000001020304050607" + word[18:] // bytes 1..8 <- 0..7, byte 9 untouched
+	if hex.EncodeToString(res.Return) != want {
+		t.Fatalf("MCOPY overlap: got %x want %s", res.Return, want)
+	}
+	// Zero size is a no-op, no expansion.
+	code = "6000600060ff5e" + "59600052" + "60206000f3" // MSIZE after
+	res = runCode(t, code, &nullBackend{})
+	if res.Return[31] != 0 {
+		t.Fatalf("MCOPY size 0 expanded memory: msize=%d", res.Return[31])
+	}
+}
+
+func TestInterp_TransientStorage(t *testing.T) {
+	// TLOAD(1) before write is 0; TSTORE(1, 0x2a); TLOAD(1) -> 0x2a.
+	code := "60015c" + "602a60015d" + "60015c" + "01" + "600052" + "60206000f3"
+	res := runCode(t, code, &nullBackend{})
+	if res.Return[31] != 0x2a {
+		t.Fatalf("TLOAD/TSTORE: got %x", res.Return)
+	}
+}

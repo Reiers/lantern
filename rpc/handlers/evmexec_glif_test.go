@@ -132,3 +132,46 @@ func TestEthCall_LocalIntegration(t *testing.T) {
 		}
 	}
 }
+
+// TestEthCall_LocalCancunOpcodes replays the two eth_call shapes that
+// missed locally in prod on lantern-m2 with "unsupported opcode 0x5e"
+// (MCOPY) and checks local FEVM exec now matches Glif eth_call at the
+// same state. Network-gated: LANTERN_EVM_GLIF_TEST=1.
+func TestEthCall_LocalCancunOpcodes(t *testing.T) {
+	if os.Getenv("LANTERN_EVM_GLIF_TEST") != "1" {
+		t.Skip("set LANTERN_EVM_GLIF_TEST=1 to run the local eth_call integration gate")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	bg := &hbGlif{url: "https://api.calibration.node.glif.io/rpc/v1", hc: &http.Client{Timeout: 25 * time.Second}}
+	epoch, stateRoot, err := bg.head(ctx)
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	tr := &trustedroot.TrustedRoot{Epoch: abi.ChainEpoch(epoch), StateRoot: stateRoot}
+	c := &ChainAPI{Trusted: tr, BlockGetter: bg, Accessor: accessor.New(tr, bg), NetworkName: "calibrationnet"}
+	// Glif's eth_call at the tipset whose parent state we execute against.
+	blk := fmt.Sprintf("0x%x", epoch-1)
+	const curio = "000000000000000000000000d44e13e90f36ad26b5e2b7922c5100e673ee4bee"
+	cases := []struct{ name, to, data string }{
+		{"PDPVerifier VERSION()", "0x85e366Cf9DD2c0aE37E963d9556F5f4718d6417C", "0xffa1ad74"},
+		{"SPRegistry 0x2335bde0(curio)", "0x839e5c9988e4e9977d40708d0094103c0839Ac9D", "0x2335bde0" + curio},
+	}
+	for _, tc := range cases {
+		got, err := c.EthCall(ctx, map[string]any{"to": tc.to, "data": tc.data}, "latest")
+		if err != nil {
+			t.Fatalf("%s: local EthCall: %v", tc.name, err)
+		}
+		raw, err := bg.rpc(ctx, "eth_call", []any{map[string]any{"to": tc.to, "data": tc.data}, blk})
+		if err != nil {
+			t.Fatalf("%s: glif eth_call: %v", tc.name, err)
+		}
+		var want string
+		_ = json.Unmarshal(raw, &want)
+		if got != want {
+			t.Errorf("%s: local %s != glif %s", tc.name, got, want)
+		} else {
+			t.Logf("%s: local == glif (%d bytes)", tc.name, (len(got)-2)/2)
+		}
+	}
+}

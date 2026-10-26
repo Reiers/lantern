@@ -202,6 +202,14 @@ func (ip *interpreter) exec(op OpCode) (bool, *Result, error) {
 		return false, nil, ip.opMstore8()
 	case MSIZE:
 		ip.stack.push(*uint256.NewInt(uint64(ip.mem.len())))
+	case MCOPY:
+		return false, nil, ip.opMcopy()
+
+	// ---- transient storage (EIP-1153) ----
+	case TLOAD:
+		return false, nil, ip.opTload()
+	case TSTORE:
+		return false, nil, ip.opTstore()
 
 	// ---- storage ----
 	case SLOAD:
