@@ -11,7 +11,7 @@
 // What this package DOES:
 //
 //   - Decode and dispatch a Filecoin Message against the built-in actor
-//     method tables shipped in go-state-types (v17/v18).
+//     method tables shipped in go-state-types (v17/v18/v19).
 //   - Execute Account → Account `Send` (method 0) end-to-end: balance
 //     check, value transfer, gas accounting. This is the only on-chain
 //     write path we model with full fidelity.

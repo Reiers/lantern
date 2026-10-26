@@ -16,7 +16,7 @@
 // keccak256(bytecode)) is offered as a helper so the caller can prove the
 // fetched bytecode is the one the chain state commits to.
 //
-// Phase scope mirrors the rest of state/actors: v17 + v18.
+// Phase scope mirrors the rest of state/actors: v17, v18 and v19.
 
 package actors
 
@@ -30,6 +30,7 @@ import (
 
 	evm17 "github.com/filecoin-project/go-state-types/builtin/v17/evm"
 	evm18 "github.com/filecoin-project/go-state-types/builtin/v18/evm"
+	evm19 "github.com/filecoin-project/go-state-types/builtin/v19/evm"
 
 	"github.com/Reiers/lantern/state/hamt"
 )
@@ -59,7 +60,7 @@ func LoadEVM(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGetter,
 		return nil, ErrUnknownCode{Code: codeCid}
 	}
 	if info.Kind != KindEvm {
-		return nil, fmt.Errorf("LoadEVM: code %s is %s, not evm", codeCid, info.Kind)
+		return nil, ErrWrongKind{Code: codeCid, Got: info.Kind, Want: KindEvm}
 	}
 	raw, err := bg.Get(ctx, headCid)
 	if err != nil {
@@ -81,6 +82,12 @@ func LoadEVM(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGetter,
 			return nil, fmt.Errorf("decoding evm v18: %w", err)
 		}
 		return &evmV18{s: &s}, nil
+	case 19:
+		var s evm19.State
+		if err := s.UnmarshalCBOR(bytes.NewReader(raw)); err != nil {
+			return nil, fmt.Errorf("decoding evm v19: %w", err)
+		}
+		return &evmV19{s: &s}, nil
 	}
 	return nil, ErrUnsupportedVersion{Kind: KindEvm, Version: info.Version}
 }
@@ -134,3 +141,11 @@ func (e *evmV18) BytecodeCID() cid.Cid   { return e.s.Bytecode }
 func (e *evmV18) BytecodeHash() [32]byte { return e.s.BytecodeHash }
 func (e *evmV18) StorageRoot() cid.Cid   { return e.s.ContractState }
 func (e *evmV18) Nonce() uint64          { return e.s.Nonce }
+
+type evmV19 struct{ s *evm19.State }
+
+func (e *evmV19) Version() int           { return 19 }
+func (e *evmV19) BytecodeCID() cid.Cid   { return e.s.Bytecode }
+func (e *evmV19) BytecodeHash() [32]byte { return e.s.BytecodeHash }
+func (e *evmV19) StorageRoot() cid.Cid   { return e.s.ContractState }
+func (e *evmV19) Nonce() uint64          { return e.s.Nonce }

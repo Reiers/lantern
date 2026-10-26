@@ -1,7 +1,7 @@
 // Built-in actor method dispatch for Lantern's VM shell.
 //
 // We import the public `Methods` map from each
-// go-state-types/builtin/v{17,18}/<actor> package, then dispatch a
+// go-state-types/builtin/v{17,18,19}/<actor> package, then dispatch a
 // (codeCID, methodNum) tuple to the corresponding method metadata. We
 // don't *execute* the method; we just look up its name, parameter type,
 // and return type — that's enough to (a) decode the message params for
@@ -49,6 +49,21 @@ import (
 	reward18 "github.com/filecoin-project/go-state-types/builtin/v18/reward"
 	system18 "github.com/filecoin-project/go-state-types/builtin/v18/system"
 	verifreg18 "github.com/filecoin-project/go-state-types/builtin/v18/verifreg"
+	account19 "github.com/filecoin-project/go-state-types/builtin/v19/account"
+	cron19 "github.com/filecoin-project/go-state-types/builtin/v19/cron"
+	datacap19 "github.com/filecoin-project/go-state-types/builtin/v19/datacap"
+	eam19 "github.com/filecoin-project/go-state-types/builtin/v19/eam"
+	ethaccount19 "github.com/filecoin-project/go-state-types/builtin/v19/ethaccount"
+	evm19 "github.com/filecoin-project/go-state-types/builtin/v19/evm"
+	initact19 "github.com/filecoin-project/go-state-types/builtin/v19/init"
+	market19 "github.com/filecoin-project/go-state-types/builtin/v19/market"
+	miner19 "github.com/filecoin-project/go-state-types/builtin/v19/miner"
+	multisig19 "github.com/filecoin-project/go-state-types/builtin/v19/multisig"
+	paych19 "github.com/filecoin-project/go-state-types/builtin/v19/paych"
+	power19 "github.com/filecoin-project/go-state-types/builtin/v19/power"
+	reward19 "github.com/filecoin-project/go-state-types/builtin/v19/reward"
+	system19 "github.com/filecoin-project/go-state-types/builtin/v19/system"
+	verifreg19 "github.com/filecoin-project/go-state-types/builtin/v19/verifreg"
 
 	"github.com/Reiers/lantern/state/actors"
 )
@@ -78,8 +93,8 @@ func ResolveMethod(_ context.Context, kind actors.Kind, version int, m abi.Metho
 }
 
 // methodTable returns the Methods map for a given (kind, version).
-// Currently we support v17 (nv25) and v18 (nv26) — the active mainnet
-// actor versions as of 2026-05.
+// Currently we support v17 (nv27), v18 (nv28) and v19 (nv29, Solstice,
+// the active version on mainnet and calibration as of 2026-10).
 func methodTable(kind actors.Kind, version int) (map[abi.MethodNum]builtin.MethodMeta, error) {
 	switch version {
 	case 17:
@@ -151,6 +166,41 @@ func methodTable(kind actors.Kind, version int) (map[abi.MethodNum]builtin.Metho
 			return eam18.Methods, nil
 		case actors.KindEthAccount:
 			return ethaccount18.Methods, nil
+		case actors.KindPlaceholder:
+			return map[abi.MethodNum]builtin.MethodMeta{}, nil
+		}
+	case 19:
+		switch kind {
+		case actors.KindAccount:
+			return account19.Methods, nil
+		case actors.KindCron:
+			return cron19.Methods, nil
+		case actors.KindInit:
+			return initact19.Methods, nil
+		case actors.KindMarket:
+			return market19.Methods, nil
+		case actors.KindMiner:
+			return miner19.Methods, nil
+		case actors.KindMultisig:
+			return multisig19.Methods, nil
+		case actors.KindPaych:
+			return paych19.Methods, nil
+		case actors.KindPower:
+			return power19.Methods, nil
+		case actors.KindReward:
+			return reward19.Methods, nil
+		case actors.KindSystem:
+			return system19.Methods, nil
+		case actors.KindVerifreg:
+			return verifreg19.Methods, nil
+		case actors.KindDatacap:
+			return datacap19.Methods, nil
+		case actors.KindEvm:
+			return evm19.Methods, nil
+		case actors.KindEam:
+			return eam19.Methods, nil
+		case actors.KindEthAccount:
+			return ethaccount19.Methods, nil
 		case actors.KindPlaceholder:
 			return map[abi.MethodNum]builtin.MethodMeta{}, nil
 		}

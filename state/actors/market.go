@@ -16,6 +16,8 @@ import (
 	adt17 "github.com/filecoin-project/go-state-types/builtin/v17/util/adt"
 	market18 "github.com/filecoin-project/go-state-types/builtin/v18/market"
 	adt18 "github.com/filecoin-project/go-state-types/builtin/v18/util/adt"
+	market19 "github.com/filecoin-project/go-state-types/builtin/v19/market"
+	adt19 "github.com/filecoin-project/go-state-types/builtin/v19/util/adt"
 
 	"github.com/Reiers/lantern/state/hamt"
 )
@@ -95,8 +97,180 @@ func LoadMarket(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGett
 			return nil, fmt.Errorf("decoding market v18: %w", err)
 		}
 		return &marketV18{s: &s, store: adt18.WrapStore(ctx, store), ctx: ctx}, nil
+	case 19:
+		var s market19.State
+		if err := s.UnmarshalCBOR(bytes.NewReader(raw)); err != nil {
+			return nil, fmt.Errorf("decoding market v19: %w", err)
+		}
+		return &marketV19{s: &s, store: adt19.WrapStore(ctx, store), ctx: ctx}, nil
 	}
 	return nil, ErrUnsupportedVersion{Kind: KindMarket, Version: info.Version}
+}
+
+// ----- v19 -----
+
+type marketV19 struct {
+	s     *market19.State
+	store adt19.Store
+	ctx   context.Context
+}
+
+func (m *marketV19) Version() int { return 19 }
+
+func (m *marketV19) GetDealProposal(ctx context.Context, dealID abi.DealID) (*DealProposal, bool, error) {
+	props, err := adt19.AsArray(m.store, m.s.Proposals, market19.ProposalsAmtBitwidth)
+	if err != nil {
+		return nil, false, fmt.Errorf("load proposals v19: %w", err)
+	}
+	var dp market19.DealProposal
+	found, err := props.Get(uint64(dealID), &dp)
+	if err != nil || !found {
+		return nil, found, err
+	}
+	return dealProposalV19(&dp), true, nil
+}
+
+func (m *marketV19) GetDealState(ctx context.Context, dealID abi.DealID) (*DealState, bool, error) {
+	states, err := adt19.AsArray(m.store, m.s.States, market19.StatesAmtBitwidth)
+	if err != nil {
+		return nil, false, fmt.Errorf("load states v19: %w", err)
+	}
+	var ds market19.DealState
+	found, err := states.Get(uint64(dealID), &ds)
+	if err != nil || !found {
+		return nil, found, err
+	}
+	return &DealState{
+		SectorNumber:     ds.SectorNumber,
+		SectorStartEpoch: ds.SectorStartEpoch,
+		LastUpdatedEpoch: ds.LastUpdatedEpoch,
+		SlashEpoch:       ds.SlashEpoch,
+	}, true, nil
+}
+
+func (m *marketV19) BalanceOf(ctx context.Context, a address.Address) (MarketBalance, error) {
+	esc, err := adt19.AsBalanceTable(m.store, m.s.EscrowTable)
+	if err != nil {
+		return MarketBalance{}, fmt.Errorf("load escrow v19: %w", err)
+	}
+	e, err := esc.Get(a)
+	if err != nil {
+		return MarketBalance{}, fmt.Errorf("get escrow %s v19: %w", a, err)
+	}
+	lck, err := adt19.AsBalanceTable(m.store, m.s.LockedTable)
+	if err != nil {
+		return MarketBalance{}, fmt.Errorf("load locked v19: %w", err)
+	}
+	l, err := lck.Get(a)
+	if err != nil {
+		return MarketBalance{}, fmt.Errorf("get locked %s v19: %w", a, err)
+	}
+	return MarketBalance{Escrow: e, Locked: l}, nil
+}
+
+func (m *marketV19) AllBalances(ctx context.Context) (map[address.Address]MarketBalance, error) {
+	// EscrowTable and LockedTable are HAMTs of (Address → BigInt). We walk
+	// both and merge.
+	out := make(map[address.Address]MarketBalance)
+	esc, err := adt19.AsMap(m.store, m.s.EscrowTable, adt19.BalanceTableBitwidth)
+	if err != nil {
+		return nil, fmt.Errorf("load escrow map v19: %w", err)
+	}
+	var v abi.TokenAmount
+	err = esc.ForEach(&v, func(k string) error {
+		a, err := address.NewFromBytes([]byte(k))
+		if err != nil {
+			return err
+		}
+		b := out[a]
+		b.Escrow = v
+		out[a] = b
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	lck, err := adt19.AsMap(m.store, m.s.LockedTable, adt19.BalanceTableBitwidth)
+	if err != nil {
+		return nil, fmt.Errorf("load locked map v19: %w", err)
+	}
+	err = lck.ForEach(&v, func(k string) error {
+		a, err := address.NewFromBytes([]byte(k))
+		if err != nil {
+			return err
+		}
+		b := out[a]
+		b.Locked = v
+		out[a] = b
+		return nil
+	})
+	return out, err
+}
+
+func (m *marketV19) AllDeals(ctx context.Context, max int) (map[abi.DealID]*DealEntry, error) {
+	out := make(map[abi.DealID]*DealEntry)
+	props, err := adt19.AsArray(m.store, m.s.Proposals, market19.ProposalsAmtBitwidth)
+	if err != nil {
+		return nil, fmt.Errorf("load proposals v19: %w", err)
+	}
+	var dp market19.DealProposal
+	count := 0
+	err = props.ForEach(&dp, func(i int64) error {
+		if max > 0 && count >= max {
+			return fmt.Errorf("stop")
+		}
+		dpc := dp
+		dpv := dealProposalV19(&dpc)
+		out[abi.DealID(i)] = &DealEntry{Proposal: *dpv}
+		count++
+		return nil
+	})
+	if err != nil && err.Error() != "stop" {
+		return nil, err
+	}
+	states, err := adt19.AsArray(m.store, m.s.States, market19.StatesAmtBitwidth)
+	if err != nil {
+		return out, fmt.Errorf("load states v19: %w", err)
+	}
+	var ds market19.DealState
+	err = states.ForEach(&ds, func(i int64) error {
+		if e, ok := out[abi.DealID(i)]; ok {
+			e.State = DealState{
+				SectorNumber:     ds.SectorNumber,
+				SectorStartEpoch: ds.SectorStartEpoch,
+				LastUpdatedEpoch: ds.LastUpdatedEpoch,
+				SlashEpoch:       ds.SlashEpoch,
+			}
+		}
+		return nil
+	})
+	return out, err
+}
+
+func dealProposalV19(in *market19.DealProposal) *DealProposal {
+	return &DealProposal{
+		PieceCID:             in.PieceCID,
+		PieceSize:            in.PieceSize,
+		VerifiedDeal:         in.VerifiedDeal,
+		Client:               in.Client,
+		Provider:             in.Provider,
+		Label:                labelV19(in.Label),
+		StartEpoch:           in.StartEpoch,
+		EndEpoch:             in.EndEpoch,
+		StoragePricePerEpoch: in.StoragePricePerEpoch,
+		ProviderCollateral:   in.ProviderCollateral,
+		ClientCollateral:     in.ClientCollateral,
+	}
+}
+
+// labelString extracts a string label from a market.DealLabel; returns "" if
+// the label is a byte string (rare) or unset.
+func labelV19(label market19.DealLabel) string {
+	if label.IsString() {
+		s, _ := label.ToString()
+		return s
+	}
+	return ""
 }
 
 // ----- v18 -----

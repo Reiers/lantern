@@ -3,13 +3,15 @@ package actors
 import (
 	"testing"
 
+	gstactors "github.com/filecoin-project/go-state-types/actors"
+	"github.com/filecoin-project/go-state-types/network"
 	"github.com/ipfs/go-cid"
 )
 
 func TestRegistryMainnetV18Miner(t *testing.T) {
 	reg := DefaultRegistry()
 
-	// Lifted from lotus@v1.36.0 build/builtin_actors_gen.go, mainnet v18.
+	// Lifted from lotus@v1.38.3 build/builtin_actors_gen.go, mainnet v18.
 	mainnetV18MinerCID := cid.MustParse("bafk2bzacead23tnh3ywx2cwudftngssfjgptsvr3nao7xv6mcfot7gvju4bak")
 	info, ok := reg.Lookup(mainnetV18MinerCID)
 	if !ok {
@@ -30,7 +32,7 @@ func TestRegistryAllKnownActors(t *testing.T) {
 	reg := DefaultRegistry()
 
 	// Pick one well-known mainnet v17 actor of each kind to confirm the
-	// table is complete. (Lifted from lotus@v1.36.0.)
+	// table is complete. (Lifted from lotus@v1.38.3.)
 	tests := []struct {
 		kind Kind
 		c    string
@@ -109,5 +111,71 @@ func TestRegisterCodeCIDs_DoesNotOverrideExisting(t *testing.T) {
 	}
 	if got, _ := r.Lookup(known); got != knownInfo {
 		t.Fatalf("existing entry mutated: got %+v want %+v", got, knownInfo)
+	}
+}
+
+// TestRegistryCalibrationV19EVM pins the calibration actors v19 (NV29,
+// Solstice) EVM code CID that broke eth_getCode in the M2 dry run: Lantern
+// v1.10.0 did not know it, LoadEVM failed with ErrUnknownCode and every
+// FEVM contract was reported as having no code.
+func TestRegistryCalibrationV19EVM(t *testing.T) {
+	reg := DefaultRegistry()
+	c := cid.MustParse("bafk2bzaceceiey6pgg2qfkqxhqyrlffyylq4gyefkza6uirnowshcuyixoquo")
+	info, ok := reg.Lookup(c)
+	if !ok {
+		t.Fatal("calibration v19 EVM code CID not in registry")
+	}
+	if info.Kind != KindEvm || info.Version != 19 || info.Network != "calibrationnet" {
+		t.Fatalf("got %+v, want {evm 19 calibrationnet}", info)
+	}
+}
+
+// TestRegistryMainnetV19EVM pins the mainnet actors v19 EVM code CID.
+func TestRegistryMainnetV19EVM(t *testing.T) {
+	reg := DefaultRegistry()
+	c := cid.MustParse("bafk2bzaceaufbdpwqvu6r7bbfpx4w4fw3cub27lm45wapyjfaiwesgvkrw5lm")
+	info, ok := reg.Lookup(c)
+	if !ok {
+		t.Fatal("mainnet v19 EVM code CID not in registry")
+	}
+	if info.Kind != KindEvm || info.Version != 19 || info.Network != "mainnet" {
+		t.Fatalf("got %+v, want {evm 19 mainnet}", info)
+	}
+}
+
+// TestBundlesCoverEveryVersion asserts both networks carry every actors
+// version from 8 to the newest one go-state-types maps a network version
+// to, so a go-state-types bump without a bundles regen fails loudly here.
+func TestBundlesCoverEveryVersion(t *testing.T) {
+	latest, err := gstactors.VersionForNetwork(network.Version29)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int(latest) != BundlesMaxActorsVersion {
+		t.Fatalf("NV29 maps to actors v%d but bundles max is v%d", latest, BundlesMaxActorsVersion)
+	}
+	have := map[string]map[int]bool{}
+	for _, b := range Bundles {
+		if have[b.Network] == nil {
+			have[b.Network] = map[int]bool{}
+		}
+		have[b.Network][b.Version] = true
+	}
+	for _, nw := range []string{"mainnet", "calibrationnet"} {
+		for v := 8; v <= BundlesMaxActorsVersion; v++ {
+			if !have[nw][v] {
+				t.Errorf("%s: missing actors v%d bundle", nw, v)
+			}
+		}
+	}
+}
+
+func TestWarnUnknownCodeOnce(t *testing.T) {
+	c := cid.MustParse("bafy2bzacedixrt5tkmgkpgw7p2ueq6cjg44ejhccpdwn33iezceqr5uxslp7s")
+	if !WarnUnknownCodeOnce(c, "test") {
+		t.Fatal("first call should emit the warning")
+	}
+	if WarnUnknownCodeOnce(c, "test") {
+		t.Fatal("second call for the same CID must stay quiet")
 	}
 }

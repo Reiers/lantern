@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -99,6 +100,62 @@ func TestLoadEVM_RegistryGolden(t *testing.T) {
 	}
 	if got := st.StorageRoot().String(); got != wantStorageRoot {
 		t.Errorf("StorageRoot: got %s, want %s", got, wantStorageRoot)
+	}
+}
+
+// TestLoadEVM_V19Calibration dispatches the golden EVM head through the
+// real DefaultRegistry using the calibration actors v19 EVM code CID. The
+// v19 evm.State CBOR shape is unchanged from v18, so the same head block
+// must decode to the same handles via the v19 decoder.
+func TestLoadEVM_V19Calibration(t *testing.T) {
+	raw, err := hex.DecodeString(regHeadHex)
+	if err != nil {
+		t.Fatalf("decode fixture hex: %v", err)
+	}
+	codeCid := mustParseCID(t, "bafk2bzaceceiey6pgg2qfkqxhqyrlffyylq4gyefkza6uirnowshcuyixoquo")
+	headCid := mustParseCID(t, "bafy2bzacecotea5anb46fwhsp7sqb7jzqxl7r7heht2q3ycwxfxldc2uqyduk")
+	bg := &mapBlockGetter{blocks: map[cid.Cid][]byte{headCid: raw}}
+
+	st, err := LoadEVM(context.Background(), codeCid, headCid, bg, DefaultRegistry())
+	if err != nil {
+		t.Fatalf("LoadEVM: %v", err)
+	}
+	if st.Version() != 19 {
+		t.Errorf("Version: got %d, want 19", st.Version())
+	}
+	if got := st.BytecodeCID().String(); got != wantBytecodeCID {
+		t.Errorf("BytecodeCID: got %s, want %s", got, wantBytecodeCID)
+	}
+	if got := st.StorageRoot().String(); got != wantStorageRoot {
+		t.Errorf("StorageRoot: got %s, want %s", got, wantStorageRoot)
+	}
+}
+
+// TestLoadEVM_ErrorClassification: a known non-EVM code CID yields the
+// definitive ErrWrongKind, an unknown code CID yields ErrUnknownCode. The
+// eth_getCode / eth_call / eth_getStorageAt local paths depend on telling
+// these apart.
+func TestLoadEVM_ErrorClassification(t *testing.T) {
+	reg := DefaultRegistry()
+	bg := &mapBlockGetter{blocks: map[cid.Cid][]byte{}}
+	head := mustParseCID(t, "bafy2bzacecotea5anb46fwhsp7sqb7jzqxl7r7heht2q3ycwxfxldc2uqyduk")
+
+	// mainnet v19 account actor: known, not EVM.
+	acct := mustParseCID(t, "bafk2bzacecgttsyulmd4r2y64iw64x2t4w7tkh636tbtkemy37ume6fxtcjuu")
+	_, err := LoadEVM(context.Background(), acct, head, bg, reg)
+	var wk ErrWrongKind
+	if !errors.As(err, &wk) || wk.Got != KindAccount || wk.Want != KindEvm {
+		t.Fatalf("account code: got %v, want ErrWrongKind{account->evm}", err)
+	}
+
+	unknown := mustParseCID(t, "bafy2bzacedixrt5tkmgkpgw7p2ueq6cjg44ejhccpdwn33iezceqr5uxslp7s")
+	_, err = LoadEVM(context.Background(), unknown, head, bg, reg)
+	var uc ErrUnknownCode
+	if !errors.As(err, &uc) || uc.Code != unknown {
+		t.Fatalf("unknown code: got %v, want ErrUnknownCode", err)
+	}
+	if errors.As(err, &wk) {
+		t.Fatal("unknown code must not classify as ErrWrongKind")
 	}
 }
 
