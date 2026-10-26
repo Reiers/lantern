@@ -68,9 +68,8 @@ func (ip *interpreter) binaryOp(op OpCode) error {
 	case XOR:
 		r.Xor(&a, &b)
 	case BYTE:
-		r.Byte(&b) // a = index (top), b = value; uint256.Byte uses receiver as value
-		// uint256's Byte: z.Byte(n) treats z as the value and n as index.
-		// We popped a=index, b=value, so recompute correctly:
+		// a = index (top), b = value; uint256's z.Byte(n) treats z as the
+		// value and n as the index.
 		r.Set(&b)
 		r.Byte(&a)
 	case SHL:
@@ -121,6 +120,15 @@ func (ip *interpreter) unaryOp(op OpCode) error {
 	return ip.stack.push(r)
 }
 
+func (ip *interpreter) opClz() error {
+	a, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	// leading zeros of the 256-bit word; CLZ(0) == 256.
+	return ip.stack.push(*uint256.NewInt(uint64(256 - a.BitLen())))
+}
+
 func (ip *interpreter) opSha3() error {
 	offset, err := ip.stack.pop()
 	if err != nil {
@@ -130,8 +138,11 @@ func (ip *interpreter) opSha3() error {
 	if err != nil {
 		return err
 	}
-	data := ip.mem.get(offset.Uint64(), size.Uint64())
-	h := keccak256(data)
+	off, sz, err := ip.mem.region(offset, size)
+	if err != nil {
+		return err
+	}
+	h := keccak256(ip.mem.slice(off, sz))
 	var r uint256.Int
 	r.SetBytes(h[:])
 	return ip.stack.push(r)
@@ -145,7 +156,7 @@ func (ip *interpreter) opCalldataload() error {
 	var buf [32]byte
 	o := off.Uint64()
 	for i := uint64(0); i < 32; i++ {
-		if off.IsUint64() && o+i < uint64(len(ip.input)) {
+		if off.IsUint64() && o+i < uint64(len(ip.input)) && o+i >= o {
 			buf[i] = ip.input[o+i]
 		}
 	}
@@ -154,7 +165,10 @@ func (ip *interpreter) opCalldataload() error {
 	return ip.stack.push(r)
 }
 
-func (ip *interpreter) opCalldatacopy() error {
+// opCopyToMemory implements CALLDATACOPY / CODECOPY: pop (memOff, dataOff,
+// size), copy src[dataOff:dataOff+size] into memory, zero-filling past the
+// end of src (FEVM copy_to_memory with zero_fill=true).
+func (ip *interpreter) opCopyToMemory(src []byte) error {
 	memOff, err := ip.stack.pop()
 	if err != nil {
 		return err
@@ -167,29 +181,34 @@ func (ip *interpreter) opCalldatacopy() error {
 	if err != nil {
 		return err
 	}
-	data := copyPadded(ip.input, dataOff.Uint64(), size.Uint64())
-	ip.mem.set(memOff.Uint64(), data)
+	return ip.copyToMemory(memOff, size, dataOff, src, true)
+}
+
+// copyToMemory mirrors builtin-actors instructions/memory.rs copy_to_memory.
+func (ip *interpreter) copyToMemory(destOff, destSize, dataOff uint256.Int, data []byte, zeroFill bool) error {
+	off, sz, err := ip.mem.region(destOff, destSize)
+	if err != nil {
+		return err
+	}
+	if sz == 0 {
+		return nil
+	}
+	dst := ip.mem.slice(off, sz)
+	start := uint64(len(data))
+	if dataOff.IsUint64() && dataOff.Uint64() < start {
+		start = dataOff.Uint64()
+	}
+	n := copy(dst, data[start:])
+	if zeroFill {
+		for i := n; i < len(dst); i++ {
+			dst[i] = 0
+		}
+	}
 	return nil
 }
 
-func (ip *interpreter) opCodecopy() error {
-	memOff, err := ip.stack.pop()
-	if err != nil {
-		return err
-	}
-	codeOff, err := ip.stack.pop()
-	if err != nil {
-		return err
-	}
-	size, err := ip.stack.pop()
-	if err != nil {
-		return err
-	}
-	data := copyPadded(ip.code, codeOff.Uint64(), size.Uint64())
-	ip.mem.set(memOff.Uint64(), data)
-	return nil
-}
-
+// opReturndatacopy faults (FEVM EVM_CONTRACT_ILLEGAL_MEMORY_ACCESS) when
+// the source range exceeds the return data, per EIP-211.
 func (ip *interpreter) opReturndatacopy() error {
 	memOff, err := ip.stack.pop()
 	if err != nil {
@@ -203,23 +222,37 @@ func (ip *interpreter) opReturndatacopy() error {
 	if err != nil {
 		return err
 	}
-	ip.mem.set(memOff.Uint64(), copyPadded(ip.ret, dataOff.Uint64(), size.Uint64()))
+	off, sz, err := ip.mem.region(memOff, size)
+	if err != nil {
+		return err
+	}
+	if !dataOff.IsUint64() || dataOff.Uint64() > uint64(len(ip.ret)) {
+		return fmt.Errorf("evm: returndatacopy start exceeds return-data length %d", len(ip.ret))
+	}
+	src := dataOff.Uint64()
+	if src+sz > uint64(len(ip.ret)) {
+		return fmt.Errorf("evm: returndatacopy end %d exceeds return-data length %d", src+sz, len(ip.ret))
+	}
+	copy(ip.mem.slice(off, sz), ip.ret[src:src+sz])
 	return nil
 }
 
 func (ip *interpreter) opMload() error {
-	off, err := ip.stack.pop()
+	idx, err := ip.stack.pop()
 	if err != nil {
 		return err
 	}
-	b := ip.mem.get(off.Uint64(), 32)
+	off, _, err := ip.mem.region(idx, *uint256.NewInt(32))
+	if err != nil {
+		return err
+	}
 	var r uint256.Int
-	r.SetBytes(b)
+	r.SetBytes(ip.mem.slice(off, 32))
 	return ip.stack.push(r)
 }
 
 func (ip *interpreter) opMstore() error {
-	off, err := ip.stack.pop()
+	idx, err := ip.stack.pop()
 	if err != nil {
 		return err
 	}
@@ -227,12 +260,17 @@ func (ip *interpreter) opMstore() error {
 	if err != nil {
 		return err
 	}
-	ip.mem.set32(off.Uint64(), val.Bytes32())
+	off, _, err := ip.mem.region(idx, *uint256.NewInt(32))
+	if err != nil {
+		return err
+	}
+	b := val.Bytes32()
+	copy(ip.mem.slice(off, 32), b[:])
 	return nil
 }
 
 func (ip *interpreter) opMstore8() error {
-	off, err := ip.stack.pop()
+	idx, err := ip.stack.pop()
 	if err != nil {
 		return err
 	}
@@ -240,7 +278,44 @@ func (ip *interpreter) opMstore8() error {
 	if err != nil {
 		return err
 	}
-	ip.mem.set8(off.Uint64(), byte(val.Uint64()))
+	off, _, err := ip.mem.region(idx, *uint256.NewInt(1))
+	if err != nil {
+		return err
+	}
+	ip.mem.store[off] = byte(val.Uint64() & 0xff)
+	return nil
+}
+
+// opMcopy implements EIP-5656 MCOPY as the FEVM does (instructions/
+// memory.rs mcopy): pop (dest, src, size); for size > 0 expand memory to
+// cover both src+size and dest+size, then copy as if through an
+// intermediate buffer (overlap-safe). Size 0 is a no-op with no expansion.
+func (ip *interpreter) opMcopy() error {
+	dest, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	src, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	size, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	if size.IsZero() {
+		return nil
+	}
+	so, sz, err := ip.mem.region(src, size)
+	if err != nil {
+		return err
+	}
+	do, _, err := ip.mem.region(dest, size)
+	if err != nil {
+		return err
+	}
+	// Go's copy has memmove semantics for overlapping slices.
+	copy(ip.mem.store[do:do+sz], ip.mem.store[so:so+sz])
 	return nil
 }
 
@@ -260,6 +335,13 @@ func (ip *interpreter) opSload() error {
 	return ip.stack.push(v)
 }
 
+// errReadOnly is the FEVM's USR_READ_ONLY abort (state change inside a
+// STATICCALL context). Surfaced as a fault so the call is not served
+// locally rather than modeling the callee abort.
+func (ip *interpreter) errReadOnly(op OpCode) error {
+	return fmt.Errorf("%w: %s called while read-only (static context) at pc %d", ErrUnsupported, op, ip.pc)
+}
+
 // opSstore records a storage write in the ephemeral overlay. Discarded
 // when the top-level eth_call returns; chain state is never mutated.
 func (ip *interpreter) opSstore() error {
@@ -271,19 +353,54 @@ func (ip *interpreter) opSstore() error {
 	if err != nil {
 		return err
 	}
+	if ip.readonly {
+		return ip.errReadOnly(SSTORE)
+	}
 	ip.ov.set(ip.self, key, val)
+	return nil
+}
+
+// opTload reads EIP-1153 transient storage of the current storage context
+// (self; the caller's context under DELEGATECALL, as in the FEVM where the
+// delegated code runs inside the calling actor).
+func (ip *interpreter) opTload() error {
+	key, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	return ip.stack.push(ip.ov.tget(ip.self, key))
+}
+
+// opTstore writes transient storage; read-only contexts abort (FEVM
+// storage.rs tstore).
+func (ip *interpreter) opTstore() error {
+	key, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	val, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	if ip.readonly {
+		return ip.errReadOnly(TSTORE)
+	}
+	ip.ov.tset(ip.self, key, val)
 	return nil
 }
 
 // opLog consumes a LOGn instruction's operands (mem offset, size, and n
 // topics) and discards them. Emitted events don't affect a call's return
 // value, so for eth_call purposes this is a well-formed no-op that keeps
-// the stack balanced.
+// the stack balanced. The memory region is still validated/expanded and a
+// LOG in a read-only context aborts, as in the FEVM.
 func (ip *interpreter) opLog(n int) error {
-	if _, err := ip.stack.pop(); err != nil { // mem offset
+	off, err := ip.stack.pop()
+	if err != nil {
 		return err
 	}
-	if _, err := ip.stack.pop(); err != nil { // size
+	size, err := ip.stack.pop()
+	if err != nil {
 		return err
 	}
 	for i := 0; i < n; i++ {
@@ -291,7 +408,11 @@ func (ip *interpreter) opLog(n int) error {
 			return err
 		}
 	}
-	return nil
+	if ip.readonly {
+		return ip.errReadOnly(LOG0 + OpCode(n))
+	}
+	_, _, err = ip.mem.region(off, size)
+	return err
 }
 
 func (ip *interpreter) opBalance() error {
@@ -304,6 +425,38 @@ func (ip *interpreter) opBalance() error {
 		return err
 	}
 	return ip.stack.push(bal)
+}
+
+// opBlockhash mirrors builtin-actors context.rs blockhash: heights in
+// [NUMBER-256, NUMBER) yield the tipset-key CID digest (first 32 bytes),
+// anything else is zero.
+func (ip *interpreter) opBlockhash() error {
+	bn, err := ip.stack.pop()
+	if err != nil {
+		return err
+	}
+	curr := ip.b.BlockNumber()
+	lo := uint64(0)
+	if curr > 256 {
+		lo = curr - 256
+	}
+	if !bn.IsUint64() || bn.Uint64() >= curr || bn.Uint64() < lo || bn.Uint64() > 1<<63-1 {
+		return ip.stack.push(uint256.Int{})
+	}
+	e, err := ip.env(BLOCKHASH)
+	if err != nil {
+		return err
+	}
+	digest, err := e.TipsetCIDDigest(bn.Uint64())
+	if err != nil {
+		return fmt.Errorf("%w: BLOCKHASH(%d): %v", ErrUnsupported, bn.Uint64(), err)
+	}
+	if len(digest) > 32 {
+		digest = digest[:32]
+	}
+	var r uint256.Int
+	r.SetBytes(digest)
+	return ip.stack.push(r)
 }
 
 func (ip *interpreter) opJump() error {
@@ -339,12 +492,45 @@ func (ip *interpreter) opJumpi() error {
 	return nil
 }
 
+// actorKind classifies addr. Without a KindBackend it reports ActorEVM so
+// callers fall through to the legacy "code may be empty" path.
+func (ip *interpreter) actorKind(a Address) (ActorKind, bool, error) {
+	kb, ok := ip.b.(KindBackend)
+	if !ok {
+		return ActorEVM, false, nil
+	}
+	k, err := kb.ActorKind(a)
+	if err != nil {
+		return 0, true, fmt.Errorf("evm: classify %x: %w", a, err)
+	}
+	return k, true, nil
+}
+
+var (
+	emptyCodeHash  = keccak256(nil)
+	nativeCodeHash = keccak256([]byte{0xfe}) // builtin-actors BytecodeHash::NATIVE_ACTOR
+)
+
 func (ip *interpreter) opExtcodesize() error {
-	a, err := ip.stack.pop()
+	w, err := ip.stack.pop()
 	if err != nil {
 		return err
 	}
-	code, err := ip.b.GetCode(wordToAddress(a))
+	a := wordToAddress(w)
+	if isFEVMPrecompile(a) {
+		return ip.stack.push(uint256.Int{})
+	}
+	kind, _, err := ip.actorKind(a)
+	if err != nil {
+		return err
+	}
+	switch kind {
+	case ActorNative:
+		return ip.stack.push(*uint256.NewInt(1)) // FEVM: native actors report size 1
+	case ActorAccount, ActorNotFound:
+		return ip.stack.push(uint256.Int{})
+	}
+	code, err := ip.b.GetCode(a)
 	if err != nil {
 		return err
 	}
@@ -352,17 +538,36 @@ func (ip *interpreter) opExtcodesize() error {
 }
 
 func (ip *interpreter) opExtcodehash() error {
-	a, err := ip.stack.pop()
+	w, err := ip.stack.pop()
 	if err != nil {
 		return err
 	}
-	code, err := ip.b.GetCode(wordToAddress(a))
-	if err != nil {
-		return err
-	}
+	a := wordToAddress(w)
 	var r uint256.Int
-	if len(code) == 0 {
-		return ip.stack.push(r) // empty -> 0 (no-account convention)
+	if isFEVMPrecompile(a) {
+		r.SetBytes(emptyCodeHash[:])
+		return ip.stack.push(r)
+	}
+	kind, classified, err := ip.actorKind(a)
+	if err != nil {
+		return err
+	}
+	switch kind {
+	case ActorNative:
+		r.SetBytes(nativeCodeHash[:])
+		return ip.stack.push(r)
+	case ActorAccount:
+		r.SetBytes(emptyCodeHash[:])
+		return ip.stack.push(r)
+	case ActorNotFound:
+		return ip.stack.push(r)
+	}
+	code, err := ip.b.GetCode(a)
+	if err != nil {
+		return err
+	}
+	if len(code) == 0 && !classified {
+		return ip.stack.push(r) // legacy: empty -> 0 (no-account convention)
 	}
 	h := keccak256(code)
 	r.SetBytes(h[:])
@@ -370,7 +575,7 @@ func (ip *interpreter) opExtcodehash() error {
 }
 
 func (ip *interpreter) opExtcodecopy() error {
-	a, err := ip.stack.pop()
+	w, err := ip.stack.pop()
 	if err != nil {
 		return err
 	}
@@ -386,16 +591,27 @@ func (ip *interpreter) opExtcodecopy() error {
 	if err != nil {
 		return err
 	}
-	code, err := ip.b.GetCode(wordToAddress(a))
-	if err != nil {
-		return err
+	a := wordToAddress(w)
+	var code []byte
+	if !isFEVMPrecompile(a) {
+		kind, _, err := ip.actorKind(a)
+		if err != nil {
+			return err
+		}
+		switch kind {
+		case ActorNative:
+			code = []byte{0xfe}
+		case ActorEVM:
+			if code, err = ip.b.GetCode(a); err != nil {
+				return err
+			}
+		}
 	}
-	ip.mem.set(memOff.Uint64(), copyPadded(code, codeOff.Uint64(), size.Uint64()))
-	return nil
+	return ip.copyToMemory(memOff, size, codeOff, code, true)
 }
 
 func (ip *interpreter) opReturnData() ([]byte, error) {
-	off, err := ip.stack.pop()
+	offset, err := ip.stack.pop()
 	if err != nil {
 		return nil, err
 	}
@@ -403,25 +619,40 @@ func (ip *interpreter) opReturnData() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ip.mem.get(off.Uint64(), size.Uint64()), nil
+	off, sz, err := ip.mem.region(offset, size)
+	if err != nil {
+		return nil, err
+	}
+	if sz == 0 {
+		return nil, nil
+	}
+	return append([]byte(nil), ip.mem.slice(off, sz)...), nil
 }
 
-// opCall handles STATICCALL / CALL / DELEGATECALL in read-only mode. A
-// nested read-only call into another contract is executed recursively
-// against the same backend. CALL/DELEGATECALL with value are treated as
-// read-only (value transfer is a no-op on a view call).
+// opCall handles STATICCALL / CALL / DELEGATECALL following builtin-actors
+// instructions/call.rs call_generic:
+//
+//   - precompile addresses run the precompile (implemented subset; others
+//     fault with ErrUnsupported);
+//   - EVM contracts execute recursively against the shared overlay; a
+//     reverted sub-call rolls back its overlay writes and pushes 0;
+//   - account / placeholder / ethaccount / missing actors succeed with
+//     empty return data;
+//   - DELEGATECALL into a native actor fails (pushes 0); CALL into a
+//     native actor is not modeled (fault);
+//   - CALL with a non-zero value is not modeled (fault): Lantern does not
+//     track balance moves.
 func (ip *interpreter) opCall(op OpCode) error {
-	// Stack layout differs slightly between CALL (has value) and
-	// STATICCALL/DELEGATECALL (no value).
-	if _, err := ip.stack.pop(); err != nil { // gas
+	if _, err := ip.stack.pop(); err != nil { // gas (not metered locally)
 		return err
 	}
 	toW, err := ip.stack.pop()
 	if err != nil {
 		return err
 	}
+	var value uint256.Int
 	if op == CALL {
-		if _, err := ip.stack.pop(); err != nil { // value (ignored, read-only)
+		if value, err = ip.stack.pop(); err != nil {
 			return err
 		}
 	}
@@ -441,57 +672,76 @@ func (ip *interpreter) opCall(op OpCode) error {
 	if err != nil {
 		return err
 	}
+	if !value.IsZero() {
+		if ip.readonly {
+			return ip.errReadOnly(op)
+		}
+		return fmt.Errorf("%w: CALL with value transfer at pc %d (balance moves are not modeled locally)", ErrUnsupported, ip.pc)
+	}
 
-	callInput := ip.mem.get(inOff.Uint64(), inSize.Uint64())
+	io, is, err := ip.mem.region(inOff, inSize)
+	if err != nil {
+		return err
+	}
+	callInput := append([]byte(nil), ip.mem.slice(io, is)...)
 	to := wordToAddress(toW)
 
-	// DELEGATECALL keeps self as the storage context; for read-only
-	// purposes we still execute the target's code but report self/caller
-	// per delegatecall semantics. Cross-contract STATICCALL/CALL execute
-	// the target with self=target.
-	var sub *Result
-	var subErr error
-	if op == DELEGATECALL {
-		sub, subErr = callWithContext(ip.b, ip.ov, ip.caller, ip.self, ip.self, callInput, to)
+	var (
+		success bool
+		ret     []byte
+	)
+	if isReservedPrecompileAddress(to) {
+		ret, success, err = ip.callPrecompile(to, callInput)
+		if err != nil {
+			return err
+		}
 	} else {
-		sub, subErr = callWithState(ip.b, ip.ov, ip.self, to, callInput)
-	}
-	if subErr != nil {
-		return subErr
+		kind, _, err := ip.actorKind(to)
+		if err != nil {
+			return err
+		}
+		switch kind {
+		case ActorEVM:
+			mark := ip.ov.snapshot()
+			var f frame
+			if op == DELEGATECALL {
+				// Run the target's code in our own context: same caller,
+				// value, storage and read-only flag.
+				f = frame{caller: ip.caller, self: ip.self, codeAddr: to, input: callInput,
+					value: ip.value, readonly: ip.readonly, depth: ip.depth + 1}
+			} else {
+				f = frame{caller: ip.self, self: to, codeAddr: to, input: callInput,
+					readonly: ip.readonly || op == STATICCALL, depth: ip.depth + 1}
+			}
+			sub, err := ip.cs.run(f)
+			if err != nil {
+				return err
+			}
+			if sub.Reverted {
+				ip.ov.revert(mark)
+			}
+			success, ret = !sub.Reverted, sub.Return
+		case ActorAccount, ActorNotFound:
+			success = true
+		case ActorNative:
+			if op != DELEGATECALL {
+				return fmt.Errorf("%w: %s into native actor %x is not modeled locally", ErrUnsupported, op, to)
+			}
+			success = false
+		}
 	}
 
-	// Write return data into memory (truncated to retSize) and push
-	// success (1) / failure (0).
-	if sub != nil {
-		ip.ret = sub.Return
-		out := sub.Return
-		if uint64(len(out)) > retSize.Uint64() {
-			out = out[:retSize.Uint64()]
-		}
-		ip.mem.set(retOff.Uint64(), out)
+	ip.ret = ret
+	// FEVM: copy_to_memory(output_offset, output_size, 0, return_data,
+	// zero_fill=false): grow to the full output region, copy what fits.
+	if err := ip.copyToMemory(retOff, retSize, uint256.Int{}, ret, false); err != nil {
+		return err
 	}
-	ok := uint256.NewInt(1)
-	if sub == nil || sub.Reverted {
-		ok = uint256.NewInt(0)
+	ok := uint256.NewInt(0)
+	if success {
+		ok.SetOne()
 	}
 	return ip.stack.push(*ok)
-}
-
-// callWithContext is the DELEGATECALL execution variant: run `to`'s code
-// but with storage/self context preserved as `storageCtx`.
-func callWithContext(b Backend, ov *overlay, caller, self, storageCtx Address, input []byte, codeAddr Address) (*Result, error) {
-	code, err := b.GetCode(codeAddr)
-	if err != nil {
-		return nil, err
-	}
-	if len(code) == 0 {
-		return &Result{}, nil
-	}
-	ip := &interpreter{
-		b: b, ov: ov, caller: caller, self: storageCtx, code: code, input: input,
-		stack: newStack(), mem: &memory{}, jumpdest: analyzeJumpdests(code),
-	}
-	return ip.run()
 }
 
 // ---- helpers ----
@@ -504,93 +754,9 @@ func boolWord(b bool) uint256.Int {
 	return v
 }
 
-func copyPadded(src []byte, off, size uint64) []byte {
-	out := make([]byte, size)
-	if off < uint64(len(src)) {
-		copy(out, src[off:min64(off+size, uint64(len(src)))])
-	}
-	return out
-}
-
 func min64safeShift(a *uint256.Int) uint64 {
 	if !a.IsUint64() || a.Uint64() >= 256 {
 		return 256
 	}
 	return a.Uint64()
-}
-
-// mcopyMaxBytes caps a single MCOPY's memory expansion. Real FEVM gas
-// limits keep memory far below this; the cap only guards the local
-// interpreter (which does not meter memory gas) against a pathological
-// size operand.
-const mcopyMaxBytes = 32 << 20
-
-// opMcopy implements EIP-5656 MCOPY(dst, src, size): copy size bytes of
-// memory from src to dst with memmove semantics (overlap safe), expanding
-// memory to cover both ranges.
-func (ip *interpreter) opMcopy() error {
-	dst, err := ip.stack.pop()
-	if err != nil {
-		return err
-	}
-	src, err := ip.stack.pop()
-	if err != nil {
-		return err
-	}
-	size, err := ip.stack.pop()
-	if err != nil {
-		return err
-	}
-	if size.IsZero() {
-		return nil
-	}
-	if !size.IsUint64() || !src.IsUint64() || !dst.IsUint64() ||
-		size.Uint64() > mcopyMaxBytes || src.Uint64() > mcopyMaxBytes || dst.Uint64() > mcopyMaxBytes {
-		return fmt.Errorf("evm: MCOPY operands out of range (dst %s, src %s, size %s)", dst.Hex(), src.Hex(), size.Hex())
-	}
-	n := size.Uint64()
-	ip.mem.expand(src.Uint64(), n)
-	data := ip.mem.get(src.Uint64(), n) // copy, so overlap is safe
-	ip.mem.set(dst.Uint64(), data)
-	return nil
-}
-
-// opTload implements EIP-1153 TLOAD: transient storage reads, zero unless
-// written earlier in this call.
-func (ip *interpreter) opTload() error {
-	key, err := ip.stack.pop()
-	if err != nil {
-		return err
-	}
-	if ip.ov != nil && ip.ov.transient != nil {
-		if m, ok := ip.ov.transient[ip.self]; ok {
-			return ip.stack.push(m[key])
-		}
-	}
-	return ip.stack.push(uint256.Int{})
-}
-
-// opTstore implements EIP-1153 TSTORE into the ephemeral overlay.
-func (ip *interpreter) opTstore() error {
-	key, err := ip.stack.pop()
-	if err != nil {
-		return err
-	}
-	val, err := ip.stack.pop()
-	if err != nil {
-		return err
-	}
-	if ip.ov == nil {
-		return nil
-	}
-	if ip.ov.transient == nil {
-		ip.ov.transient = make(map[Address]map[uint256.Int]uint256.Int)
-	}
-	m, ok := ip.ov.transient[ip.self]
-	if !ok {
-		m = make(map[uint256.Int]uint256.Int)
-		ip.ov.transient[ip.self] = m
-	}
-	m[key] = val
-	return nil
 }
