@@ -536,8 +536,8 @@ func (ei *ethTxIndexer) indexPair(ctx context.Context, p tsPair) error {
 		return err
 	}
 	lbg := &overlayGetter{m: local, inner: bg}
-	if err := c.ensureEthHashes(ctx, lbg, ix); err != nil {
-		return err
+	if left := c.ensureEthHashes(ctx, lbg, ix); left > 0 {
+		return fmt.Errorf("tipset %d: %d eth tx hashes unresolved", p.incl.Height(), left)
 	}
 
 	// Receipts: compact copies + per-receipt event counts (logIndex base).

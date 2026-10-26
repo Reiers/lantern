@@ -213,6 +213,13 @@ func wantGlif(t *testing.T, glif map[string]json.RawMessage, key string, got any
 	if err := json.Unmarshal(glif[key], &want); err != nil {
 		t.Fatal(err)
 	}
+	// Recorded Glif answers came from a backend that renders an empty
+	// accessList as []; Lotus v1.38.3 and Lantern render null on eth txs.
+	if m, ok := want.(map[string]any); ok {
+		if al, ok := m["accessList"].([]any); ok && len(al) == 0 {
+			m["accessList"] = nil
+		}
+	}
 	if d := diffEthJSON(key, want, normJSON(t, got)); len(d) > 0 {
 		t.Errorf("%s: %d field diffs vs Lotus:\n  %s", key, len(d), strings.Join(d, "\n  "))
 	}
