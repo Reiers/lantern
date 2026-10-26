@@ -600,7 +600,8 @@ func (c *ChainAPI) EthCall(ctx context.Context, callObj any, blockParam any) (st
 		if b, err := json.Marshal(callObj); err == nil {
 			_ = json.Unmarshal(b, &call)
 		}
-		if res, served, err := c.localEthCall(ctx, call); served {
+		res, served, reason, err := c.localEthCallWithReason(ctx, call)
+		if served {
 			// served==true is a definitive answer (success or revert).
 			atomic.AddUint64(&c.localEthCallServed, 1)
 			if err != nil {
@@ -611,7 +612,14 @@ func (c *ChainAPI) EthCall(ctx context.Context, callObj any, blockParam any) (st
 			return res, nil
 		}
 		atomic.AddUint64(&c.localEthCallBridgeFallback, 1)
-		log.Debugw("eth_call: local miss, falling back to bridge", "to", call.To)
+		// INFO, rate-limited per (to, selector, reason): bridge-off this
+		// miss is a hard failure for the caller, so prod needs to see
+		// exactly which contract/selector is not covered locally.
+		data := call.Data
+		if data == "" {
+			data = call.Input
+		}
+		ethLocalMiss("eth_call", call.To, ethSelector(data), reason, c.Bridge != nil)
 		// Adaptive warming (lantern#44): feed the missed contract back to
 		// the prefetcher so it's warm next head advance. Non-blocking;
 		// curio-core's hook dedups + caps internally.

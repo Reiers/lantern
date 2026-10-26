@@ -123,45 +123,70 @@ func (s *Searcher) Find(ctx context.Context, fromEpoch abi.ChainEpoch, msgCID ci
 	return nil, ErrNotFound
 }
 
-// OrderedMessageCIDs returns ts's messages in the canonical Filecoin
-// application order (all blocks' BLS messages in block order, then all
-// blocks' secp messages, with cross-block duplicates applied once). This
-// is the exact order the child tipset's ParentMessageReceipts AMT is
-// indexed by, so receipt[i] corresponds to OrderedMessageCIDs[i]
-// (lantern#73, used by eth_getLogs to pair events with tx hashes).
-func (s *Searcher) OrderedMessageCIDs(ctx context.Context, ts *ltypes.TipSet) ([]cid.Cid, error) {
-	type collected struct {
-		bls  []cid.Cid
-		secp []cid.Cid
-	}
-	perBlock := make([]collected, len(ts.Blocks()))
+// BlockMsgCIDs is one block's message CIDs as stored in its MsgMeta.
+type BlockMsgCIDs struct {
+	Bls  []cid.Cid
+	Secp []cid.Cid
+}
+
+// BlockMessages returns the per-block (BLS, secp) message CID lists for
+// every block of ts, in tipset block order.
+func (s *Searcher) BlockMessages(ctx context.Context, ts *ltypes.TipSet) ([]BlockMsgCIDs, error) {
+	out := make([]BlockMsgCIDs, len(ts.Blocks()))
 	for bi, b := range ts.Blocks() {
 		bls, secp, err := s.fetchMsgMeta(ctx, b.Messages)
 		if err != nil {
 			return nil, fmt.Errorf("block %s msgmeta: %w", b.Cid(), err)
 		}
-		perBlock[bi] = collected{bls: bls, secp: secp}
+		out[bi] = BlockMsgCIDs{Bls: bls, Secp: secp}
 	}
+	return out, nil
+}
+
+// ExecutionOrder flattens per-block message lists into the order Lotus
+// applies them (chain/consensus ApplyBlocks + ChainStore.MessagesForTipset):
+// for each block in tipset order, that block's BLS messages followed by
+// that block's secp messages. A CID already applied by an earlier block is
+// skipped. isSecp[i] reports which list out[i] came from.
+//
+// Note: Lotus additionally drops a message whose (sender, nonce) does not
+// follow the sender's previously applied nonce. That only matters when two
+// blocks carry conflicting messages; callers that need exactness compare
+// len(out) with the receipt count and apply the nonce rule on mismatch.
+func ExecutionOrder(per []BlockMsgCIDs) (out []cid.Cid, isSecp []bool) {
 	seen := make(map[cid.Cid]bool)
-	var out []cid.Cid
-	for _, c := range perBlock {
-		for _, mc := range c.bls {
+	for _, b := range per {
+		for _, mc := range b.Bls {
 			if seen[mc] {
 				continue
 			}
 			seen[mc] = true
 			out = append(out, mc)
+			isSecp = append(isSecp, false)
 		}
-	}
-	for _, c := range perBlock {
-		for _, mc := range c.secp {
+		for _, mc := range b.Secp {
 			if seen[mc] {
 				continue
 			}
 			seen[mc] = true
 			out = append(out, mc)
+			isSecp = append(isSecp, true)
 		}
 	}
+	return out, isSecp
+}
+
+// OrderedMessageCIDs returns ts's messages in the canonical Filecoin
+// application order (see ExecutionOrder). This is the order the child
+// tipset's ParentMessageReceipts AMT is indexed by, so receipt[i]
+// corresponds to OrderedMessageCIDs[i] (lantern#73, used by eth_getLogs to
+// pair events with tx hashes).
+func (s *Searcher) OrderedMessageCIDs(ctx context.Context, ts *ltypes.TipSet) ([]cid.Cid, error) {
+	per, err := s.BlockMessages(ctx, ts)
+	if err != nil {
+		return nil, err
+	}
+	out, _ := ExecutionOrder(per)
 	return out, nil
 }
 
@@ -210,55 +235,17 @@ func matchesParent(child, parent *ltypes.TipSet) bool {
 
 // findInTipset returns (index, true, nil) when msgCID appears in one of
 // ts's blocks' message AMTs. The index is the message's position in the
-// canonical "BLS messages then secp messages, in block-order" sequence
-// used by Filecoin's ParentMessageReceipts AMT.
+// execution order (per block: BLS then secp; see ExecutionOrder) used by
+// Filecoin's ParentMessageReceipts AMT.
 func (s *Searcher) findInTipset(ctx context.Context, ts *ltypes.TipSet, msgCID cid.Cid) (uint64, bool, error) {
-	var globalIdx uint64
-	type collected struct {
-		bls  []cid.Cid
-		secp []cid.Cid
+	per, err := s.BlockMessages(ctx, ts)
+	if err != nil {
+		return 0, false, err
 	}
-	perBlock := make([]collected, len(ts.Blocks()))
-	for bi, b := range ts.Blocks() {
-		bls, secp, err := s.fetchMsgMeta(ctx, b.Messages)
-		if err != nil {
-			return 0, false, fmt.Errorf("block %s msgmeta: %w", b.Cid(), err)
-		}
-		perBlock[bi] = collected{bls: bls, secp: secp}
-	}
-	// First pass: count BLS messages across all blocks (no dedup; the
-	// chain spec applies them in block order). For correct receipt
-	// index alignment, we must mirror Lotus' message application order:
-	// BLS-msgs-for-block-0, BLS-msgs-for-block-1, ..., secp-msgs-block-0,
-	// secp-msgs-block-1, with duplicates skipped across blocks.
-	//
-	// Important: messages that appear in multiple blocks are only
-	// applied once. We track a `seen` set.
-	seen := make(map[cid.Cid]bool)
-	// BLS pass.
-	for _, c := range perBlock {
-		for _, mc := range c.bls {
-			if seen[mc] {
-				continue
-			}
-			if mc == msgCID {
-				return globalIdx, true, nil
-			}
-			seen[mc] = true
-			globalIdx++
-		}
-	}
-	// Secp pass.
-	for _, c := range perBlock {
-		for _, mc := range c.secp {
-			if seen[mc] {
-				continue
-			}
-			if mc == msgCID {
-				return globalIdx, true, nil
-			}
-			seen[mc] = true
-			globalIdx++
+	ordered, _ := ExecutionOrder(per)
+	for i, mc := range ordered {
+		if mc == msgCID {
+			return uint64(i), true, nil
 		}
 	}
 	return 0, false, nil

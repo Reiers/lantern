@@ -152,12 +152,19 @@ type ethCallObject struct {
 // code 3), or (_, false, nil) when the call can't be served locally and
 // the caller should fall back to the VMBridge.
 func (c *ChainAPI) localEthCall(ctx context.Context, call ethCallObject) (string, bool, error) {
+	res, served, _, err := c.localEthCallWithReason(ctx, call)
+	return res, served, err
+}
+
+// localEthCallWithReason is localEthCall plus, when served==false, a short
+// human-readable reason for the local miss (logged by EthCall).
+func (c *ChainAPI) localEthCallWithReason(ctx context.Context, call ethCallObject) (string, bool, string, error) {
 	if c.Accessor == nil || c.BlockGetter == nil {
-		return "", false, nil // can't serve locally
+		return "", false, "local state not wired (no accessor/block getter)", nil
 	}
 	toRaw, err := decodeEthAddr(call.To)
 	if err != nil {
-		return "", false, nil // malformed -> let bridge try
+		return "", false, "malformed or missing 'to' (contract creation / bad address)", nil
 	}
 	dataHex := call.Data
 	if dataHex == "" {
@@ -165,7 +172,7 @@ func (c *ChainAPI) localEthCall(ctx context.Context, call ethCallObject) (string
 	}
 	input, err := decodeHexData(dataHex)
 	if err != nil {
-		return "", false, nil
+		return "", false, "malformed call data hex", nil
 	}
 	var from evm.Address
 	if call.From != "" {
@@ -246,14 +253,14 @@ func (c *ChainAPI) localEthCall(ctx context.Context, call ethCallObject) (string
 		// is NOT a definitive answer; fall back to the bridge. Record the
 		// reason so we can see what local coverage is still missing.
 		log.Debugw("eth_call: local exec fault, will fall back", "to", call.To, "reason", err.Error())
-		return "", false, nil
+		return "", false, "local exec fault: " + err.Error(), nil
 	}
 	if res.Reverted {
 		// A revert IS a definitive answer. Surface it so EthCall maps it
 		// to eth error code 3 with the revert payload.
-		return "0x" + hex.EncodeToString(res.Return), true, &revertError{data: res.Return}
+		return "0x" + hex.EncodeToString(res.Return), true, "", &revertError{data: res.Return}
 	}
-	return "0x" + hex.EncodeToString(res.Return), true, nil
+	return "0x" + hex.EncodeToString(res.Return), true, "", nil
 }
 
 // revertError carries EVM revert data for the JSON-RPC error mapping
