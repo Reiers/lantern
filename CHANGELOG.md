@@ -4,6 +4,17 @@ All notable changes to Lantern.
 
 ## Unreleased
 
+### Bridge-off eth receipts for stock Curio-PDP
+Stock Curio-PDP against a bridge-off Lantern registered and sent txs fine, but data-set creation never completed: Curio's `message_waits_eth` receipt carried `logs: []`, so `DataSetCreated event not found in receipt` / `failed to extract pieces from receipt`, and some receipts never resolved at all.
+
+- **Local `eth_getTransactionReceipt` with real logs, Lotus parity.** Served from the canonical chain walked by parent links from head (bounded, default 2000 epochs, `LANTERN_ETH_TX_LOOKBACK` / `ChainAPI.EthTxLookback`). The receipt comes from the child tipset's `ParentMessageReceipts` (CID-verified) and logs from the receipt's events AMT: emitter resolved to its f410 address, `logIndex` counted over every event in the tipset, `blockHash` = Lotus tipset-key hash of the inclusion tipset, Lotus `transactionIndex`, `effectiveGasPrice` from `ComputeGasOutputs`, `cumulativeGasUsed` 0x0, `root`, `logsBloom`, `contractAddress` for EAM creates. Verified field-for-field against Glif on two real calibration Curio txs (fixture test).
+- **Works for txs we did not publish** (e.g. after a Lantern restart): matched by recomputing the eth tx hash of delegated-signature messages, or by the CID form of the hash for native messages. Not-yet-included returns `null` like Lotus; bridge-off unknown hashes return `null` instead of `FEVM method requires --vm-bridge-rpc`.
+- **Partial header-store tipsets no longer hide txs.** The store can hold only some blocks of a tipset; inclusion tipsets are now rebuilt from the child's `Parents` key (missing headers fetched by CID and verified). Previously a tx in a block the node never received resolved as pending forever.
+- **`eth_getTransactionByHash`** uses the same path and returns the full Lotus tx object (accessList, real blockHash / transactionIndex).
+- **Message execution order fixed** (`chain/msgsearch`): per block, BLS then secp (Lotus `ApplyBlocks` / `MessagesForTipset`), not all-BLS-first. Affects receipt indexing in `StateSearchMsg` and `eth_getLogs` on multi-block tipsets. Order is cross-checked against the receipt count, with the Lotus nonce rule applied on mismatch.
+- **`eth_call` local-miss logging.** Each local miss logs at INFO, rate-limited per (to, selector, reason), with the reason (exec fault text, malformed input, ...), so bridge-off F8 gaps are visible in prod.
+- **`Filecoin.EthAddressToFilecoinAddress`** implemented (Curio calls it).
+
 ### NV29 (Solstice) support
 Mainnet (epoch 6470279) and calibration (epoch 4109133) are both on network version 29 with builtin-actors v19. v1.10.0 stopped at actors v18 and NV27, so on both networks every FEVM contract (PDPVerifier, FWSS, ServiceProviderRegistry, USDFC, ...) was served as having no code by local `eth_getCode`, and stock Curio-PDP failed with `GetPDPConfig: no contract code at given address`.
 
