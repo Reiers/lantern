@@ -479,7 +479,12 @@ node_type_setup() {
 trust_bootstrap() {
   step "Anchoring to the chain (multi-source quorum)"
 
-  local q="${LANTERN_BOOTSTRAP_QUORUM:-5}"
+  # F10: the quorum counts DISTINCT OPERATORS (endpoints of one operator
+  # count once, any conflicting answer fails). Empty = lantern's network
+  # default (3). LANTERN_BOOTSTRAP_QUORUM overrides it.
+  local q="${LANTERN_BOOTSTRAP_QUORUM:-}"
+  local qflag=""
+  [[ -n "$q" ]] && qflag="--bootstrap-quorum=$q"
   local t="${LANTERN_BOOTSTRAP_TIMEOUT:-90s}"
   # Since V1.3, `lantern init` writes the anchor to the per-network dir
   # (<home>/mainnet/bootstrap-anchor.json), not the top level. The
@@ -501,8 +506,8 @@ trust_bootstrap() {
     return
   fi
 
-  info "Asking $q+ independent sources for the current F3-finalized head."
-  info "Refusing to anchor if they disagree."
+  info "Asking independent operators for the current F3-finalized head (${q:-3}+ must agree)."
+  info "Refusing to anchor if any of them disagree."
 
   local bin="${LANTERN_HOME}/lantern"
   # Fallback quorum: if the full quorum can't be reached (some public RPC
@@ -513,18 +518,18 @@ trust_bootstrap() {
   # LANTERN_BOOTSTRAP_MIN_QUORUM (fallback floor).
   local qmin="${LANTERN_BOOTSTRAP_MIN_QUORUM:-3}"
   if env LANTERN_HOME="$LANTERN_HOME" "$bin" init \
-        --bootstrap-quorum="$q" \
+        $qflag \
         --bootstrap-timeout="$t" \
         --no-wallet $extra_peers >/dev/null 2>&1; then
     : # full quorum reached
-  elif [[ "$qmin" -lt "$q" ]]; then
-    warn "Couldn't reach $q-source agreement (some public endpoints flaked)."
-    info "Retrying at the fallback floor of ${BOLD}${qmin}${RESET} independent sources."
+  elif [[ -n "$q" && "$qmin" -lt "$q" ]]; then
+    warn "Couldn't reach $q-operator agreement (some public endpoints flaked)."
+    info "Retrying at the fallback floor of ${BOLD}${qmin}${RESET} distinct operators."
     env LANTERN_HOME="$LANTERN_HOME" "$bin" init \
         --bootstrap-quorum="$qmin" \
         --bootstrap-timeout="$t" \
         --no-wallet $extra_peers >/dev/null 2>&1 || \
-      fail "Quorum bootstrap failed even at $qmin sources. Check your network/firewall, then run 'lantern doctor' for per-source diagnostics. You can also set LANTERN_BOOTSTRAP_TIMEOUT=180s and re-run."
+      fail "Quorum bootstrap failed even at $qmin operators. Check your network/firewall, then run 'lantern doctor' for per-source diagnostics. You can also set LANTERN_BOOTSTRAP_TIMEOUT=180s and re-run."
   else
     fail "Quorum bootstrap failed. Try 'lantern doctor' for per-source diagnostics, or set LANTERN_BOOTSTRAP_TIMEOUT=180s and re-run."
   fi

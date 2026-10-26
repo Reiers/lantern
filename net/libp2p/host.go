@@ -34,6 +34,7 @@ import (
 	"github.com/multiformats/go-multiaddr"
 
 	"github.com/Reiers/lantern/internal/buildinfo"
+	"github.com/Reiers/lantern/net/dnsaddr"
 )
 
 // HostConfig configures the Lantern libp2p node.
@@ -149,6 +150,12 @@ func (h *Host) MaxPeers() int { return h.cfgMax }
 // New constructs and starts a libp2p Host and a GossipSub PubSub on it.
 // The caller is responsible for calling Close().
 func New(ctx context.Context, cfg HostConfig) (*Host, error) {
+	// F10: expand /dnsaddr roots (Lotus ships them in the bootstrap
+	// lists) into /p2p multiaddrs once, so the bootstrap dial, the
+	// gossipsub direct-peer set and the #80 trusted floor all see the
+	// peers behind them. No-op when the lists carry no /dnsaddr root.
+	cfg.BootstrapPeers = dnsaddr.ExpandStrings(ctx, cfg.BootstrapPeers)
+	cfg.GossipSubDirectPeers = dnsaddr.ExpandStrings(ctx, cfg.GossipSubDirectPeers)
 	if len(cfg.ListenAddrs) == 0 {
 		cfg.ListenAddrs = []string{
 			"/ip4/0.0.0.0/tcp/0",

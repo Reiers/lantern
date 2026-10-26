@@ -206,8 +206,9 @@ git clone https://github.com/Reiers/lantern.git
 cd lantern
 CGO_ENABLED=0 go build -o lantern ./cmd/lantern
 
-# First-run wizard — includes the multi-source bootstrap quorum.
-./lantern init --bootstrap-quorum=5
+# First-run wizard: multi-source bootstrap quorum (3 distinct operators must
+# agree, no source may disagree). The daemon refuses to start without it.
+./lantern init
 
 # Run the daemon (Lotus-compatible RPC on 127.0.0.1:1234)
 ./lantern daemon
@@ -416,6 +417,7 @@ header store), use:
 ```sh
 lantern stop                 # if it's running as a service
 lantern reset --chain-state  # clears header store + trust anchor ONLY
+lantern repair               # writes a fresh quorum anchor
 lantern daemon               # re-syncs from live head
 ```
 

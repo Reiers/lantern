@@ -198,6 +198,112 @@ headers and only checked for monotonicity, not recomputed (that needs
 power state). The quorum is an eclipse and single-source defence on the
 un-finalized tip; F3 finality (section 2.2) is what fully closes it.
 
+### 2.9 Bootstrap quorum: distinct operators, zero conflicts (F10/F11)
+
+`lantern init`, `repair`, `doctor`, the dashboard renew action and the
+bridge-off auto-reset all run the same probe (`chain/bootstrap`): ask every
+source for its latest F3 finality certificate in parallel, then accept a
+finality only when
+
+1. sources run by at least **3 distinct operators** (`--bootstrap-quorum`,
+   default 3 on mainnet and calibration) return the same (instance,
+   tipset key, power table), and
+2. **no responder conflicts**: if any source, counted or not, names a
+   different tipset for an instance another source answered, the probe
+   fails with `ErrConflict`. It is not retried and no majority overrides it.
+   F3 finality is unique per instance (GPBFT safety), so a same-instance
+   disagreement means a source is lying, broken, or on another network.
+   An answer for a different instance is lag, not conflict. After the
+   threshold is met the probe keeps listening for 3 s so a slightly slower
+   conflicting answer is still seen.
+
+**Why operators, not endpoints.** The pre-F10 rule was "5 sources agree",
+counted per endpoint. On 2026-10-26 the reachable mainnet sources were the
+Glif RPC, the chain.love RPC, the chain.love libp2p bootstrap peer and one
+ChainSafe peer. Glif is served from chain.love infrastructure (same IP
+46.229.170.7 as api.chain.love, `x-chainlove-lb-*` load-balancer headers, the
+same non-release Lotus build, a bare HEAD redirects to filecoin.chain.love),
+so three of those four "independent" votes were one operator, and
+`--bootstrap-quorum 4` (the workaround users reached for) meant **two**
+operators. Counting operators is strictly stronger even with a lower
+number: today's default needs 3 different organisations, where the old
+default of 5 could be met by 2.
+
+**How a source is attributed** (`bootstrap.OperatorOf`,
+`OperatorOfMultiaddr`):
+
+* RPC endpoints: the registrable domain of the URL host, folded through a
+  small evidence-backed alias table (`glif.io -> chain.love`,
+  `chainsafe.dev -> chainsafe-fil.io`).
+* libp2p bootstrap peers: the DNS domain in the bootstrap multiaddr. Peers
+  that come from a `/dnsaddr` root are attributed to the domain that
+  publishes the TXT records. A peer listed with several addresses is one
+  source. A bare IP counts as its own operator; a bare peer ID as itself.
+* `--peer` URLs: the URL's domain, so a node you run yourself is its own
+  operator and adds a vote.
+* The Lantern gateway is not counted unless `--count-gateway`; it votes as its
+  upstream (Glif, therefore chain.love).
+
+This is a heuristic. It cannot prove two domains are different
+organisations, only collapse the duplicates we know about. Every alias in
+the table carries the evidence and the date it was observed.
+
+**Default source set (verified 2026-10-26).** Bootstrap peers are Lotus
+v1.38.3's `build/bootstrap/*.pi` verbatim; `/dnsaddr` roots are resolved at
+runtime with an embedded snapshot as the offline fallback.
+
+| Network | Operator | Sources |
+|---|---|---|
+| mainnet | chain.love | api.chain.love RPC, api.node.glif.io RPC, bootstrap.filecoin.chain.love peer |
+| mainnet | chainsafe-fil.io | bootstrap-mainnet-{0,1,2} peers (only -1 serves F3 cert-exchange today) |
+| mainnet | filfox.info | filfox.info RPC |
+| mainnet | ankr.com | rpc.ankr.com/filecoin RPC |
+| calibration | chain.love | api.calibration.node.glif.io RPC, bootstrap.calibration.filecoin.chain.love peer |
+| calibration | chainsafe-fil.io | bootstrap-calibnet-{0,1,2} peers (only -1 serves F3 cert-exchange today) |
+| calibration | filfox.info | calibration.filfox.info RPC |
+| calibration | ankr.com | rpc.ankr.com/filecoin_testnet RPC |
+
+Four operators per network, three required: one can be down. Dropped in
+the refresh: the filincubator Venus peer (no DNS record) and the devtty.eu
+peer (TCP and QUIC time out). Some public endpoints reject Go's default
+HTTP User-Agent (filfox answered 403), so Lantern identifies itself as
+`lantern/<version>`.
+
+**Stale F3.** Mainnet F3 has been stuck at instance 466453 (epoch 5824156)
+since spring 2026, about 231 days behind the live head on 2026-10-26. The
+probe still reaches agreement on that certificate, and #167 then refuses to
+anchor on it: init falls back to EC head agreement at the live head. In
+that fallback a stale certificate is now ignored entirely (F11), because
+"consistent with F3" is vacuous for a months-old finality: every live head
+is a descendant. Without that, the old "F3-consistent heaviest" rule
+accepted a single operator's head. The EC fallback requires 2 distinct
+operators to agree on (state root, tipset key), compared at a common epoch
+a few epochs below the lowest sampled head when the heads straddle an epoch
+boundary. That is a lower bar than the 3-operator F3 quorum; it is the bar
+the #54 boot anchor already used, and it is documented in
+`bootstrap-anchor.json` as `"source": "ec-multi-source"`. Calibration F3 is live, so
+calibration anchors on the F3 quorum directly.
+
+**No anchor, no daemon (F11).** `lantern daemon` used to fall back silently
+to a gateway+RPC head when init had not written an anchor. That path is
+weaker than init's quorum, so the daemon now refuses to start without
+`bootstrap-anchor.json` and tells the operator to run `lantern init` (or
+`lantern doctor` to see what failed). `--allow-rpc-anchor` restores the old path
+with a loud warning. Devnet and `--insecure-anchor` keep their existing explicit
+single-endpoint behaviour.
+
+**Tradeoffs, stated plainly.**
+
+* Liveness vs safety: a single misbehaving default source can block
+  bootstrap (any conflict fails). It cannot steer it. Failing closed is the
+  intended behaviour; `--peer` lets an operator add a source they trust.
+* 3 operators is the floor for a fresh install. `--bootstrap-quorum 2` or `1`
+  is possible and the failure hint offers it, but each step down is one
+  fewer organisation an attacker has to compromise.
+* Independence of Ankr's Filecoin backend is not provable from outside. It
+  runs a different Lotus build from Glif/chain.love and Filfox, and it is
+  never needed alone: the other three operators already meet the default.
+
 ---
 
 ## 3. What Lantern does NOT trust
@@ -207,8 +313,8 @@ of the following as input that must clear local verification before use.
 
 ### 3.1 RPC providers (Glif, infura, etc.)
 
-The default daemon uses `gateway.lantern.reiers.io` for the initial
-trusted-head fetch and Glif as a fallback. Both responses are immediately
+The daemon boots from the anchor written by `lantern init` (section 2.9) and
+uses `gateway.lantern.reiers.io` and Glif for cold blocks and fallback reads. Both responses are immediately
 CID-verified locally; if a provider lies about the state root, the
 verifier rejects the response. **Lantern never returns unverified data
 to its caller, no matter what an upstream RPC says.**

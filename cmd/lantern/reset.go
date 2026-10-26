@@ -3,8 +3,9 @@
 // The official, key-safe recovery path for a node that has been stopped
 // for a long time and boots stuck on a stale head. It clears ONLY
 // rebuildable chain state (the persistent header store and the on-disk
-// bootstrap anchor) and then the next `lantern daemon` re-syncs from the
-// live head.
+// bootstrap anchor); `lantern repair` then writes a fresh quorum anchor and
+// the next `lantern daemon` re-syncs from the live head. (F11: the daemon
+// refuses to boot without a quorum anchor unless --allow-rpc-anchor.)
 //
 // It is deliberately impossible for this command to delete secrets. The
 // only thing it removes is an explicit allow-list of chain-state paths;
@@ -104,7 +105,9 @@ func cmdReset(args []string) error {
 
 	if len(present) == 0 {
 		fmt.Println("No chain state to clear (header store + anchor already absent).")
-		fmt.Println("Next `lantern daemon` will cold-bootstrap from live head.")
+		fmt.Println("Write a fresh trust anchor, then start the daemon:")
+		fmt.Printf("  lantern repair --filecoin-network %s\n", filNet)
+		fmt.Printf("  lantern daemon --network %s\n", filNet)
 		return nil
 	}
 
@@ -145,7 +148,9 @@ func cmdReset(args []string) error {
 	}
 
 	fmt.Printf("\nDone. Cleared %d chain-state entr%s.\n", removed, plural(removed))
-	fmt.Println("Start the daemon again and it will re-sync from live head:")
+	fmt.Println("Write a fresh trust anchor from a new quorum, then start the daemon")
+	fmt.Println("(it refuses to boot without one, F11):")
+	fmt.Printf("  lantern repair --filecoin-network %s\n", filNet)
 	fmt.Printf("  lantern daemon --network %s\n", filNet)
 	fmt.Println("\nNote: if the daemon is currently running, stop it first")
 	fmt.Println("(`lantern stop`) so the header store isn't recreated mid-reset.")

@@ -25,7 +25,7 @@ import (
 
 func cmdDoctor(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
-	quorum := fs.Int("bootstrap-quorum", 0, "Number of agreeing sources required for a healthy verdict (0 = network-default: mainnet=5, calibration=3)")
+	quorum := fs.Int("bootstrap-quorum", 0, "Number of distinct operators that must agree for a healthy verdict (0 = network default: 3). Any conflicting answer is unhealthy regardless.")
 	timeout := fs.Duration("bootstrap-timeout", 60*time.Second, "Total wall-clock budget for the probe")
 	gateway := fs.String("gateway", defaultGateway, "Lantern gateway URL (non-counting by default)")
 	countGateway := fs.Bool("count-gateway", false, "Count the Lantern gateway in the quorum tally")
@@ -42,11 +42,7 @@ func cmdDoctor(args []string) error {
 		return err
 	}
 	if *quorum == 0 {
-		if filNet == build.Calibration {
-			*quorum = 3
-		} else {
-			*quorum = 5
-		}
+		*quorum = defaultBootstrapQuorum(filNet)
 	}
 
 	if err := migrateLegacyDataDir(filNet); err != nil {
@@ -61,7 +57,9 @@ func cmdDoctor(args []string) error {
 			a.Instance, a.Epoch, shortStr(a.StateRoot, 24),
 			a.CapturedAt.Format("2006-01-02 15:04:05Z"))
 	} else {
-		fmt.Println("No bootstrap-anchor.json present yet (run `lantern init`).")
+		fmt.Println("✗ No bootstrap-anchor.json yet: `lantern init` has not completed for this network.")
+		fmt.Println("  `lantern daemon` refuses to start without it (override: --allow-rpc-anchor, weaker trust).")
+		fmt.Printf("  If the probe below succeeds, run: lantern init --filecoin-network %s --no-wallet\n", filNet)
 	}
 	fmt.Println()
 
@@ -82,13 +80,15 @@ func cmdDoctor(args []string) error {
 	})
 	fmt.Println()
 	if err != nil {
+		// runBootstrapQuorum already printed the per-source report and
+		// the operator-aware hint (F10).
+		if errors.Is(err, bootstrap.ErrConflict) {
+			fmt.Println("✗ Lantern is NOT in a healthy quorum state: sources CONFLICT (see above).")
+			return err
+		}
 		if errors.Is(err, bootstrap.ErrQuorumNotReached) || errors.Is(err, bootstrap.ErrInsufficientSources) {
-			fmt.Println("✗ Lantern is NOT in a healthy quorum state.")
-			fmt.Println("  Possible fixes:")
-			fmt.Println("    - check network connectivity (try `curl https://api.node.glif.io/rpc/v1`)")
-			fmt.Println("    - add a trusted --peer URL")
-			fmt.Println("    - lower --bootstrap-quorum (NOT recommended below 3)")
-			fmt.Println("    - run `lantern repair` once the swarm is reachable to refresh the anchor")
+			fmt.Println("✗ Lantern is NOT in a healthy quorum state (see the hints above).")
+			fmt.Println("  Once the probe passes, `lantern repair` refreshes the anchor.")
 			return err
 		}
 		return err
@@ -105,7 +105,7 @@ func cmdDoctor(args []string) error {
 
 func cmdRepair(args []string) error {
 	fs := flag.NewFlagSet("repair", flag.ExitOnError)
-	quorum := fs.Int("bootstrap-quorum", 0, "Number of agreeing sources required (0 = network-default: mainnet=5, calibration=3)")
+	quorum := fs.Int("bootstrap-quorum", 0, "Number of distinct operators that must agree (0 = network default: 3)")
 	timeout := fs.Duration("bootstrap-timeout", 60*time.Second, "Total wall-clock budget")
 	gateway := fs.String("gateway", defaultGateway, "Lantern gateway URL")
 	countGateway := fs.Bool("count-gateway", false, "Count the gateway in the quorum")
@@ -122,11 +122,7 @@ func cmdRepair(args []string) error {
 		return err
 	}
 	if *quorum == 0 {
-		if filNet == build.Calibration {
-			*quorum = 3
-		} else {
-			*quorum = 5
-		}
+		*quorum = defaultBootstrapQuorum(filNet)
 	}
 
 	if err := migrateLegacyDataDir(filNet); err != nil {

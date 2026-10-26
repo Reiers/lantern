@@ -4,6 +4,20 @@ All notable changes to Lantern.
 
 ## Unreleased
 
+### Mainnet bootstrap works out of the box (F10, F11)
+A fresh `lantern init --filecoin-network mainnet` failed with "quorum not reached: no single tipset reached 5 sources (countable=9, counted=4)": most libp2p bootstrap peers were dead, and the 5-source default could not be met. The bar is now counted in distinct operators, which is both reachable and stronger.
+
+- **Operator-aware quorum.** `chain/bootstrap` counts DISTINCT OPERATORS, not endpoints. Default: 3 operators must agree on the same F3 finality (mainnet and calibration), and **any conflicting answer for the same instance fails the probe** (`ErrConflict`, never retried, never outvoted). The probe keeps listening 3 s after the threshold so a late conflict is still seen. Different-instance answers are lag, not conflict.
+- **Glif is chain.love.** api.node.glif.io and api.calibration.node.glif.io are served from chain.love infrastructure (same IP as api.chain.love, `x-chainlove-lb-*` headers, same Lotus build, HEAD redirects to filecoin.chain.love; observed 2026-10-26). `bootstrap.OperatorOf` now folds `glif.io` onto `chain.love` (and `chainsafe.dev` onto `chainsafe-fil.io`). The old 5-source default could be met by two operators; the `--bootstrap-quorum 4` workaround meant two. The #153 "independent RPC" for mainnet (boot anchor + headcheck) moves from chain.love to Filfox.
+- **Bootstrap peers refreshed from lotus v1.38.3** (`build/bootstrap/*.pi` verbatim). `/dnsaddr` roots are now resolved (new `net/dnsaddr`, embedded snapshot as offline fallback) for the libp2p host, DHT, gossipsub direct peers, the #80 trusted floor and the quorum. Removed: the filincubator Venus peer (no DNS) and devtty.eu (TCP/QUIC time out). A peer listed with several addresses is one quorum source, not two.
+- **More operators.** Mainnet RPC sources add Filfox and Ankr; calibration adds Filfox and Ankr testnet. Default sets now span 4 operators per network (chain.love, ChainSafe, Filfox, Ankr), 3 required.
+- **HTTP User-Agent.** RPC clients send `lantern/<version>`. Filfox returns 403 to Go's default User-Agent, which silently dropped it from the quorum and the boot anchor.
+- **Failure guidance.** init/doctor/repair print which sources failed (with operator), how many distinct operators answered vs required, and the flags that change the outcome (`--peer`, `--no-libp2p`, `--bootstrap-quorum N`). A conflict prints a separate explanation and does not suggest lowering the quorum. `lantern doctor` says when no anchor exists yet and what that means for the daemon.
+- **F11: no anchor, no daemon.** `lantern daemon` no longer silently anchors via gateway+RPC agreement when init never wrote `bootstrap-anchor.json`; it refuses with instructions. `--allow-rpc-anchor` restores the old path with a loud WARN. Devnet and `--insecure-anchor` are unchanged. `lantern reset --chain-state` now points at `lantern repair` before restarting.
+- **F11: stale F3 handled honestly.** Mainnet F3 is stuck at instance 466453 (epoch 5824156, ~231 days behind). The EC head-agreement fallback ignores a stale certificate instead of treating it as a cross-check (it made the single-operator "F3-consistent heaviest" rule reachable), re-samples on disagreement and compares independent operators at a common epoch when their heads straddle an epoch boundary.
+- **Installer** passes no `--bootstrap-quorum` by default (uses lantern's default); `LANTERN_BOOTSTRAP_QUORUM` still overrides, now in operators.
+- Reasoning and the source/operator table: TRUST-MODEL.md section 2.9.
+
 ### Bridge-off eth receipts for stock Curio-PDP
 Stock Curio-PDP against a bridge-off Lantern registered and sent txs fine, but data-set creation never completed: Curio's `message_waits_eth` receipt carried `logs: []`, so `DataSetCreated event not found in receipt` / `failed to extract pieces from receipt`, and some receipts never resolved at all.
 

@@ -16,6 +16,7 @@ import (
 
 	"github.com/Reiers/lantern/chain/bootstrap"
 	ltypes "github.com/Reiers/lantern/chain/types"
+	"github.com/Reiers/lantern/internal/buildinfo"
 )
 
 // RPCHeadSource is a HeadSource backed by a Lotus-compatible JSON-RPC
@@ -105,7 +106,7 @@ func (s *GatewayHeadSource) Operator() string {
 	if s.upstream != "" {
 		return s.upstream
 	}
-	return bootstrap.DefaultGatewayUpstream
+	return bootstrap.OperatorOf(bootstrap.DefaultGatewayUpstream)
 }
 
 func (s *GatewayHeadSource) HeadEpoch(ctx context.Context) (abi.ChainEpoch, error) {
@@ -153,6 +154,7 @@ func (s *RPCHeadSource) HeadEpoch(ctx context.Context) (abi.ChainEpoch, error) {
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", buildinfo.HTTPUserAgent())
 	if s.token != "" {
 		req.Header.Set("Authorization", "Bearer "+s.token)
 	}
@@ -203,6 +205,7 @@ func (s *RPCHeadSource) TipSetAt(ctx context.Context, epoch abi.ChainEpoch) (Tip
 		return TipSetRef{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", buildinfo.HTTPUserAgent())
 	if s.token != "" {
 		req.Header.Set("Authorization", "Bearer "+s.token)
 	}

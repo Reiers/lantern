@@ -1,20 +1,21 @@
 // Calibration libp2p bootstrap peers. Copied verbatim from
 // github.com/filecoin-project/lotus/build/bootstrap/calibnet.pi at tag
-// v1.36.0 (2026-05-23 verified). See LICENSE.
+// v1.38.3 (refreshed 2026-10-26, F10). See LICENSE.
 //
 // These are the seed peers Lantern dials on startup to enter the Filecoin
 // calibration DHT + gossipsub mesh. The calibration network name is
 // "calibrationnet" (confirmed live against api.calibration.node.glif.io
-// 2026-05-23) — note this differs from mainnet's "testnetnet" wire-name.
+// 2026-05-23), which differs from mainnet's "testnetnet" wire-name.
+//
+// The /dnsaddr root is expanded at runtime by net/dnsaddr, with
+// BootstrapDNSAddrSnapshot (bootstrap_mainnet.go) as the offline fallback.
 
 package build
 
 // CalibnetBootstrapPeers is the canonical calibration bootstrap multiaddr list.
 var CalibnetBootstrapPeers = []string{
 	"/dns/bootstrap.calibration.filecoin.chain.love/tcp/1237/p2p/12D3KooWQPYouEAsUQKzvFUA9sQ8tz4rfpqtTzh2eL6USd9bwg7x",
-	"/dns/bootstrap-calibnet-0.chainsafe-fil.io/tcp/34000/p2p/12D3KooWABQ5gTDHPWyvhJM7jPhtNwNJruzTEo32Lo4gcS5ABAMm",
-	"/dns/bootstrap-calibnet-1.chainsafe-fil.io/tcp/34000/p2p/12D3KooWS3ZRhMYL67b4bD5XQ6fcpTyVQXnDe8H89LvwrDqaSbiT",
-	"/dns/bootstrap-calibnet-2.chainsafe-fil.io/tcp/34000/p2p/12D3KooWEiBN8jBX8EBoM3M47pVRLRWV812gDRUJhMxgyVkUoR48",
+	"/dnsaddr/bootstrap-calibnet.chainsafe-fil.io",
 }
 
 // CalibnetGossipTopicMessages is the calibration message-pool gossipsub topic.

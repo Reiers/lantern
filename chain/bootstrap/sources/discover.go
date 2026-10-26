@@ -19,6 +19,7 @@ import (
 	"github.com/multiformats/go-multiaddr"
 
 	"github.com/Reiers/lantern/chain/bootstrap"
+	"github.com/Reiers/lantern/net/dnsaddr"
 )
 
 // DefaultLanternBeacons is the curated set of known-good Lantern beacons
@@ -42,28 +43,39 @@ var DefaultLanternBeacons = []string{}
 // MainnetPublicForestURLs is the mainnet-only subset of the public
 // JSON-RPC endpoints. Use this when bootstrapping a mainnet node.
 //
-// Curated to be operationally independent: Glif (Protocol Labs
-// infra), chain.love (Protocol Labs community), and any user-added
-// --peer URLs add to this base set. The quorum tally treats each as
-// one vote regardless of operator, so users who want stronger
-// independence guarantees should add their own --peer flags.
+// The quorum counts DISTINCT OPERATORS (F10, bootstrap.OperatorOf), not
+// endpoints. Verified 2026-10-26 to serve Filecoin.F3GetLatestCertificate:
+//
+//   - api.node.glif.io      operator chain.love (Glif is served from
+//     chain.love infrastructure; see bootstrap.operatorAliases)
+//   - api.chain.love        operator chain.love (same vote as Glif)
+//   - filfox.info           operator filfox.info (own Lotus build)
+//   - rpc.ankr.com/filecoin operator ankr.com (own Lotus build)
+//
+// Glif stays in the list because it is a second endpoint (liveness) and a
+// conflict witness; it never adds a vote on top of chain.love. Together
+// with the libp2p bootstrap peers (chain.love, ChainSafe) the default
+// mainnet set spans 4 distinct operators.
 var MainnetPublicForestURLs = []string{
 	"https://api.node.glif.io/rpc/v1",
 	"https://api.chain.love/rpc/v1",
+	"https://filfox.info/rpc/v1",
+	"https://rpc.ankr.com/filecoin",
 }
 
 // CalibnetPublicForestURLs is the calibration subset of the public
 // JSON-RPC endpoints. Use this when bootstrapping a calibration node.
 //
-// Calibration has fewer publicly-curated archive endpoints than
-// mainnet. The quorum config for calibration drops to 3-of-N as a
-// result; operators wanting stricter quorum should add --peer URLs.
+// Verified 2026-10-26: Glif calibration (operator chain.love, a Forest
+// node), Filfox calibration and Ankr's testnet endpoint serve F3 certs.
+// calibration.filecoin.chain.love answers but errors on
+// F3GetLatestCertificate; forest-archive-calibnet does not answer. With
+// the libp2p peers (chain.love, ChainSafe) the default calibration set
+// spans 4 distinct operators.
 var CalibnetPublicForestURLs = []string{
 	"https://api.calibration.node.glif.io/rpc/v1",
-	// chain.love does NOT run a calibration endpoint as of 2026-05-23
-	// (verified). Add it if/when one comes online.
-	// ChainSafe forest-archive calibration: verify reachability before
-	// adding.
+	"https://calibration.filfox.info/rpc/v1",
+	"https://rpc.ankr.com/filecoin_testnet",
 }
 
 // DefaultPublicForestURLs is the curated set of public Filecoin
@@ -89,8 +101,10 @@ type SourceSetConfig struct {
 	// nil, no libp2p sources are added.
 	Host host.Host
 	// MainnetBootstrapPeers is the multiaddr list to query via
-	// cert-exchange (typically build.MainnetBootstrapPeers). Each
-	// successful dial becomes a Libp2pSource.
+	// cert-exchange (typically the network's build bootstrap list). It
+	// may contain /dnsaddr roots, which are expanded via net/dnsaddr.
+	// Each distinct peer ID becomes one Libp2pSource attributed to the
+	// operator of the list entry it came from.
 	MainnetBootstrapPeers []string
 	// MaxLibp2pPeers caps the number of libp2p sources added. Default 8.
 	MaxLibp2pPeers int
@@ -143,23 +157,16 @@ func BuildDefaultSources(cfg SourceSetConfig) []bootstrap.Source {
 
 	var out []bootstrap.Source
 
-	// 1. libp2p cert-exchange sources, one per known bootstrap peer.
+	// 1. libp2p cert-exchange sources, one per distinct bootstrap peer
+	// ID (F10: a peer listed with several addresses, e.g. tcp + quic, is
+	// one source, not two).
 	if cfg.Host != nil {
-		count := 0
-		for _, ma := range cfg.MainnetBootstrapPeers {
-			if count >= cfg.MaxLibp2pPeers {
-				break
-			}
-			pi, err := addrInfoFromString(ma)
-			if err != nil || pi.ID == "" {
-				continue
-			}
+		for _, p := range libp2pPeers(dnsaddr.Expand(context.Background(), cfg.MainnetBootstrapPeers), cfg.MaxLibp2pPeers) {
 			// Eagerly add the peer's addrs to the host's peerstore so
 			// certexchange.Request can dial. This is a no-op if the
 			// host has already connected via background bootstrap.
-			cfg.Host.Peerstore().AddAddrs(pi.ID, pi.Addrs, time.Hour)
-			out = append(out, NewLibp2pSource(cfg.Host, pi.ID, cfg.NetworkName, cfg.SourceTimeout))
-			count++
+			cfg.Host.Peerstore().AddAddrs(p.info.ID, p.info.Addrs, time.Hour)
+			out = append(out, NewLibp2pSourceForOperator(cfg.Host, p.info.ID, cfg.NetworkName, cfg.SourceTimeout, p.operator))
 		}
 	}
 
@@ -216,6 +223,39 @@ func BuildDefaultSources(cfg SourceSetConfig) []bootstrap.Source {
 		}
 	}
 
+	return out
+}
+
+type bootPeer struct {
+	info     peer.AddrInfo
+	operator string
+}
+
+// libp2pPeers merges expanded bootstrap entries by peer ID (keeping the
+// first operator attribution and every address), in input order, capped
+// at max distinct peers.
+func libp2pPeers(entries []dnsaddr.Entry, max int) []bootPeer {
+	var out []bootPeer
+	idx := map[peer.ID]int{}
+	for _, e := range entries {
+		pi, err := addrInfoFromString(e.Addr)
+		if err != nil || pi.ID == "" {
+			continue
+		}
+		if i, ok := idx[pi.ID]; ok {
+			out[i].info.Addrs = append(out[i].info.Addrs, pi.Addrs...)
+			continue
+		}
+		if max > 0 && len(out) >= max {
+			continue
+		}
+		op := bootstrap.OperatorOfMultiaddr(e.Origin)
+		if op == "" {
+			op = bootstrap.OperatorOfMultiaddr(e.Addr)
+		}
+		idx[pi.ID] = len(out)
+		out = append(out, bootPeer{info: pi, operator: op})
+	}
 	return out
 }
 

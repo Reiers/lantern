@@ -43,6 +43,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 
 	"github.com/Reiers/lantern/chain/bootstrap"
+	"github.com/Reiers/lantern/internal/buildinfo"
 )
 
 // ---------- JSON-RPC sources (Forest / Lantern gateway / user-peer) ----------
@@ -90,6 +91,10 @@ func NewUserPeerSource(name, url, token string, timeout time.Duration) bootstrap
 func (s *rpcSource) Name() string         { return s.name }
 func (s *rpcSource) Kind() bootstrap.Kind { return s.kind }
 
+// Operator attributes the endpoint to the operator behind its URL host
+// (F10), so two endpoints of one operator count once in the quorum.
+func (s *rpcSource) Operator() string { return bootstrap.OperatorOf(s.url) }
+
 func (s *rpcSource) LatestFinality(ctx context.Context) (bootstrap.Finality, error) {
 	timeout := s.timeout
 	if timeout <= 0 {
@@ -108,6 +113,7 @@ func (s *rpcSource) LatestFinality(ctx context.Context) (bootstrap.Finality, err
 		return bootstrap.Finality{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", buildinfo.HTTPUserAgent())
 	if s.token != "" {
 		req.Header.Set("Authorization", "Bearer "+s.token)
 	}
@@ -221,19 +227,37 @@ func cidsFromTipSetKey(encoded gpbft.TipSetKey) ([]cid.Cid, error) {
 // protocol (/f3/certexch/get/1/<networkName>). Use one per peer; the
 // quorum driver fans out across all libp2p sources in parallel.
 type Libp2pSource struct {
-	host    host.Host
-	peer    peer.ID
-	network gpbft.NetworkName
-	timeout time.Duration
+	host     host.Host
+	peer     peer.ID
+	network  gpbft.NetworkName
+	timeout  time.Duration
+	operator string
 }
 
-// NewLibp2pSource returns a Source for a single libp2p peer.
+// NewLibp2pSource returns a Source for a single libp2p peer. The peer has
+// no operator attribution; prefer NewLibp2pSourceForOperator.
 func NewLibp2pSource(h host.Host, p peer.ID, network gpbft.NetworkName, timeout time.Duration) bootstrap.Source {
 	return &Libp2pSource{host: h, peer: p, network: network, timeout: timeout}
 }
 
+// NewLibp2pSourceForOperator returns a Source for a single libp2p peer
+// attributed to operator (F10; usually bootstrap.OperatorOfMultiaddr of
+// the bootstrap list entry the peer came from).
+func NewLibp2pSourceForOperator(h host.Host, p peer.ID, network gpbft.NetworkName, timeout time.Duration, operator string) bootstrap.Source {
+	return &Libp2pSource{host: h, peer: p, network: network, timeout: timeout, operator: operator}
+}
+
 func (s *Libp2pSource) Name() string         { return "libp2p:" + s.peer.String() }
 func (s *Libp2pSource) Kind() bootstrap.Kind { return bootstrap.KindLibp2p }
+
+// Operator returns the operator the peer was attributed to, or a key
+// derived from the peer ID when unknown (one peer, one vote).
+func (s *Libp2pSource) Operator() string {
+	if s.operator != "" {
+		return s.operator
+	}
+	return "peer:" + s.peer.String()
+}
 
 func (s *Libp2pSource) LatestFinality(ctx context.Context) (bootstrap.Finality, error) {
 	if s.host == nil {
@@ -327,6 +351,17 @@ func (s *LanternBeaconSource) Name() string {
 	return "lantern-beacon:" + s.info.ID.String()
 }
 func (s *LanternBeaconSource) Kind() bootstrap.Kind { return bootstrap.KindLanternBeacon }
+
+// Operator attributes a beacon to the DNS domain or IP of its first
+// address, else to its peer ID.
+func (s *LanternBeaconSource) Operator() string {
+	for _, a := range s.info.Addrs {
+		if op := bootstrap.OperatorOfMultiaddr(a.String()); op != "" {
+			return op
+		}
+	}
+	return "peer:" + s.info.ID.String()
+}
 
 func (s *LanternBeaconSource) LatestFinality(ctx context.Context) (bootstrap.Finality, error) {
 	if s.host == nil {
