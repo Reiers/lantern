@@ -122,3 +122,82 @@ func TestPlistEscape(t *testing.T) {
 		}
 	}
 }
+
+// --- service install: network + extra daemon flags ---
+
+func TestServiceDaemonArgs(t *testing.T) {
+	got, err := serviceDaemonArgs("calibration", "172.17.0.1:1234", []string{"--allow-remote-rpc", "--metrics", "127.0.0.1:9092"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"daemon", "--network", "calibration", "--listen", "172.17.0.1:1234", "--allow-remote-rpc", "--metrics", "127.0.0.1:9092"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("args = %v, want %v", got, want)
+	}
+
+	// No network: daemon default (mainnet), unchanged legacy behaviour.
+	got, err = serviceDaemonArgs("", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, " ") != "daemon --listen "+defaultListen {
+		t.Errorf("default args = %v", got)
+	}
+
+	for _, bad := range [][]string{{"--network", "mainnet"}, {"--listen=0.0.0.0:1"}, {"-network=calibration"}} {
+		if _, err := serviceDaemonArgs("calibration", "", bad); err == nil {
+			t.Errorf("extra %v: expected error (must be a service install flag)", bad)
+		}
+	}
+	if _, err := serviceDaemonArgs("devnet", "", nil); err == nil {
+		t.Error("devnet service: expected error")
+	}
+	if _, err := serviceDaemonArgs("nope", "", nil); err == nil {
+		t.Error("invalid network: expected error")
+	}
+}
+
+func TestSystemdUnitTextCarriesDaemonArgs(t *testing.T) {
+	args, err := serviceDaemonArgs("calibration", "172.17.0.1:1234", []string{"--allow-remote-rpc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit := systemdUnitText("/opt/lantern/bin/lantern", args, "/srv/lantern", servicePassphrase{envFile: "/srv/lantern/pass.env"})
+	for _, want := range []string{
+		"ExecStart=/opt/lantern/bin/lantern daemon --network calibration --listen 172.17.0.1:1234 --allow-remote-rpc\n",
+		"Environment=LANTERN_HOME=/srv/lantern\n",
+		"EnvironmentFile=/srv/lantern/pass.env\n",
+	} {
+		if !strings.Contains(unit, want) {
+			t.Errorf("unit missing %q:\n%s", want, unit)
+		}
+	}
+}
+
+func TestSystemdQuoteArg(t *testing.T) {
+	cases := map[string]string{
+		"--allow-remote-rpc": "--allow-remote-rpc",
+		"/path with space":   `"/path with space"`,
+		"50%":                `"50%%"`,
+		"$HOME":              `"$$HOME"`,
+		`a"b`:                `"a\"b"`,
+		"":                   `""`,
+	}
+	for in, want := range cases {
+		if got := systemdQuoteArg(in); got != want {
+			t.Errorf("systemdQuoteArg(%q) = %s, want %s", in, got, want)
+		}
+	}
+}
+
+func TestLaunchdPlistTextCarriesDaemonArgs(t *testing.T) {
+	args, err := serviceDaemonArgs("calibration", "127.0.0.1:1234", []string{"--metrics", "127.0.0.1:9092"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pl := launchdPlistText("/usr/local/bin/lantern", args, "/Users/x/.lantern", "", "/l.log", "/l.err")
+	want := "    <string>/usr/local/bin/lantern</string>\n    <string>daemon</string>\n    <string>--network</string>\n    <string>calibration</string>\n    <string>--listen</string>\n    <string>127.0.0.1:1234</string>\n    <string>--metrics</string>\n    <string>127.0.0.1:9092</string>\n  </array>"
+	if !strings.Contains(pl, want) {
+		t.Errorf("plist ProgramArguments wrong:\n%s", pl)
+	}
+}

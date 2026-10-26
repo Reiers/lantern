@@ -24,6 +24,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/Reiers/lantern/build"
 )
 
 const (
@@ -61,8 +63,19 @@ func serviceInstall(args []string) error {
 	fs := flag.NewFlagSet("service install", flag.ExitOnError)
 	binary := fs.String("binary", currentBinary(), "Path to the lantern binary")
 	listen := fs.String("listen", defaultListen, "RPC listen address")
+	network := fs.String("network", "", "Filecoin network the service runs: mainnet | calibration (default mainnet). Passed to `lantern daemon --network`.")
 	passphraseFile := fs.String("passphrase-file", "", "Path to a file containing LANTERN_PASS for an encrypted keystore (chmod 600). When set, the service reads the passphrase from this file instead of running unencrypted.")
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: lantern service install [--network mainnet|calibration] [--listen addr] [--passphrase-file path] [-- <extra lantern daemon flags>]")
+		fmt.Fprintln(os.Stderr, "  example: lantern service install --network calibration --listen 172.17.0.1:1234 -- --allow-remote-rpc")
+		fs.PrintDefaults()
+	}
 	fs.Parse(args)
+
+	daemonArgs, err := serviceDaemonArgs(*network, *listen, fs.Args())
+	if err != nil {
+		return err
+	}
 
 	pp, err := resolveServicePassphrase(*passphraseFile)
 	if err != nil {
@@ -71,12 +84,64 @@ func serviceInstall(args []string) error {
 
 	switch runtime.GOOS {
 	case "darwin":
-		return installLaunchd(*binary, *listen, pp)
+		return installLaunchd(*binary, daemonArgs, pp)
 	case "linux":
-		return installSystemd(*binary, *listen, pp)
+		return installSystemd(*binary, daemonArgs, pp)
 	default:
 		return fmt.Errorf("service install: GOOS=%s not supported (try foreground: `lantern daemon`)", runtime.GOOS)
 	}
+}
+
+// serviceDaemonArgs builds the argument vector (after the binary) the
+// service runs: "daemon", the network, the listen address, then any extra
+// daemon flags the operator passed after "--" (for example
+// --allow-remote-rpc or --metrics). An empty network leaves the daemon
+// default (mainnet) in place.
+func serviceDaemonArgs(network, listen string, extra []string) ([]string, error) {
+	args := []string{"daemon"}
+	if network != "" {
+		n := build.Network(network)
+		if n != build.Mainnet && n != build.Calibration {
+			return nil, fmt.Errorf("service install: invalid --network %q: want mainnet or calibration", network)
+		}
+		args = append(args, "--network", string(n))
+	}
+	if listen == "" {
+		listen = defaultListen
+	}
+	args = append(args, "--listen", listen)
+	for _, a := range extra {
+		if a == "--network" || strings.HasPrefix(a, "--network=") || a == "-network" || strings.HasPrefix(a, "-network=") ||
+			a == "--listen" || strings.HasPrefix(a, "--listen=") || a == "-listen" || strings.HasPrefix(a, "-listen=") {
+			return nil, fmt.Errorf("service install: pass %s as a service install flag (before --), not as an extra daemon flag", a)
+		}
+		if strings.ContainsAny(a, "\n\r") {
+			return nil, fmt.Errorf("service install: extra daemon flag %q contains a newline", a)
+		}
+	}
+	return append(args, extra...), nil
+}
+
+// systemdQuoteArg quotes one ExecStart argument for a systemd unit. Plain
+// tokens pass through; anything with whitespace, quotes, backslashes or
+// systemd specifier/variable characters is double-quoted with those
+// characters escaped.
+func systemdQuoteArg(a string) string {
+	if a != "" && !strings.ContainsAny(a, " \t\"'\\%$;") {
+		return a
+	}
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "%", "%%", "$", "$$")
+	return `"` + r.Replace(a) + `"`
+}
+
+// systemdExecStart renders the ExecStart= value for binary + args.
+func systemdExecStart(binary string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, systemdQuoteArg(binary))
+	for _, a := range args {
+		parts = append(parts, systemdQuoteArg(a))
+	}
+	return strings.Join(parts, " ")
 }
 
 // servicePassphrase describes how the background service authenticates the
@@ -212,7 +277,7 @@ func launchdPlistPath() string {
 	return filepath.Join(home, "Library", "LaunchAgents", launchdLabel+".plist")
 }
 
-func installLaunchd(binary, listen string, pp servicePassphrase) error {
+func installLaunchd(binary string, daemonArgs []string, pp servicePassphrase) error {
 	dir := dataDir()
 	logPath := filepath.Join(dir, "lantern.log")
 	errPath := filepath.Join(dir, "lantern.err")
@@ -233,39 +298,7 @@ func installLaunchd(binary, listen string, pp servicePassphrase) error {
 		passValue = pp.inlinePass
 	}
 
-	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>%s</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>%s</string>
-    <string>daemon</string>
-    <string>--listen</string>
-    <string>%s</string>
-  </array>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>LANTERN_HOME</key>
-    <string>%s</string>
-    <key>LANTERN_PASS</key>
-    <string>%s</string>
-  </dict>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>StandardOutPath</key>
-  <string>%s</string>
-  <key>StandardErrorPath</key>
-  <string>%s</string>
-  <key>WorkingDirectory</key>
-  <string>%s</string>
-</dict>
-</plist>
-`, launchdLabel, binary, listen, dir, plistEscape(passValue), logPath, errPath, dir)
+	plist := launchdPlistText(binary, daemonArgs, dir, passValue, logPath, errPath)
 
 	path := launchdPlistPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -296,6 +329,44 @@ func installLaunchd(binary, listen string, pp servicePassphrase) error {
 	return nil
 }
 
+// launchdPlistText renders the LaunchAgent plist for binary + daemonArgs.
+func launchdPlistText(binary string, daemonArgs []string, dir, passValue, logPath, errPath string) string {
+	var argXML strings.Builder
+	fmt.Fprintf(&argXML, "    <string>%s</string>\n", plistEscape(binary))
+	for _, a := range daemonArgs {
+		fmt.Fprintf(&argXML, "    <string>%s</string>\n", plistEscape(a))
+	}
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>%s</string>
+  <key>ProgramArguments</key>
+  <array>
+%s  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>LANTERN_HOME</key>
+    <string>%s</string>
+    <key>LANTERN_PASS</key>
+    <string>%s</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>%s</string>
+  <key>StandardErrorPath</key>
+  <string>%s</string>
+  <key>WorkingDirectory</key>
+  <string>%s</string>
+</dict>
+</plist>
+`, launchdLabel, argXML.String(), plistEscape(dir), plistEscape(passValue), plistEscape(logPath), plistEscape(errPath), plistEscape(dir))
+}
+
 func uninstallLaunchd() error {
 	path := launchdPlistPath()
 	if _, err := os.Stat(path); err == nil {
@@ -317,41 +388,9 @@ func systemdUnitPath() string {
 	return filepath.Join(home, ".config", "systemd", "user", systemdUnit)
 }
 
-func installSystemd(binary, listen string, pp servicePassphrase) error {
+func installSystemd(binary string, daemonArgs []string, pp servicePassphrase) error {
 	dir := dataDir()
-
-	// Build the keystore-passphrase line for the unit. The daemon refuses to
-	// start non-interactively unless LANTERN_PASS is set (encrypted) or
-	// explicitly empty (unencrypted opt-out), so one of these is always emitted.
-	var passLine string
-	switch {
-	case pp.envFile != "":
-		passLine = fmt.Sprintf("EnvironmentFile=%s", pp.envFile)
-	case pp.inlinePassSet:
-		// LANTERN_PASS="" -> explicit unencrypted opt-out.
-		passLine = fmt.Sprintf("Environment=LANTERN_PASS=%s", pp.inlinePass)
-	default:
-		passLine = "Environment=LANTERN_PASS="
-	}
-
-	unit := fmt.Sprintf(`[Unit]
-Description=Lantern Filecoin light node
-After=network.target
-
-[Service]
-Type=simple
-Environment=LANTERN_HOME=%s
-%s
-ExecStart=%s daemon --listen %s
-Restart=on-failure
-RestartSec=5s
-WorkingDirectory=%s
-StandardOutput=append:%s/lantern.log
-StandardError=append:%s/lantern.err
-
-[Install]
-WantedBy=default.target
-`, dir, passLine, binary, listen, dir, dir, dir)
+	unit := systemdUnitText(binary, daemonArgs, dir, pp)
 
 	path := systemdUnitPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -371,6 +410,43 @@ WantedBy=default.target
 	fmt.Println("  Tip: enable lingering so the service survives logout:")
 	fmt.Println("    sudo loginctl enable-linger", os.Getenv("USER"))
 	return nil
+}
+
+// systemdUnitText renders the systemd user unit for binary + daemonArgs.
+func systemdUnitText(binary string, daemonArgs []string, dir string, pp servicePassphrase) string {
+
+	// Build the keystore-passphrase line for the unit. The daemon refuses to
+	// start non-interactively unless LANTERN_PASS is set (encrypted) or
+	// explicitly empty (unencrypted opt-out), so one of these is always emitted.
+	var passLine string
+	switch {
+	case pp.envFile != "":
+		passLine = fmt.Sprintf("EnvironmentFile=%s", pp.envFile)
+	case pp.inlinePassSet:
+		// LANTERN_PASS="" -> explicit unencrypted opt-out.
+		passLine = fmt.Sprintf("Environment=LANTERN_PASS=%s", pp.inlinePass)
+	default:
+		passLine = "Environment=LANTERN_PASS="
+	}
+
+	return fmt.Sprintf(`[Unit]
+Description=Lantern Filecoin node
+After=network.target
+
+[Service]
+Type=simple
+Environment=LANTERN_HOME=%s
+%s
+ExecStart=%s
+Restart=on-failure
+RestartSec=5s
+WorkingDirectory=%s
+StandardOutput=append:%s/lantern.log
+StandardError=append:%s/lantern.err
+
+[Install]
+WantedBy=default.target
+`, dir, passLine, systemdExecStart(binary, daemonArgs), dir, dir, dir)
 }
 
 func uninstallSystemd() error {

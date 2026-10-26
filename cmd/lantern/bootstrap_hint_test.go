@@ -38,7 +38,7 @@ func TestQuorumFailureHint_NotReachedListsFailuresAndFlags(t *testing.T) {
 		"--peer https://",
 		"--no-libp2p",
 		"--bootstrap-quorum 2",
-		"lantern doctor --filecoin-network mainnet",
+		"lantern doctor --network mainnet",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("hint missing %q:\n%s", want, got)
@@ -60,7 +60,7 @@ func TestQuorumFailureHint_ConflictDoesNotSuggestLoweringQuorum(t *testing.T) {
 func TestMissingAnchorError_MentionsInitAndOverride(t *testing.T) {
 	err := missingAnchorError("/tmp/x/mainnet", build.Mainnet)
 	msg := err.Error()
-	for _, want := range []string{"lantern init --filecoin-network mainnet", "lantern doctor", "--allow-rpc-anchor", "/tmp/x/mainnet/bootstrap-anchor.json"} {
+	for _, want := range []string{"lantern init --network mainnet", "lantern doctor", "--allow-rpc-anchor", "/tmp/x/mainnet/bootstrap-anchor.json"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error missing %q: %s", want, msg)
 		}

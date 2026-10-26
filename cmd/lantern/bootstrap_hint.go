@@ -51,7 +51,7 @@ func quorumFailureHint(res *bootstrap.QuorumResult, err error, p bootstrapParams
 	if network == "" {
 		network = build.Mainnet
 	}
-	netFlag := "--filecoin-network " + string(network)
+	netFlag := "--network " + string(network)
 	fmt.Fprintln(&b)
 	if errors.Is(err, bootstrap.ErrConflict) {
 		fmt.Fprintln(&b, "  ✗ Sources returned DIFFERENT finalized tipsets for the same F3 instance.")
@@ -117,10 +117,10 @@ func quorumFailureHint(res *bootstrap.QuorumResult, err error, p bootstrapParams
 // missingAnchorError is the F11 refusal: the daemon no longer silently
 // falls back to the weaker gateway+RPC anchor when init never wrote one.
 func missingAnchorError(netDir string, network build.Network) error {
-	return fmt.Errorf("no trust anchor at %s: `lantern init --filecoin-network %s` has not completed.\n"+
+	return fmt.Errorf("no trust anchor at %s: `lantern init --network %s` has not completed.\n"+
 		"  Refusing to boot from a gateway+RPC head, which is weaker than init's %d-operator quorum (F11).\n"+
-		"  Fix: run `lantern init --filecoin-network %s --no-wallet` (or `lantern repair`). If it fails,\n"+
-		"  `lantern doctor --filecoin-network %s` shows which sources failed and which flags help.\n"+
+		"  Fix: run `lantern init --network %s --no-wallet` (or `lantern repair`). If it fails,\n"+
+		"  `lantern doctor --network %s` shows which sources failed and which flags help.\n"+
 		"  Override (weaker trust, prints a warning): `lantern daemon --allow-rpc-anchor`",
 		filepath.Join(netDir, "bootstrap-anchor.json"), network, defaultBootstrapQuorum(network), network, network)
 }

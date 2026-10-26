@@ -1,0 +1,27 @@
+# Lantern overlay for the upstream Curio-PDP ("skiff") Docker Compose stack.
+#
+# The upstream stack in filecoin-project/curio (docker/skiff) runs three
+# services: Forest (chain node), Yugabyte (HarmonyDB) and skiff (Curio-PDP).
+# With Lantern as the chain node, Forest is not needed. This overlay removes
+# skiff's dependency on Forest so Compose can start skiff without it.
+#
+# Usage (from curio/docker/skiff, with this file copied next to the upstream
+# compose files and FULLNODE_API_INFO in .env pointing at Lantern):
+#
+#   docker compose \
+#     -f docker-compose.yaml \
+#     -f docker-compose.calibnet.yaml \
+#     -f docker-compose.lantern.yaml \
+#     up -d --no-build yugabyte skiff
+#
+# Always name the services ("yugabyte skiff"). A bare "up -d" would still
+# start the Forest container from the base file.
+#
+# Requires Docker Compose v2.24.4 or newer for the "!override" merge tag.
+# Full walkthrough: RUN-PDP.md in https://github.com/Reiers/lantern
+
+services:
+  skiff:
+    depends_on: !override
+      yugabyte:
+        condition: service_healthy
