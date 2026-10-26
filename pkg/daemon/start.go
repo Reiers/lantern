@@ -47,6 +47,7 @@ import (
 
 	"github.com/Reiers/lantern/build"
 	"github.com/Reiers/lantern/chain/ecfinality"
+	"github.com/Reiers/lantern/chain/ethtxindex"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
 	"github.com/Reiers/lantern/chain/fullvalidate"
 	"github.com/Reiers/lantern/chain/headcheck"
@@ -194,6 +195,23 @@ func (d *Daemon) startInternal(ctx context.Context) error {
 		// FollowHeadState doc + the CLI daemon wiring). Embedded consumers
 		// (curio-core) get the same head-following state surface.
 		chainAPI.FollowHeadState()
+
+		// F12: persistent, head-following eth tx index (receipts survive
+		// restarts; lookups never walk the chain).
+		if win := abi.ChainEpoch(d.cfg.EthTxIndexWindow); win >= 0 {
+			if win == 0 {
+				win = ethtxindex.LightWindow
+				if d.cfg.PersistentCache {
+					win = ethtxindex.DefaultWindow
+				}
+				win = handlers.EthTxIndexWindowFromEnv(win)
+			}
+			if win > 0 {
+				if err := chainAPI.StartEthTxIndex(ctx, handlers.EthTxIndexOptions{Window: win, CacheBlocks: d.cfg.PersistentCache}); err != nil {
+					log.Warnw("eth tx index disabled", "err", err)
+				}
+			}
+		}
 
 		dist := headnotify.New(store, d.cfg.NotifyBufSize)
 		dist.Start()

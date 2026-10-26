@@ -1,17 +1,14 @@
 package handlers
 
-// Local eth_getBlockByHash (lantern#75). A bridge-off node (stock Curio /
-// maxboom) has no VMBridge to forward to, so resolve recent blocks from
-// the local header store. The store is height-indexed, not hash-indexed,
-// so we scan a bounded window of recent heights and match the ETH block
-// hash (EthHashFromCid of the tipset's first block CID, the same hash
-// tipsetToEthBlock reports). PDP-path eth_getBlockByHash calls are for
-// recent blocks (receipt/tx context), which fall inside the window. For
-// hashes outside the window we report served=false and fall back to the
-// bridge, so behaviour degrades gracefully instead of erroring.
+// Header-only eth_getBlockByHash (lantern#75), used only when no block
+// getter is mounted (the full local path, with transactions, lives in
+// eth_block_local.go). The store is height-indexed, not hash-indexed, so
+// we scan a bounded window of recent heights and match the eth block hash
+// (the tipset key CID hash, as Lotus reports; any single block CID hash is
+// accepted too for hashes handed out by older builds). For hashes outside
+// the window we report served=false and fall back to the bridge.
 
 import (
-	"context"
 	"strings"
 
 	"github.com/filecoin-project/go-state-types/abi"
@@ -23,15 +20,13 @@ import (
 // per-call work. Beyond this we fall back to the bridge.
 const localBlockByHashWindow abi.ChainEpoch = 900
 
-// localEthGetBlockByHash returns (ethBlock, true, nil) when the block is
+// headerOnlyEthGetBlockByHash returns (ethBlock, true, nil) when the block is
 // found in the recent local window, (nil, true, nil) for a well-formed
 // hash that simply isn't a known recent block (Ethereum returns null),
 // or (nil, false, nil) when we can't serve it locally (no header store,
 // or the hash is older than the scan window) and the caller should fall
 // back to the bridge.
-func (c *ChainAPI) localEthGetBlockByHash(ctx context.Context, blockHash string, fullTx bool) (any, bool, error) {
-	_ = ctx
-	_ = fullTx
+func (c *ChainAPI) headerOnlyEthGetBlockByHash(blockHash string) (any, bool, error) {
 	if c.HeaderStore == nil {
 		return nil, false, nil
 	}
@@ -64,9 +59,9 @@ func (c *ChainAPI) localEthGetBlockByHash(ctx context.Context, blockHash string,
 			}
 			continue
 		}
-		// Match against every block CID in the tipset (the ETH "block
-		// hash" we report is the first block's, but a caller could hold
-		// any sibling's hash).
+		if normalizeHashHex(ethTipsetHash(ts.Key())) == want {
+			return tipsetToEthBlock(ts), true, nil
+		}
 		for _, b := range blocks {
 			if normalizeHashHex(EthHashFromCid(b.Cid())) == want {
 				return tipsetToEthBlock(ts), true, nil

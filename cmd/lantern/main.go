@@ -55,6 +55,7 @@ import (
 	"github.com/Reiers/lantern/chain/anchorverify"
 	"github.com/Reiers/lantern/chain/bootstrap"
 	"github.com/Reiers/lantern/chain/crosscheck"
+	"github.com/Reiers/lantern/chain/ethtxindex"
 	"github.com/Reiers/lantern/chain/f3/subscriber"
 	"github.com/Reiers/lantern/chain/fullvalidate"
 	"github.com/Reiers/lantern/chain/headcheck"
@@ -1026,6 +1027,7 @@ func cmdDaemon(args []string) error {
 	gw := fs.String("gateway", defaultGateway, "Lantern gateway base URL")
 	listen := fs.String("listen", defaultListen, "RPC listen address")
 	noHS := fs.Bool("no-header-store", false, "Disable the persistent header store (legacy synthetic-head mode)")
+	ethTxIndexWindow := fs.Int("eth-tx-index-window", -1, "Epochs of eth tx hashes kept in the persistent eth tx index that serves eth_getTransactionReceipt / eth_getTransactionByHash locally (F12). -1 = tier default (pdp/full 2880 = 1 day, light 960), 0 = disable (fall back to the bounded chain walk). Env: LANTERN_ETH_TX_INDEX_WINDOW.")
 	hsPath := fs.String("header-store", "", "Header store BadgerDB path (default: <data-dir>/<network>/headerstore)")
 	syncInterval := fs.Duration("sync-interval", 6*time.Second, "Header-store sync poll interval")
 	devnetHeadPollInterval := fs.Duration("devnet-head-poll-interval", 0, "Devnet-only: override the header-store poll interval on devnet (default 0 = auto: use BlockDelaySecs from devnet-config, or 4s if unavailable). Fixes lantern#123 findings 8+9: a single-node docker devnet can't form a gossipsub mesh, so head updates come only from RPC polling; the mainnet-oriented 30s cadence lags a 4s-cadence devnet by ~7x block time. Ignored on mainnet/calibration.")
@@ -1528,6 +1530,28 @@ func cmdDaemon(args []string) error {
 		// the stale root) and breaks StateMinerPower/StateMinerInfo — the reads
 		// Curio needs for WinningPoSt block production.
 		chainAPI.FollowHeadState()
+
+		// F12: persistent, head-following eth tx index so receipt /
+		// tx-by-hash lookups survive restarts and never walk the chain.
+		{
+			win := abi.ChainEpoch(*ethTxIndexWindow)
+			if win < 0 {
+				win = ethtxindex.DefaultWindow
+				if !profile.UsesPersistentCache() {
+					win = ethtxindex.LightWindow
+				}
+				win = handlers.EthTxIndexWindowFromEnv(win)
+			}
+			if win > 0 {
+				if err := chainAPI.StartEthTxIndex(ctx, handlers.EthTxIndexOptions{Window: win, CacheBlocks: persistentCache != nil}); err != nil {
+					fmt.Printf("  eth tx index: disabled (%v)\n", err)
+				} else {
+					fmt.Printf("  eth tx index: on (window %d epochs)\n", win)
+				}
+			} else {
+				fmt.Printf("  eth tx index: off (--eth-tx-index-window=0)\n")
+			}
+		}
 
 		dist = headnotify.New(store, *notifyBufSize)
 		dist.Start()

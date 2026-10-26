@@ -120,6 +120,13 @@ type Config struct {
 	// memory-cached. Cache lives at <DataDir>/<network>/blockcache.
 	PersistentCache bool
 
+	// EthTxIndexWindow is the retention (epochs) of the persistent eth tx
+	// index serving eth_getTransactionReceipt / eth_getTransactionByHash
+	// locally (F12). 0 => default (2880 with PersistentCache, else 960;
+	// LANTERN_ETH_TX_INDEX_WINDOW overrides); negative disables the index
+	// (bounded chain walk). Requires the header store.
+	EthTxIndexWindow int
+
 	// PersistentCacheBytes is the soft byte budget for the persistent block
 	// cache (only used when PersistentCache=true). 0 => default 3 GiB (the
 	// middle of the 2-5 GB PDP-tier target). Eviction is sampled-LRU over

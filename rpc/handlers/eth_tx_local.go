@@ -252,6 +252,18 @@ func (c *ChainAPI) tipsetMsgIndex(ctx context.Context, bg hamt.BlockGetter, incl
 	if ix := cache.get(key); ix != nil {
 		return ix, nil
 	}
+	ix, err := c.buildTipsetMsgIndex(ctx, bg, incl, exec)
+	if err != nil {
+		return nil, err
+	}
+	cache.put(key, ix)
+	return ix, nil
+}
+
+// buildTipsetMsgIndex is tipsetMsgIndex without the in-memory cache (the
+// persistent indexer builds one per tipset and must not fill the cache
+// with a whole window of them).
+func (c *ChainAPI) buildTipsetMsgIndex(ctx context.Context, bg hamt.BlockGetter, incl, exec *types.TipSet) (*tsMsgIndex, error) {
 	s := msgsearch.New(c.HeaderStore, bg)
 	per, err := s.BlockMessages(ctx, incl)
 	if err != nil {
@@ -277,7 +289,6 @@ func (c *ChainAPI) tipsetMsgIndex(ctx context.Context, bg hamt.BlockGetter, incl
 	for i, m := range msgs {
 		ix.pos[m] = i
 	}
-	cache.put(key, ix)
 	return ix, nil
 }
 
@@ -431,12 +442,11 @@ func (c *ChainAPI) ensureEthHashes(ctx context.Context, bg hamt.BlockGetter, ix 
 				}
 				r := res{i: i, ok: true}
 				if sm.Signature.Type == statecrypto.SigTypeDelegated {
-					if tx, _, err := ethTxFromSignedMessage(sm, chainID); err == nil {
-						if h, err := tx.TxHash(); err == nil {
-							r.h, r.has = h, true
-						}
+					// EIP-1559 and legacy (homestead / EIP-155) txs.
+					if t, err := decodeDelegatedEthTx(sm, chainID); err == nil {
+						r.h, r.has = t.hash, true
 					}
-					// else: not an EIP-1559 tx we can rebuild; unreachable by hash.
+					// else: not an eth tx we can rebuild; unreachable by hash.
 				} else if d, ok := cidDigest(mc); ok {
 					r.h, r.has = d, true
 				}
@@ -511,6 +521,10 @@ type ethTxHit struct {
 	msgCID     cid.Cid
 	isSecp     bool
 	receipt    types.MessageReceipt
+	// evBase, when set (persistent index), is the number of events emitted
+	// by earlier messages of the tipset, so the logIndex base needs no
+	// receipts / events walk.
+	evBase *uint64
 }
 
 // findEthTx walks the canonical chain from head looking for the tx.
@@ -768,6 +782,16 @@ func (c *ChainAPI) emitterEthAddr(ctx context.Context, acc *accessor.Accessor, i
 		return s, nil
 	}
 	cache.mu.Unlock()
+	pidx := c.EthTxIndex()
+	if pidx != nil {
+		if a, ok := pidx.Emitter(id); ok {
+			s := "0x" + hex.EncodeToString(a[:])
+			cache.mu.Lock()
+			cache.emitters[id] = s
+			cache.mu.Unlock()
+			return s, nil
+		}
+	}
 	masked := ethAddrFromActorID(id)
 	idAddr, err := address.NewIDAddress(uint64(id))
 	if err != nil {
@@ -784,6 +808,16 @@ func (c *ChainAPI) emitterEthAddr(ctx context.Context, acc *accessor.Accessor, i
 	if act.DelegatedAddress != nil {
 		if p, ok := f410Payload(*act.DelegatedAddress); ok {
 			out = "0x" + hex.EncodeToString(p[:])
+		}
+	}
+	// The actor exists, so its eth address is immutable: persist it.
+	if pidx != nil {
+		if b, err := hex.DecodeString(out[2:]); err == nil && len(b) == 20 {
+			var a [20]byte
+			copy(a[:], b)
+			if err := pidx.PutEmitter(id, a); err != nil {
+				log.Debugw("eth tx index: persist emitter", "actor", id, "err", err)
+			}
 		}
 	}
 	cache.mu.Lock()
@@ -873,7 +907,9 @@ func (c *ChainAPI) receiptLogs(ctx context.Context, bg hamt.BlockGetter, acc *ac
 		return []any{}, nil
 	}
 	base := uint64(0)
-	if hit.idx > 0 {
+	if hit.evBase != nil {
+		base = *hit.evBase
+	} else if hit.idx > 0 {
 		var roots []cid.Cid
 		err := amt.ForEachV2Raw(ctx, hit.exec.Blocks()[0].ParentMessageReceipts, bg, func(i uint64, raw []byte) error {
 			if i >= uint64(hit.idx) {
@@ -964,7 +1000,7 @@ type ethTxView struct {
 	from             string
 	to               any // string or nil
 	txType           string
-	tx               *ethtx.Eth1559Tx // nil for native messages
+	etx              *lotusEthTx
 	msg              *types.Message
 	blockHash        string
 	blockNumber      string
@@ -976,35 +1012,25 @@ func (c *ChainAPI) ethTxViewFor(ctx context.Context, bg hamt.BlockGetter, acc *a
 	if err != nil {
 		return nil, err
 	}
+	// lotus newEthTxFromSignedMessage: delegated (1559 / legacy) or a
+	// native message converted against the post-execution state.
+	etx, err := c.ethTxForMessage(ctx, acc, sm, hit.msgCID, c.ethChainID())
+	if err != nil {
+		return nil, err
+	}
 	v := &ethTxView{
 		hash:             strings.ToLower(txHash),
-		txType:           "0x2",
+		txType:           "0x" + uint64Hex(etx.typ),
+		etx:              etx,
 		msg:              &sm.Message,
+		from:             "0x" + hex.EncodeToString(etx.from[:]),
 		blockHash:        ethTipsetHash(hit.incl.Key()),
 		blockNumber:      "0x" + abiEpochHex(hit.incl.Height()),
 		transactionIndex: "0x" + uint64Hex(uint64(hit.idx)),
 	}
-	if sm.Signature.Type == statecrypto.SigTypeDelegated {
-		tx, from, err := ethTxFromSignedMessage(sm, c.ethChainID())
-		if err != nil {
-			return nil, err
-		}
-		v.tx = tx
-		v.from = "0x" + hex.EncodeToString(from[:])
-		if tx.To != nil {
-			v.to = "0x" + hex.EncodeToString(tx.To[:])
-		}
-		return v, nil
+	if etx.to != nil {
+		v.to = "0x" + hex.EncodeToString(etx.to[:])
 	}
-	// Native message: lotus ethTxFromNativeMessage addressing.
-	if v.from, err = c.lookupEthAddress(ctx, acc, sm.Message.From); err != nil {
-		return nil, err
-	}
-	to, err := c.lookupEthAddress(ctx, acc, sm.Message.To)
-	if err != nil {
-		return nil, err
-	}
-	v.to = to
 	return v, nil
 }
 
@@ -1067,22 +1093,15 @@ func (c *ChainAPI) buildEthReceipt(ctx context.Context, bg hamt.BlockGetter, hit
 	}, nil
 }
 
-// buildEthTxObject shapes the Lotus EthTx JSON for a mined eth tx.
-// Native (non-delegated) messages are not rebuilt (returns nil, false).
+// buildEthTxObject shapes the Lotus EthTx JSON for a mined message
+// (delegated eth txs and native messages alike, like Lotus).
 func (c *ChainAPI) buildEthTxObject(ctx context.Context, bg hamt.BlockGetter, hit *ethTxHit, txHash string) (map[string]any, bool, error) {
 	acc := c.execAccessor(hit.exec, bg)
 	v, err := c.ethTxViewFor(ctx, bg, acc, hit, txHash)
 	if err != nil {
 		return nil, false, err
 	}
-	if v.tx == nil {
-		return nil, false, nil
-	}
-	obj := ethTxJSON(v.hash, v.from, v.tx)
-	obj["blockHash"] = v.blockHash
-	obj["blockNumber"] = v.blockNumber
-	obj["transactionIndex"] = v.transactionIndex
-	return obj, true, nil
+	return v.etx.toJSON(v.blockHash, v.blockNumber, v.transactionIndex), true, nil
 }
 
 // ethTxJSON is the Lotus EthTx field set for an EIP-1559 tx (block fields
@@ -1103,7 +1122,7 @@ func ethTxJSON(hash, from string, tx *ethtx.Eth1559Tx) map[string]any {
 		"gas":                  "0x" + uint64Hex(tx.GasLimit),
 		"maxFeePerGas":         "0x" + bigHex(&tx.MaxFeePerGas),
 		"maxPriorityFeePerGas": "0x" + bigHex(&tx.MaxPriorityFeePerGas),
-		"accessList":           []any{},
+		"accessList":           nil, // Lotus leaves AccessList nil for eth txs
 		"v":                    "0x" + bigHex(&tx.V),
 		"r":                    "0x" + bigHex(&tx.R),
 		"s":                    "0x" + bigHex(&tx.S),
