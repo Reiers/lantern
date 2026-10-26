@@ -113,6 +113,18 @@ func New(cache Cache, sources ...Source) *Fetcher {
 // OR Bitswap fast deadline", whichever fires first. State-tree walks
 // that previously took 30s+ now complete in low single seconds.
 func (f *Fetcher) Get(ctx context.Context, c cid.Cid) ([]byte, error) {
+	return f.get(ctx, c, true)
+}
+
+// GetNoCache is Get without writing a network-fetched block into the
+// cache (cache reads still apply). Background bulk readers (the eth tx
+// indexer) use it on nodes whose cache is unbounded memory, so indexing a
+// day of tipsets cannot grow the in-memory cache without limit.
+func (f *Fetcher) GetNoCache(ctx context.Context, c cid.Cid) ([]byte, error) {
+	return f.get(ctx, c, false)
+}
+
+func (f *Fetcher) get(ctx context.Context, c cid.Cid, store bool) ([]byte, error) {
 	// 1. Cache.
 	if f.cache != nil {
 		if raw, err := f.cache.Get(ctx, c); err == nil {
@@ -138,7 +150,7 @@ func (f *Fetcher) Get(ctx context.Context, c cid.Cid) ([]byte, error) {
 	if len(race) > 0 {
 		raw, name, err := f.raceFetch(ctx, c, race)
 		if err == nil {
-			f.recordHit(c, raw, name)
+			f.recordHit(c, raw, name, store)
 			return raw, nil
 		}
 		firstErr = err
@@ -153,7 +165,7 @@ func (f *Fetcher) Get(ctx context.Context, c cid.Cid) ([]byte, error) {
 			}
 			continue
 		}
-		f.recordHit(c, raw, s.Name)
+		f.recordHit(c, raw, s.Name, store)
 		return raw, nil
 	}
 
@@ -237,8 +249,8 @@ func (f *Fetcher) fetchOne(ctx context.Context, c cid.Cid, s Source) ([]byte, er
 
 // recordHit caches the block (if cache present) and bumps the source-hit
 // counter for `name`.
-func (f *Fetcher) recordHit(c cid.Cid, raw []byte, name string) {
-	if f.cache != nil {
+func (f *Fetcher) recordHit(c cid.Cid, raw []byte, name string, store bool) {
+	if store && f.cache != nil {
 		f.cache.Put(c, raw)
 	}
 	f.mu.Lock()

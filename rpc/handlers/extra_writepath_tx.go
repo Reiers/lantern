@@ -96,6 +96,24 @@ func (s *sentTxIndex) get(ethHash string) (cid.Cid, bool) {
 	return rec.msgCID, true
 }
 
+// parseSignedEthTx re-parses a persisted signed raw tx.
+func parseSignedEthTx(raw []byte) (*ethtx.Eth1559Tx, error) {
+	return ethtx.ParseSignedEIP1559(raw)
+}
+
+// sentRecord returns the record of a tx we published: the in-memory map
+// first, then the persistent index (survives restarts).
+func (c *ChainAPI) sentRecord(ethHash string) (sentTxRecord, bool) {
+	if rec, ok := c.sentTx().getRecord(ethHash); ok {
+		return rec, true
+	}
+	rec, ok := c.loadSentTx(ethHash)
+	if ok {
+		c.sentTx().put(ethHash, rec)
+	}
+	return rec, ok
+}
+
 // getRecord returns the full record for a tracked tx.
 func (s *sentTxIndex) getRecord(ethHash string) (sentTxRecord, bool) {
 	s.mu.Lock()
@@ -157,7 +175,9 @@ func (c *ChainAPI) EthSendRawTransaction(ctx context.Context, signedTxHex string
 		if c.HeaderStore != nil {
 			sentEpoch = c.HeaderStore.HeadEpoch()
 		}
-		c.sentTx().put(strings.ToLower(hashHex), sentTxRecord{msgCID: msgCID, tx: tx, from: sender, sentEpoch: sentEpoch})
+		srec := sentTxRecord{msgCID: msgCID, tx: tx, from: sender, sentEpoch: sentEpoch}
+		c.sentTx().put(strings.ToLower(hashHex), srec)
+		c.persistSentTx(strings.ToLower(hashHex), srec, raw)
 		log.Infow("eth_sendRawTransaction: published locally",
 			"ethHash", hashHex, "msgCID", msgCID, "from", smsg.Message.From)
 		// lantern#50: kick off background warming of this message's blocks so
@@ -257,13 +277,29 @@ func (c *ChainAPI) lookupEthTxLocal(ctx context.Context, txHash string) (*ethTxL
 		return nil, false, nil
 	}
 	res := &ethTxLookupResult{hash: normalizeHashHex(txHash), bg: c.ethTxBlockGetter()}
-	res.rec, res.sent = c.sentTx().getRecord(res.hash)
+	res.rec, res.sent = c.sentRecord(res.hash)
 	var known cid.Cid
 	minEpoch := abi.ChainEpoch(-1)
 	if res.sent {
 		known = res.rec.msgCID
 		if res.rec.sentEpoch > 0 {
 			minEpoch = res.rec.sentEpoch - sentTxSearchSlack
+		}
+	}
+	// Persistent index first (F12). A miss is answered without walking
+	// the chain: null when the window is fully indexed, and also null
+	// (or the bridge, for txs we did not send) while a backfill is still
+	// filling it; the caller re-polls.
+	if ihit, used, ierr := c.indexedFindEthTx(ctx, res.bg, h, minEpoch); used {
+		switch {
+		case ierr == nil:
+			res.hit, res.found = ihit, true
+			return res, true, nil
+		case errors.Is(ierr, errEthTxNotFound), errors.Is(ierr, errEthIdxMiss):
+			return res, true, nil
+		default:
+			ethLocalMiss("eth_tx_lookup", res.hash, "", ierr.Error(), c.Bridge != nil)
+			return nil, false, fmt.Errorf("local eth tx lookup %s: %w", res.hash, ierr)
 		}
 	}
 	hit, err := c.findEthTx(ctx, res.bg, h, known, minEpoch)

@@ -99,6 +99,10 @@ type ChainAPI struct {
 	// emitter eth addresses for the local tx lookups.
 	ethTxCacheOnce sync.Once
 	ethTxC         *ethTxCache
+	// ethIdxr is the persistent, head-following eth tx index (F12), set by
+	// StartEthTxIndex. Nil means lookups use the bounded chain walk.
+	ethIdxMu sync.RWMutex
+	ethIdxr  *ethTxIndexer
 
 	// OnLocalMiss, when set, is invoked with the lowercase 0x-prefixed
 	// `to` address every time an eth_call can't be served locally and

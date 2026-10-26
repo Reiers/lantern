@@ -207,6 +207,18 @@ func (c *ChainAPI) tipsetMsgIndex(ctx context.Context, bg hamt.BlockGetter, incl
 	if ix := cache.get(key); ix != nil {
 		return ix, nil
 	}
+	ix, err := c.buildTipsetMsgIndex(ctx, bg, incl, exec)
+	if err != nil {
+		return nil, err
+	}
+	cache.put(key, ix)
+	return ix, nil
+}
+
+// buildTipsetMsgIndex is tipsetMsgIndex without the in-memory cache (the
+// persistent indexer builds one per tipset and must not fill the cache
+// with a whole window of them).
+func (c *ChainAPI) buildTipsetMsgIndex(ctx context.Context, bg hamt.BlockGetter, incl, exec *types.TipSet) (*tsMsgIndex, error) {
 	s := msgsearch.New(c.HeaderStore, bg)
 	per, err := s.BlockMessages(ctx, incl)
 	if err != nil {
@@ -232,7 +244,6 @@ func (c *ChainAPI) tipsetMsgIndex(ctx context.Context, bg hamt.BlockGetter, incl
 	for i, m := range msgs {
 		ix.pos[m] = i
 	}
-	cache.put(key, ix)
 	return ix, nil
 }
 
@@ -421,6 +432,10 @@ type ethTxHit struct {
 	msgCID     cid.Cid
 	isSecp     bool
 	receipt    types.MessageReceipt
+	// evBase, when set (persistent index), is the number of events emitted
+	// by earlier messages of the tipset, so the logIndex base needs no
+	// receipts / events walk.
+	evBase *uint64
 }
 
 // findEthTx walks the canonical chain from head looking for the tx.
@@ -641,6 +656,16 @@ func (c *ChainAPI) emitterEthAddr(ctx context.Context, acc *accessor.Accessor, i
 		return s, nil
 	}
 	cache.mu.Unlock()
+	pidx := c.EthTxIndex()
+	if pidx != nil {
+		if a, ok := pidx.Emitter(id); ok {
+			s := "0x" + hex.EncodeToString(a[:])
+			cache.mu.Lock()
+			cache.emitters[id] = s
+			cache.mu.Unlock()
+			return s, nil
+		}
+	}
 	masked := ethAddrFromActorID(id)
 	idAddr, err := address.NewIDAddress(uint64(id))
 	if err != nil {
@@ -657,6 +682,16 @@ func (c *ChainAPI) emitterEthAddr(ctx context.Context, acc *accessor.Accessor, i
 	if act.DelegatedAddress != nil {
 		if p, ok := f410Payload(*act.DelegatedAddress); ok {
 			out = "0x" + hex.EncodeToString(p[:])
+		}
+	}
+	// The actor exists, so its eth address is immutable: persist it.
+	if pidx != nil {
+		if b, err := hex.DecodeString(out[2:]); err == nil && len(b) == 20 {
+			var a [20]byte
+			copy(a[:], b)
+			if err := pidx.PutEmitter(id, a); err != nil {
+				log.Debugw("eth tx index: persist emitter", "actor", id, "err", err)
+			}
 		}
 	}
 	cache.mu.Lock()
@@ -746,7 +781,9 @@ func (c *ChainAPI) receiptLogs(ctx context.Context, bg hamt.BlockGetter, acc *ac
 		return []any{}, nil
 	}
 	base := uint64(0)
-	if hit.idx > 0 {
+	if hit.evBase != nil {
+		base = *hit.evBase
+	} else if hit.idx > 0 {
 		var roots []cid.Cid
 		err := amt.ForEachV2Raw(ctx, hit.exec.Blocks()[0].ParentMessageReceipts, bg, func(i uint64, raw []byte) error {
 			if i >= uint64(hit.idx) {
