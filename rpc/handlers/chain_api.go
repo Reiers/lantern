@@ -713,10 +713,60 @@ func (c *ChainAPI) StateAccountKey(ctx context.Context, a address.Address, _ typ
 
 // StateNetworkVersion returns the network version at a tipset. Tier 1 (#11).
 //
-// V1: hardcoded to the current mainnet version (Version27, GoldenWeek as
-// of mid-2026). Phase 5 wires the upgrade schedule.
-func (c *ChainAPI) StateNetworkVersion(_ context.Context, _ types.TipSetKey) (network.Version, error) {
-	return network.Version27, nil
+// Mainnet and calibration resolve the tipset height (empty key = head) and
+// map it through the per-network upgrade schedule in build/upgrades.go,
+// mirroring Lotus's StateManager.GetNetworkVersion(ts.Height()). Devnet has
+// no fixed schedule: it reports the version devnet-init recorded in the
+// devnet config, falling back to the historical constant.
+func (c *ChainAPI) StateNetworkVersion(ctx context.Context, tsk types.TipSetKey) (network.Version, error) {
+	sched := networkUpgradeSchedule(c.NetworkName)
+	if sched == nil {
+		if dcfg := build.GetDevnetConfig(); dcfg != nil && dcfg.NetworkVersion > 0 {
+			return network.Version(dcfg.NetworkVersion), nil
+		}
+		return fallbackNetworkVersion, nil
+	}
+	h, ok := c.networkVersionHeight(ctx, tsk)
+	if !ok {
+		// No head at all (one-shot CLI without a trusted root): report
+		// the newest scheduled version rather than failing.
+		return build.LatestNetworkVersion(sched), nil
+	}
+	return build.NetworkVersionAt(sched, h), nil
+}
+
+// fallbackNetworkVersion is what StateNetworkVersion reported before the
+// upgrade schedule was wired (NV27, GoldenWeek). Only used for networks
+// without a schedule and without a devnet-recorded version.
+const fallbackNetworkVersion = network.Version27
+
+// networkUpgradeSchedule maps the ChainAPI network name to its schedule.
+// "" is treated as mainnet, matching StateNetworkName.
+func networkUpgradeSchedule(name string) []build.Upgrade {
+	switch name {
+	case "", "mainnet":
+		return build.MainnetUpgrades
+	case "calibration", "calibrationnet":
+		return build.CalibrationUpgrades
+	}
+	return nil
+}
+
+// networkVersionHeight resolves the epoch StateNetworkVersion should use:
+// the tipset's height for a non-empty key, the live head otherwise. An
+// unknown non-empty key falls back to the head height (network versions
+// only change at upgrade boundaries, and Curio treats an error here as
+// fatal for the whole request).
+func (c *ChainAPI) networkVersionHeight(ctx context.Context, tsk types.TipSetKey) (abi.ChainEpoch, bool) {
+	if !tsk.IsEmpty() {
+		if ts, err := c.ChainGetTipSet(ctx, tsk); err == nil && ts != nil && len(ts.Blocks()) > 0 {
+			return ts.Height(), true
+		}
+	}
+	if ts, err := c.ChainHead(ctx); err == nil && ts != nil && len(ts.Blocks()) > 0 {
+		return ts.Height(), true
+	}
+	return 0, false
 }
 
 // StateNetworkName returns the network's well-known name. Tier 2 (#63).

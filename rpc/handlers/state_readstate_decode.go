@@ -32,12 +32,15 @@ import (
 
 	power17 "github.com/filecoin-project/go-state-types/builtin/v17/power"
 	power18 "github.com/filecoin-project/go-state-types/builtin/v18/power"
+	power19 "github.com/filecoin-project/go-state-types/builtin/v19/power"
 
 	market17 "github.com/filecoin-project/go-state-types/builtin/v17/market"
 	market18 "github.com/filecoin-project/go-state-types/builtin/v18/market"
+	market19 "github.com/filecoin-project/go-state-types/builtin/v19/market"
 
 	verifreg17 "github.com/filecoin-project/go-state-types/builtin/v17/verifreg"
 	verifreg18 "github.com/filecoin-project/go-state-types/builtin/v18/verifreg"
+	verifreg19 "github.com/filecoin-project/go-state-types/builtin/v19/verifreg"
 
 	"github.com/Reiers/lantern/state/actors"
 )
@@ -68,6 +71,8 @@ func decodeSystemActorState(reg *actors.Registry, code cid.Cid, head []byte) (an
 		switch info.Version {
 		case 18:
 			target = &power18.State{}
+		case 19:
+			target = &power19.State{}
 		case 17:
 			target = &power17.State{}
 		}
@@ -75,6 +80,8 @@ func decodeSystemActorState(reg *actors.Registry, code cid.Cid, head []byte) (an
 		switch info.Version {
 		case 18:
 			target = &market18.State{}
+		case 19:
+			target = &market19.State{}
 		case 17:
 			target = &market17.State{}
 		}
@@ -82,6 +89,8 @@ func decodeSystemActorState(reg *actors.Registry, code cid.Cid, head []byte) (an
 		switch info.Version {
 		case 18:
 			target = &verifreg18.State{}
+		case 19:
+			target = &verifreg19.State{}
 		case 17:
 			target = &verifreg17.State{}
 		}

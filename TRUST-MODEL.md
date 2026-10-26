@@ -18,7 +18,8 @@ The unconditional trust roots are small, hardcoded, and reproducible.
 | Genesis tipset CID (mainnet)       | `rpc/handlers/extra.go` (`mainnetGenesisCID`) | Cross-verifiable against `api.node.glif.io` `Filecoin.ChainGetGenesis`. |
 | F3 power-table anchor              | `chain/f3/anchor/anchor_mainnet.json` (embedded) | Captured from a Forest full node at a documented instance. Re-pinnable on a quarterly cadence. |
 | DRAND network config (chain hashes, public keys, periods) | `build/drand.go` | Pulled verbatim from `lotus@v1.36 build/drand.go`. Public records cross-checked against `drand.cloudflare.com`. |
-| Built-in actor manifest CIDs       | `state/actors/bundles.go`                    | Pulled verbatim from `lotus@v1.36 build/builtin_actors_gen.go`. CIDs are reproducible by hashing the `builtin-actors` releases. |
+| Built-in actor manifest CIDs       | `state/actors/bundles.go`                    | Generated verbatim from `lotus@v1.38.3 build/builtin_actors_gen.go` by `go run ./state/actors/internal/genbundles -lotus v1.38.3`. CIDs are reproducible by hashing the `builtin-actors` releases. |
+| Network upgrade schedule (epoch -> network version) | `build/upgrades.go` | Heights from `lotus@v1.38.3 build/buildconstants/params_{mainnet,calibnet}.go`, upgrade -> network version from `chain/consensus/filcns/upgrades.go`. |
 | Cryptographic primitives           | `crypto/sigs/bls`, `crypto/sigs/secp`, `crypto/sigs/delegated` | Pure-Go (gnark, kyber-bls12381, dcrec, golang.org/x/crypto). No CGo. |
 | Filecoin network constants         | `build/buildconstants.go`                    | Lifted verbatim from Lotus's `params_shared_vals.go`. |
 

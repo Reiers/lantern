@@ -6,8 +6,8 @@
 // message via the paych actor — Curio uses the lane stored in the
 // channel actor state purely for off-chain redemption math).
 //
-// As with the other loaders in this package, we cover v17 (nv25) and
-// v18 (nv26) — the active mainnet actor versions.
+// As with the other loaders in this package, we cover v17 (nv27), v18
+// (nv28) and v19 (nv29).
 
 package actors
 
@@ -26,6 +26,8 @@ import (
 	adt17 "github.com/filecoin-project/go-state-types/builtin/v17/util/adt"
 	paych18 "github.com/filecoin-project/go-state-types/builtin/v18/paych"
 	adt18 "github.com/filecoin-project/go-state-types/builtin/v18/util/adt"
+	paych19 "github.com/filecoin-project/go-state-types/builtin/v19/paych"
+	adt19 "github.com/filecoin-project/go-state-types/builtin/v19/util/adt"
 
 	"github.com/Reiers/lantern/state/hamt"
 )
@@ -85,8 +87,75 @@ func LoadPaych(ctx context.Context, code, head cid.Cid, bg hamt.BlockGetter, reg
 			return nil, fmt.Errorf("decode paych v18 state: %w", err)
 		}
 		return &paychV18{s: s, store: adt18.WrapStore(ctx, cs)}, nil
+	case 19:
+		var s paych19.State
+		if err := s.UnmarshalCBOR(bytes.NewReader(raw)); err != nil {
+			return nil, fmt.Errorf("decode paych v19 state: %w", err)
+		}
+		return &paychV19{s: s, store: adt19.WrapStore(ctx, cs)}, nil
 	}
 	return nil, fmt.Errorf("paych version %d not supported in Phase 7", info.Version)
+}
+
+// --- v19 ---
+
+type paychV19 struct {
+	s     paych19.State
+	store adt19.Store
+}
+
+func (p *paychV19) Version() int { return 19 }
+
+func (p *paychV19) Info(ctx context.Context) (*PaychChannelInfo, error) {
+	out := &PaychChannelInfo{
+		From:            p.s.From,
+		To:              p.s.To,
+		ToSend:          p.s.ToSend,
+		SettlingAt:      p.s.SettlingAt,
+		MinSettleHeight: p.s.MinSettleHeight,
+	}
+	if !p.s.LaneStates.Defined() {
+		return out, nil
+	}
+	arr, err := adt19.AsArray(p.store, p.s.LaneStates, paych19.LaneStatesAmtBitwidth)
+	if err != nil {
+		return nil, fmt.Errorf("load lane states: %w", err)
+	}
+	var lane paych19.LaneState
+	if err := arr.ForEach(&lane, func(i int64) error {
+		out.Lanes = append(out.Lanes, PaychLaneInfo{
+			ID:       uint64(i),
+			Nonce:    lane.Nonce,
+			Redeemed: lane.Redeemed,
+		})
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("walk lanes: %w", err)
+	}
+	return out, nil
+}
+
+func (p *paychV19) GetLane(ctx context.Context, laneID uint64) (*PaychLaneInfo, bool, error) {
+	if !p.s.LaneStates.Defined() {
+		return nil, false, nil
+	}
+	arr, err := adt19.AsArray(p.store, p.s.LaneStates, paych19.LaneStatesAmtBitwidth)
+	if err != nil {
+		return nil, false, fmt.Errorf("load lane states: %w", err)
+	}
+	var lane paych19.LaneState
+	found, err := arr.Get(laneID, &lane)
+	if err != nil {
+		return nil, false, fmt.Errorf("get lane %d: %w", laneID, err)
+	}
+	if !found {
+		return nil, false, nil
+	}
+	return &PaychLaneInfo{
+		ID:       laneID,
+		Nonce:    lane.Nonce,
+		Redeemed: lane.Redeemed,
+	}, true, nil
 }
 
 // --- v18 ---

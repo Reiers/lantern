@@ -20,6 +20,7 @@ import (
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/abi"
+	gstactors "github.com/filecoin-project/go-state-types/actors"
 	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/go-state-types/builtin"
 	"github.com/filecoin-project/go-state-types/network"
@@ -124,12 +125,9 @@ func (c *ChainAPI) GasEstimateGasLimit(ctx context.Context, msg *types.Message, 
 // specified network version. Lotus maps nv → actor-version internally;
 // we use the canonical table embedded in state/actors/bundles.go.
 //
-// The mapping nv → actor-version follows Filecoin's release history:
-//
-//	nv25 → actor v17
-//	nv26 → actor v18
-//
-// Earlier mappings are present in Bundles but rarely queried.
+// The mapping nv → actor-version is go-state-types' actors.VersionForNetwork,
+// the same table Lotus uses (nv25/nv26 → v16, nv27 → v17, nv28 → v18,
+// nv29 → v19).
 func (c *ChainAPI) StateActorCodeCIDs(_ context.Context, nv network.Version) (map[string]cid.Cid, error) {
 	av := networkVersionToActorVersion(nv)
 	if av == 0 {
@@ -151,26 +149,20 @@ func (c *ChainAPI) StateActorCodeCIDs(_ context.Context, nv network.Version) (ma
 	return nil, fmt.Errorf("StateActorCodeCIDs: no manifest for actor version %d on %s", av, want)
 }
 
-// networkVersionToActorVersion mirrors the mapping in
-// lotus@v1.36.0/chain/actors/policy/policy.go. Only the recent versions
-// are wired; older ones fall back to 0 (caller surfaces an error).
+// networkVersionToActorVersion delegates to go-state-types'
+// actors.VersionForNetwork (the table Lotus uses). Network versions it does
+// not know (pre-actors-v0 or newer than this build) return 0 and the caller
+// surfaces an error.
+//
+// The previous hand-written table was off by one from nv25 on (it mapped
+// nv25 → v17 and nv26/nv27 → v18; the real mapping is nv25/nv26 → v16,
+// nv27 → v17), so StateActorCodeCIDs returned the wrong manifest.
 func networkVersionToActorVersion(nv network.Version) int {
-	switch {
-	case nv >= 27:
-		// nv27+ keeps actor v18 in the v1.36 release window; new actor
-		// versions land at later upgrades.
-		return 18
-	case nv == 26:
-		return 18
-	case nv == 25:
-		return 17
-	case nv == 24:
-		return 16
-	case nv == 23:
-		return 15
-	default:
+	av, err := gstactors.VersionForNetwork(nv)
+	if err != nil {
 		return 0
 	}
+	return int(av)
 }
 
 // --- Net* and Eth* health probes (Phase 10: live libp2p host wiring) ----

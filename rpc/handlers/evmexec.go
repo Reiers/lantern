@@ -89,7 +89,11 @@ func (b *evmBackend) Timestamp() uint64   { return b.tstamp }
 func (b *evmBackend) ChainID() uint64     { return b.chainID }
 
 // loadEVMActor resolves an eth address to its EVM actor state. ok=false
-// (no error) when the address is unknown or not an EVM contract.
+// (no error) when the address is unknown or its code CID is known to be a
+// non-EVM kind. An unknown code CID (network upgrade this build predates),
+// an unsupported actors version or a head fetch/decode fault is returned as
+// an error so the interpreter faults and EthCall falls back to the bridge
+// instead of executing against "empty code" and returning a wrong result.
 func (b *evmBackend) loadEVMActor(a evm.Address) (actors.EVMState, bool, error) {
 	filAddr, err := ethAddrToFilecoin(a.Bytes())
 	if err != nil {
@@ -101,8 +105,11 @@ func (b *evmBackend) loadEVMActor(a evm.Address) (actors.EVMState, bool, error) 
 	}
 	st, err := actors.LoadEVM(b.ctx, actor.Code, actor.Head, b.bg, b.reg)
 	if err != nil {
-		// Not an EVM actor (e.g. account/placeholder) -> not a contract.
-		return nil, false, nil
+		if isDefinitelyNotEVM(err, actor.Code, "eth_call") {
+			// Known non-EVM actor (e.g. account/placeholder) -> not a contract.
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("load evm actor %s (code %s): %w", filAddr, actor.Code, err)
 	}
 	return st, true, nil
 }
@@ -207,7 +214,7 @@ func (c *ChainAPI) localEthCall(ctx context.Context, call ethCallObject) (string
 		ctx:     ctx,
 		c:       c,
 		acc:     acc,
-		reg:     actors.DefaultRegistry(),
+		reg:     acc.Registry(),
 		chainID: chainIDForNetwork(c.NetworkName),
 		blockNo: blockNo,
 		bg:      bg,

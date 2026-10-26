@@ -4,10 +4,11 @@
 // the right go-state-types/builtin/vN/miner package, decode, and expose a
 // normalized MinerState handle.
 //
-// Phase 5 scope: actors v17 and v18 are the active mainnet versions
-// (nv25 / nv26). Earlier versions (v8..v16) are recognized by the Registry
-// for code-CID identification, but loading their state returns
-// ErrUnsupportedVersion; that's a Phase 5/6 follow-up.
+// Scope: actors v17 (nv27 GoldenWeek), v18 (nv28 FireHorse) and v19
+// (nv29 Solstice, current on mainnet + calibration). Earlier versions
+// (v8..v16) are recognized by the Registry for code-CID identification,
+// but loading their state returns ErrUnsupportedVersion; that's a Phase
+// 5/6 follow-up.
 //
 // All decoders are exactly the cbor-gen routines shipped by go-state-types;
 // we never touch raw CBOR bytes except to dispatch on actor version.
@@ -32,6 +33,8 @@ import (
 	adt17 "github.com/filecoin-project/go-state-types/builtin/v17/util/adt"
 	miner18 "github.com/filecoin-project/go-state-types/builtin/v18/miner"
 	adt18 "github.com/filecoin-project/go-state-types/builtin/v18/util/adt"
+	miner19 "github.com/filecoin-project/go-state-types/builtin/v19/miner"
+	adt19 "github.com/filecoin-project/go-state-types/builtin/v19/util/adt"
 
 	"github.com/Reiers/lantern/state/hamt"
 )
@@ -145,7 +148,7 @@ type ErrUnsupportedVersion struct {
 }
 
 func (e ErrUnsupportedVersion) Error() string {
-	return fmt.Sprintf("lantern: %s actor v%d not yet supported (only v17/v18)", e.Kind, e.Version)
+	return fmt.Sprintf("lantern: %s actor v%d not yet supported (only v17/v18/v19)", e.Kind, e.Version)
 }
 
 // LoadMiner fetches the actor's head state and returns a versioned wrapper.
@@ -178,6 +181,12 @@ func LoadMiner(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGette
 			return nil, fmt.Errorf("decoding miner v18: %w", err)
 		}
 		return &minerV18{s: &s, store: adt18.WrapStore(ctx, store), ctx: ctx}, nil
+	case 19:
+		var s miner19.State
+		if err := s.UnmarshalCBOR(bytes.NewReader(raw)); err != nil {
+			return nil, fmt.Errorf("decoding miner v19: %w", err)
+		}
+		return &minerV19{s: &s, store: adt19.WrapStore(ctx, store), ctx: ctx}, nil
 	}
 	return nil, ErrUnsupportedVersion{Kind: KindMiner, Version: info.Version}
 }
@@ -384,6 +393,237 @@ func unionFaultsV18(s *miner18.State, store adt18.Store, recoveries bool) (bitfi
 			return fmt.Errorf("load partitions: %w", err)
 		}
 		var p miner18.Partition
+		return parts.ForEach(&p, func(_ int64) error {
+			if recoveries {
+				acc = append(acc, p.Recoveries)
+			} else {
+				acc = append(acc, p.Faults)
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return bitfield.BitField{}, err
+	}
+	return bitfield.MultiMerge(acc...)
+}
+
+// ----- v19 -----
+//
+// v19 (nv29, Solstice) keeps the v18 miner State, Deadline, Partition and
+// SectorOnChainInfo CBOR shapes. FIP-0118 adds the FULL_QA_POWER sector flag
+// bit (carried through verbatim) and new method params only. We convert
+// v19 sector records to the v18 shape at the boundary so the MinerState
+// interface stays stable.
+
+type minerV19 struct {
+	s     *miner19.State
+	store adt19.Store
+	ctx   context.Context
+}
+
+func (m *minerV19) Version() int { return 19 }
+
+func (m *minerV19) Info(ctx context.Context) (*MinerInfo, error) {
+	info, err := m.s.GetInfo(m.store)
+	if err != nil {
+		return nil, fmt.Errorf("miner v19 GetInfo: %w", err)
+	}
+	return convertMinerV19Info(info), nil
+}
+
+func (m *minerV19) LockedFunds() (abi.TokenAmount, abi.TokenAmount, abi.TokenAmount) {
+	return m.s.LockedFunds, m.s.InitialPledge, m.s.PreCommitDeposits
+}
+
+func (m *minerV19) FeeDebt() abi.TokenAmount { return m.s.FeeDebt }
+func (m *minerV19) AvailableBalance(b abi.TokenAmount) (abi.TokenAmount, error) {
+	return m.s.GetAvailableBalance(b)
+}
+func (m *minerV19) ProvingPeriodStart() abi.ChainEpoch { return m.s.ProvingPeriodStart }
+func (m *minerV19) CurrentDeadline() uint64            { return m.s.CurrentDeadline }
+func (m *minerV19) SectorsAMTRoot() cid.Cid            { return m.s.Sectors }
+func (m *minerV19) PreCommitsHAMTRoot() cid.Cid        { return m.s.PreCommittedSectors }
+func (m *minerV19) DeadlinesRoot() cid.Cid             { return m.s.Deadlines }
+func (m *minerV19) AllocatedSectorsRoot() cid.Cid      { return m.s.AllocatedSectors }
+
+func (m *minerV19) GetSector(ctx context.Context, n abi.SectorNumber) (*miner18.SectorOnChainInfo, bool, error) {
+	si, found, err := m.s.GetSector(m.store, n)
+	if err != nil || !found {
+		return nil, found, err
+	}
+	return sectorV19to18(si), true, nil
+}
+
+func (m *minerV19) GetPrecommit(ctx context.Context, n abi.SectorNumber) (*miner18.SectorPreCommitOnChainInfo, bool, error) {
+	pi, found, err := m.s.GetPrecommittedSector(m.store, n)
+	if err != nil || !found {
+		return nil, found, err
+	}
+	return precommitV19to18(pi), true, nil
+}
+
+func (m *minerV19) FindSector(ctx context.Context, sno abi.SectorNumber) (uint64, uint64, error) {
+	return m.s.FindSector(m.store, sno)
+}
+
+func (m *minerV19) DeadlineCount() uint64 { return uint64(miner19.WPoStPeriodDeadlines) }
+
+func (m *minerV19) Deadline(ctx context.Context, dlIdx uint64) (MinerDeadline, error) {
+	dls, err := m.s.LoadDeadlines(m.store)
+	if err != nil {
+		return MinerDeadline{}, fmt.Errorf("load deadlines v19: %w", err)
+	}
+	if dlIdx >= uint64(len(dls.Due)) {
+		return MinerDeadline{}, fmt.Errorf("deadline index %d out of range", dlIdx)
+	}
+	dl, err := dls.LoadDeadline(m.store, dlIdx)
+	if err != nil {
+		return MinerDeadline{}, fmt.Errorf("load deadline %d v19: %w", dlIdx, err)
+	}
+	parts, err := adt19.AsArray(m.store, dl.Partitions, miner19.DeadlinePartitionsAmtBitwidth)
+	if err != nil {
+		return MinerDeadline{}, fmt.Errorf("load partitions v19: %w", err)
+	}
+	return MinerDeadline{
+		PostSubmissions: dl.PartitionsPoSted,
+		PartitionsCount: parts.Length(),
+		PartitionsRoot:  dl.Partitions,
+	}, nil
+}
+
+func (m *minerV19) Partitions(ctx context.Context, dlIdx uint64) ([]MinerPartition, error) {
+	dls, err := m.s.LoadDeadlines(m.store)
+	if err != nil {
+		return nil, fmt.Errorf("load deadlines v19: %w", err)
+	}
+	if dlIdx >= uint64(len(dls.Due)) {
+		return nil, fmt.Errorf("deadline index %d out of range", dlIdx)
+	}
+	dl, err := dls.LoadDeadline(m.store, dlIdx)
+	if err != nil {
+		return nil, fmt.Errorf("load deadline %d v19: %w", dlIdx, err)
+	}
+	parts, err := adt19.AsArray(m.store, dl.Partitions, miner19.DeadlinePartitionsAmtBitwidth)
+	if err != nil {
+		return nil, fmt.Errorf("load partitions v19: %w", err)
+	}
+	var out []MinerPartition
+	var p miner19.Partition
+	err = parts.ForEach(&p, func(_ int64) error {
+		live, err := p.LiveSectors()
+		if err != nil {
+			return err
+		}
+		active, err := p.ActiveSectors()
+		if err != nil {
+			return err
+		}
+		out = append(out, MinerPartition{
+			AllSectors:        p.Sectors,
+			FaultySectors:     p.Faults,
+			RecoveringSectors: p.Recoveries,
+			LiveSectors:       live,
+			ActiveSectors:     active,
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk partitions v19: %w", err)
+	}
+	return out, nil
+}
+
+func (m *minerV19) Faults(ctx context.Context) (bitfield.BitField, error) {
+	return unionFaultsV19(m.s, m.store, false)
+}
+
+func (m *minerV19) Recoveries(ctx context.Context) (bitfield.BitField, error) {
+	return unionFaultsV19(m.s, m.store, true)
+}
+
+func (m *minerV19) ProvingDeadlineInfo(currEpoch abi.ChainEpoch) *dline.Info {
+	return miner19.NewDeadlineInfo(m.s.ProvingPeriodStart, m.s.CurrentDeadline, currEpoch)
+}
+
+func (m *minerV19) AllSectors(ctx context.Context, filter *bitfield.BitField, cb func(*miner18.SectorOnChainInfo) error) error {
+	arr, err := adt19.AsArray(m.store, m.s.Sectors, miner19.SectorsAmtBitwidth)
+	if err != nil {
+		return fmt.Errorf("load sectors v19: %w", err)
+	}
+	if filter == nil {
+		var si miner19.SectorOnChainInfo
+		return arr.ForEach(&si, func(_ int64) error {
+			cp := si
+			return cb(sectorV19to18(&cp))
+		})
+	}
+	return filter.ForEach(func(s uint64) error {
+		var si miner19.SectorOnChainInfo
+		found, err := arr.Get(s, &si)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return nil
+		}
+		cp := si
+		return cb(sectorV19to18(&cp))
+	})
+}
+
+func convertMinerV19Info(in *miner19.MinerInfo) *MinerInfo {
+	peer := decodePeerID(in.PeerId)
+	mas := make([][]byte, 0, len(in.Multiaddrs))
+	for _, m := range in.Multiaddrs {
+		mas = append(mas, []byte(m))
+	}
+	out := &MinerInfo{
+		Owner:                      in.Owner,
+		Worker:                     in.Worker,
+		ControlAddresses:           in.ControlAddresses,
+		PeerId:                     peer,
+		Multiaddrs:                 mas,
+		WindowPoStProofType:        in.WindowPoStProofType,
+		SectorSize:                 in.SectorSize,
+		WindowPoStPartitionSectors: in.WindowPoStPartitionSectors,
+		ConsensusFaultElapsed:      in.ConsensusFaultElapsed,
+		Beneficiary:                in.Beneficiary,
+		BeneficiaryQuota:           in.BeneficiaryTerm.Quota,
+		BeneficiaryUsedQuota:       in.BeneficiaryTerm.UsedQuota,
+		BeneficiaryExpiration:      in.BeneficiaryTerm.Expiration,
+	}
+	if in.PendingWorkerKey != nil {
+		out.NewWorker = in.PendingWorkerKey.NewWorker
+		out.WorkerChangeEpoch = in.PendingWorkerKey.EffectiveAt
+	} else {
+		out.NewWorker, _ = address.NewIDAddress(0)
+		out.WorkerChangeEpoch = -1
+	}
+	if in.PendingBeneficiaryTerm != nil {
+		out.PendingBeneficiary = &PendingBeneficiaryChange{
+			NewBeneficiary:        in.PendingBeneficiaryTerm.NewBeneficiary,
+			NewQuota:              in.PendingBeneficiaryTerm.NewQuota,
+			NewExpiration:         in.PendingBeneficiaryTerm.NewExpiration,
+			ApprovedByBeneficiary: in.PendingBeneficiaryTerm.ApprovedByBeneficiary,
+			ApprovedByNominee:     in.PendingBeneficiaryTerm.ApprovedByNominee,
+		}
+	}
+	return out
+}
+
+func unionFaultsV19(s *miner19.State, store adt19.Store, recoveries bool) (bitfield.BitField, error) {
+	dls, err := s.LoadDeadlines(store)
+	if err != nil {
+		return bitfield.BitField{}, fmt.Errorf("load deadlines v19: %w", err)
+	}
+	var acc []bitfield.BitField
+	err = dls.ForEach(store, func(_ uint64, dl *miner19.Deadline) error {
+		parts, err := adt19.AsArray(store, dl.Partitions, miner19.DeadlinePartitionsAmtBitwidth)
+		if err != nil {
+			return fmt.Errorf("load partitions: %w", err)
+		}
+		var p miner19.Partition
 		return parts.ForEach(&p, func(_ int64) error {
 			if recoveries {
 				acc = append(acc, p.Recoveries)
@@ -652,6 +892,45 @@ func sectorV17to18(in *miner17.SectorOnChainInfo) *miner18.SectorOnChainInfo {
 }
 
 func precommitV17to18(in *miner17.SectorPreCommitOnChainInfo) *miner18.SectorPreCommitOnChainInfo {
+	return &miner18.SectorPreCommitOnChainInfo{
+		Info: miner18.SectorPreCommitInfo{
+			SealProof:     in.Info.SealProof,
+			SectorNumber:  in.Info.SectorNumber,
+			SealedCID:     in.Info.SealedCID,
+			SealRandEpoch: in.Info.SealRandEpoch,
+			DealIDs:       in.Info.DealIDs,
+			Expiration:    in.Info.Expiration,
+			UnsealedCid:   in.Info.UnsealedCid,
+		},
+		PreCommitDeposit: in.PreCommitDeposit,
+		PreCommitEpoch:   in.PreCommitEpoch,
+	}
+}
+
+// sectorV19to18 converts a v19 SectorOnChainInfo to the v18 shape. The two
+// versions share the same fields; the conversion is field-by-field.
+func sectorV19to18(in *miner19.SectorOnChainInfo) *miner18.SectorOnChainInfo {
+	return &miner18.SectorOnChainInfo{
+		SectorNumber:          in.SectorNumber,
+		SealProof:             in.SealProof,
+		SealedCID:             in.SealedCID,
+		DeprecatedDealIDs:     in.DeprecatedDealIDs,
+		Activation:            in.Activation,
+		Expiration:            in.Expiration,
+		DealWeight:            in.DealWeight,
+		VerifiedDealWeight:    in.VerifiedDealWeight,
+		InitialPledge:         in.InitialPledge,
+		ExpectedDayReward:     in.ExpectedDayReward,
+		ExpectedStoragePledge: in.ExpectedStoragePledge,
+		PowerBaseEpoch:        in.PowerBaseEpoch,
+		ReplacedDayReward:     in.ReplacedDayReward,
+		SectorKeyCID:          in.SectorKeyCID,
+		Flags:                 miner18.SectorOnChainInfoFlags(in.Flags),
+		DailyFee:              in.DailyFee,
+	}
+}
+
+func precommitV19to18(in *miner19.SectorPreCommitOnChainInfo) *miner18.SectorPreCommitOnChainInfo {
 	return &miner18.SectorPreCommitOnChainInfo{
 		Info: miner18.SectorPreCommitInfo{
 			SealProof:     in.Info.SealProof,

@@ -2,6 +2,17 @@
 
 All notable changes to Lantern.
 
+## Unreleased
+
+### NV29 (Solstice) support
+Mainnet (epoch 6470279) and calibration (epoch 4109133) are both on network version 29 with builtin-actors v19. v1.10.0 stopped at actors v18 and NV27, so on both networks every FEVM contract (PDPVerifier, FWSS, ServiceProviderRegistry, USDFC, ...) was served as having no code by local `eth_getCode`, and stock Curio-PDP failed with `GetPDPConfig: no contract code at given address`.
+
+- **Actors v19 bundles.** `state/actors/bundles.go` is regenerated from `lotus@v1.38.3 build/builtin_actors_gen.go` (mainnet + calibrationnet, actors v8..v19) by a new reproducible generator: `go run ./state/actors/internal/genbundles -lotus <tag>` (also wired as `go generate ./state/actors`).
+- **go-state-types v0.19.1** (what lotus v1.38.3 uses). v19 decoders added to every versioned loader: account, init, verifreg, datacap, reward, multisig, system, miner, market, power, paych, evm, plus the VM method tables and `StateReadState` system-actor decoding. v19 miner sector records convert to the v18 shape at the boundary (same CBOR layout; the FIP-0118 `FULL_QA_POWER` flag bit is carried through).
+- **Live network version.** `StateNetworkVersion` no longer returns a hardcoded NV27. It resolves the tipset height (empty key = head) through the mainnet / calibration upgrade schedule in `build/upgrades.go` (lotus v1.38.3 heights, Lotus boundary semantics: the upgrade epoch still reports the old version). Devnet reports the version recorded by `devnet-init`, else NV27 as before.
+- **`StateActorCodeCIDs` mapping fixed.** nv -> actors version now uses go-state-types `actors.VersionForNetwork`. The old hand-written table was off by one from nv25 (it returned the v18 manifest for nv27).
+- **Unknown actor code is loud, never a wrong answer.** Local `eth_getCode`, `eth_getStorageAt` and `eth_call` now return "no code" / empty slot only when the actor's code CID is known to be a non-EVM kind. An unknown code CID (a network upgrade this build predates), an unsupported actors version or a head fetch/decode fault falls back to the bridge (or errors bridge-off) instead of answering `0x`, and the first sighting of each unknown code CID logs a WARN naming it. The local FEVM paths also use the accessor's registry, so devnet-registered bundles apply there too.
+
 ## v1.10.0 (2026-09-29) - Milestone 1: trustless multi-source head quorum
 
 Lantern no longer trusts a single source for its chain head, neither at boot nor while running. Every head is corroborated by independent operators and libp2p peer groups, checked for fork choice and weight, and refused if it diverges. Upgrade from v1.9.x is drop-in; no config changes are required.

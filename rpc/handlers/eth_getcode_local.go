@@ -8,17 +8,22 @@ package handlers
 // on this working bridge-off.
 //
 // Resolution mirrors localEthCall: ETH addr -> Filecoin addr -> live-head
-// actor -> if it's an EVM actor, fetch + verify its bytecode. Non-EVM
-// actors (accounts/placeholders/EOAs) and unknown addresses return "0x"
-// (no code), which is exactly what eth_getCode reports for them. Any
-// resolution fault returns served=false so the caller falls back to the
-// bridge (graceful degradation during rollout), never a wrong answer.
+// actor -> if it's an EVM actor, fetch + verify its bytecode. Actors whose
+// code CID is KNOWN to be a non-EVM kind (accounts/placeholders/EOAs/miners)
+// and unknown addresses return "0x" (no code), which is exactly what
+// eth_getCode reports for them. An actor whose code CID is not in the
+// bundled actors table (a network upgrade this build predates) is NOT
+// definitive: it logs a one-time WARN naming the code CID and returns
+// served=false. Any other resolution fault also returns served=false so the
+// caller falls back to the bridge, never a wrong answer.
 
 import (
 	"context"
 	"encoding/hex"
 	"errors"
 	"time"
+
+	"github.com/ipfs/go-cid"
 
 	"github.com/Reiers/lantern/state/accessor"
 	"github.com/Reiers/lantern/state/actors"
@@ -59,11 +64,16 @@ func (c *ChainAPI) localEthGetCode(ctx context.Context, addrHex string) (string,
 		return "", false, nil
 	}
 
-	st, err := actors.LoadEVM(ctx, actor.Code, actor.Head, bg, actors.DefaultRegistry())
+	st, err := actors.LoadEVM(ctx, actor.Code, actor.Head, bg, acc.Registry())
 	if err != nil {
-		// Not an EVM actor (account / placeholder / miner / etc.) -> no
-		// contract bytecode. eth_getCode == "0x". Definitive.
-		return "0x", true, nil
+		if isDefinitelyNotEVM(err, actor.Code, "eth_getCode") {
+			// Known non-EVM actor (account / placeholder / miner / etc.)
+			// -> no contract bytecode. eth_getCode == "0x". Definitive.
+			return "0x", true, nil
+		}
+		// Unknown code CID, unsupported actors version or a head
+		// fetch/decode fault: we cannot prove there is no code. Fall back.
+		return "", false, nil
 	}
 
 	code, err := actors.FetchBytecode(ctx, st, bg)
@@ -74,4 +84,22 @@ func (c *ChainAPI) localEthGetCode(ctx context.Context, addrHex string) (string,
 		return "", false, nil
 	}
 	return "0x" + hex.EncodeToString(code), true, nil
+}
+
+// isDefinitelyNotEVM classifies a LoadEVM error. It returns true only when
+// the actor's code CID is known and resolves to a non-EVM kind, the one
+// case where "no contract here" is a definitive answer. An unknown code CID
+// (typically a builtin-actors bundle from a network upgrade this build does
+// not carry) logs a one-time WARN naming the CID and returns false, as do
+// unsupported versions and fetch/decode faults.
+func isDefinitelyNotEVM(err error, code cid.Cid, where string) bool {
+	var wk actors.ErrWrongKind
+	if errors.As(err, &wk) {
+		return true
+	}
+	var uc actors.ErrUnknownCode
+	if errors.As(err, &uc) {
+		actors.WarnUnknownCodeOnce(code, where)
+	}
+	return false
 }

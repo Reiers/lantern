@@ -7,7 +7,7 @@
 //   - Multisig    (variable)           — vested funds + signer set
 //   - System      (f00)                — manifest CID
 //
-// Phase 5 scope: v17 + v18.
+// Scope: actors v17 (nv27), v18 (nv28) and v19 (nv29).
 
 package actors
 
@@ -38,6 +38,14 @@ import (
 	system18 "github.com/filecoin-project/go-state-types/builtin/v18/system"
 	adt18 "github.com/filecoin-project/go-state-types/builtin/v18/util/adt"
 	verifreg18 "github.com/filecoin-project/go-state-types/builtin/v18/verifreg"
+	account19 "github.com/filecoin-project/go-state-types/builtin/v19/account"
+	datacap19 "github.com/filecoin-project/go-state-types/builtin/v19/datacap"
+	init19 "github.com/filecoin-project/go-state-types/builtin/v19/init"
+	multisig19 "github.com/filecoin-project/go-state-types/builtin/v19/multisig"
+	reward19 "github.com/filecoin-project/go-state-types/builtin/v19/reward"
+	system19 "github.com/filecoin-project/go-state-types/builtin/v19/system"
+	adt19 "github.com/filecoin-project/go-state-types/builtin/v19/util/adt"
+	verifreg19 "github.com/filecoin-project/go-state-types/builtin/v19/verifreg"
 
 	"github.com/Reiers/lantern/state/hamt"
 )
@@ -79,6 +87,12 @@ func LoadAccount(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGet
 			return nil, fmt.Errorf("decoding account v18: %w", err)
 		}
 		return &accountV18{s: &s}, nil
+	case 19:
+		var s account19.State
+		if err := s.UnmarshalCBOR(bytes.NewReader(raw)); err != nil {
+			return nil, fmt.Errorf("decoding account v19: %w", err)
+		}
+		return &accountV19{s: &s}, nil
 	}
 	return nil, ErrUnsupportedVersion{Kind: KindAccount, Version: info.Version}
 }
@@ -92,6 +106,11 @@ type accountV18 struct{ s *account18.State }
 
 func (a *accountV18) Version() int                   { return 18 }
 func (a *accountV18) PubkeyAddress() address.Address { return a.s.Address }
+
+type accountV19 struct{ s *account19.State }
+
+func (a *accountV19) Version() int                   { return 19 }
+func (a *accountV19) PubkeyAddress() address.Address { return a.s.Address }
 
 // ----- Init -----
 
@@ -133,6 +152,12 @@ func LoadInit(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGetter
 			return nil, fmt.Errorf("decoding init v18: %w", err)
 		}
 		return &initV18{s: &s, store: adt18.WrapStore(ctx, store)}, nil
+	case 19:
+		var s init19.State
+		if err := s.UnmarshalCBOR(bytes.NewReader(raw)); err != nil {
+			return nil, fmt.Errorf("decoding init v19: %w", err)
+		}
+		return &initV19{s: &s, store: adt19.WrapStore(ctx, store)}, nil
 	}
 	return nil, ErrUnsupportedVersion{Kind: KindInit, Version: info.Version}
 }
@@ -158,6 +183,18 @@ func (i *initV18) Version() int        { return 18 }
 func (i *initV18) NetworkName() string { return i.s.NetworkName }
 func (i *initV18) NextID() abi.ActorID { return i.s.NextID }
 func (i *initV18) ResolveAddress(ctx context.Context, a address.Address) (address.Address, bool, error) {
+	return i.s.ResolveAddress(i.store, a)
+}
+
+type initV19 struct {
+	s     *init19.State
+	store adt19.Store
+}
+
+func (i *initV19) Version() int        { return 19 }
+func (i *initV19) NetworkName() string { return i.s.NetworkName }
+func (i *initV19) NextID() abi.ActorID { return i.s.NextID }
+func (i *initV19) ResolveAddress(ctx context.Context, a address.Address) (address.Address, bool, error) {
 	return i.s.ResolveAddress(i.store, a)
 }
 
@@ -227,6 +264,12 @@ func LoadVerifreg(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGe
 			return nil, fmt.Errorf("decoding verifreg v18: %w", err)
 		}
 		return &verifregV18{s: &s, store: adt18.WrapStore(ctx, store)}, nil
+	case 19:
+		var s verifreg19.State
+		if err := s.UnmarshalCBOR(bytes.NewReader(raw)); err != nil {
+			return nil, fmt.Errorf("decoding verifreg v19: %w", err)
+		}
+		return &verifregV19{s: &s, store: adt19.WrapStore(ctx, store)}, nil
 	}
 	return nil, ErrUnsupportedVersion{Kind: KindVerifreg, Version: info.Version}
 }
@@ -299,6 +342,86 @@ func (v *verifregV18) VerifierStatus(ctx context.Context, verifier address.Addre
 	verifiers, err := adt18.AsMap(v.store, v.s.Verifiers, builtin.DefaultHamtBitwidth)
 	if err != nil {
 		return big.Zero(), false, fmt.Errorf("load verifiers v18: %w", err)
+	}
+	var dc abi.StoragePower
+	found, err := verifiers.Get(abi.AddrKey(verifier), &dc)
+	if err != nil {
+		return big.Zero(), false, err
+	}
+	if !found {
+		return big.Zero(), false, nil
+	}
+	return dc, true, nil
+}
+
+type verifregV19 struct {
+	s     *verifreg19.State
+	store adt19.Store
+}
+
+func (v *verifregV19) Version() int             { return 19 }
+func (v *verifregV19) RootKey() address.Address { return v.s.RootKey }
+
+func (v *verifregV19) FindAllocation(ctx context.Context, clientID address.Address, allocID uint64) (*Allocation, bool, error) {
+	a, ok, err := v.s.FindAllocation(v.store, clientID, verifreg19.AllocationId(allocID))
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	return &Allocation{
+		Client: a.Client, Provider: a.Provider, Data: a.Data,
+		Size: a.Size, TermMin: a.TermMin, TermMax: a.TermMax,
+		Expiration: a.Expiration,
+	}, true, nil
+}
+
+func (v *verifregV19) AllocationsByClient(ctx context.Context, clientID address.Address) (map[uint64]Allocation, error) {
+	m, err := v.s.LoadAllocationsToMap(v.store, clientID)
+	if err != nil {
+		return nil, fmt.Errorf("load allocations v19: %w", err)
+	}
+	out := make(map[uint64]Allocation, len(m))
+	for id, a := range m {
+		out[uint64(id)] = Allocation{
+			Client: a.Client, Provider: a.Provider, Data: a.Data,
+			Size: a.Size, TermMin: a.TermMin, TermMax: a.TermMax,
+			Expiration: a.Expiration,
+		}
+	}
+	return out, nil
+}
+
+func (v *verifregV19) FindClaim(ctx context.Context, providerID address.Address, claimID uint64) (*Claim, bool, error) {
+	c, ok, err := v.s.FindClaim(v.store, providerID, verifreg19.ClaimId(claimID))
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	return &Claim{
+		Provider: c.Provider, Client: c.Client, Data: c.Data,
+		Size: c.Size, TermMin: c.TermMin, TermMax: c.TermMax,
+		TermStart: c.TermStart, Sector: c.Sector,
+	}, true, nil
+}
+
+func (v *verifregV19) ClaimsByProvider(ctx context.Context, providerID address.Address) (map[uint64]Claim, error) {
+	m, err := v.s.LoadClaimsToMap(v.store, providerID)
+	if err != nil {
+		return nil, fmt.Errorf("load claims v19: %w", err)
+	}
+	out := make(map[uint64]Claim, len(m))
+	for id, c := range m {
+		out[uint64(id)] = Claim{
+			Provider: c.Provider, Client: c.Client, Data: c.Data,
+			Size: c.Size, TermMin: c.TermMin, TermMax: c.TermMax,
+			TermStart: c.TermStart, Sector: c.Sector,
+		}
+	}
+	return out, nil
+}
+
+func (v *verifregV19) VerifierStatus(ctx context.Context, verifier address.Address) (abi.StoragePower, bool, error) {
+	verifiers, err := adt19.AsMap(v.store, v.s.Verifiers, builtin.DefaultHamtBitwidth)
+	if err != nil {
+		return big.Zero(), false, fmt.Errorf("load verifiers v19: %w", err)
 	}
 	var dc abi.StoragePower
 	found, err := verifiers.Get(abi.AddrKey(verifier), &dc)
@@ -431,6 +554,12 @@ func LoadDatacap(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGet
 			return nil, fmt.Errorf("decoding datacap v18: %w", err)
 		}
 		return &datacapV18{s: &s, store: adt18.WrapStore(ctx, store)}, nil
+	case 19:
+		var s datacap19.State
+		if err := s.UnmarshalCBOR(bytes.NewReader(raw)); err != nil {
+			return nil, fmt.Errorf("decoding datacap v19: %w", err)
+		}
+		return &datacapV19{s: &s, store: adt19.WrapStore(ctx, store)}, nil
 	}
 	return nil, ErrUnsupportedVersion{Kind: KindDatacap, Version: info.Version}
 }
@@ -504,6 +633,37 @@ func (d *datacapV18) Balance(ctx context.Context, client address.Address) (abi.S
 	return amt, nil
 }
 
+type datacapV19 struct {
+	s     *datacap19.State
+	store adt19.Store
+}
+
+func (d *datacapV19) Version() int              { return 19 }
+func (d *datacapV19) Governor() address.Address { return d.s.Governor }
+
+func (d *datacapV19) Balance(ctx context.Context, client address.Address) (abi.StoragePower, error) {
+	if client.Protocol() != address.ID {
+		return big.Zero(), fmt.Errorf("datacap balance requires ID address, got %s", client)
+	}
+	id, err := address.IDFromAddress(client)
+	if err != nil {
+		return big.Zero(), err
+	}
+	balances, err := adt19.AsMap(d.store, d.s.Token.Balances, int(d.s.Token.HamtBitWidth))
+	if err != nil {
+		return big.Zero(), fmt.Errorf("load datacap balances v19: %w", err)
+	}
+	var amt abi.TokenAmount
+	found, err := balances.Get(abi.UIntKey(id), &amt)
+	if err != nil {
+		return big.Zero(), err
+	}
+	if !found {
+		return big.Zero(), nil
+	}
+	return amt, nil
+}
+
 // ----- Reward -----
 
 // RewardState exposes the reward actor (f02) sub-state used by pledge
@@ -547,6 +707,12 @@ func LoadReward(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGett
 			return nil, fmt.Errorf("decoding reward v18: %w", err)
 		}
 		return &rewardV18{s: &s}, nil
+	case 19:
+		var s reward19.State
+		if err := s.UnmarshalCBOR(bytes.NewReader(raw)); err != nil {
+			return nil, fmt.Errorf("decoding reward v19: %w", err)
+		}
+		return &rewardV19{s: &s}, nil
 	}
 	return nil, ErrUnsupportedVersion{Kind: KindReward, Version: info.Version}
 }
@@ -574,6 +740,18 @@ func (r *rewardV18) ThisEpochRewardSmoothed() (big.Int, big.Int) {
 func (r *rewardV18) CumsumRealized() big.Int              { return r.s.CumsumRealized }
 func (r *rewardV18) CumsumBaseline() big.Int              { return r.s.CumsumBaseline }
 func (r *rewardV18) EffectiveNetworkTime() abi.ChainEpoch { return r.s.EffectiveNetworkTime }
+
+type rewardV19 struct{ s *reward19.State }
+
+func (r *rewardV19) Version() int                             { return 19 }
+func (r *rewardV19) ThisEpochBaselinePower() abi.StoragePower { return r.s.ThisEpochBaselinePower }
+func (r *rewardV19) ThisEpochReward() abi.TokenAmount         { return r.s.ThisEpochReward }
+func (r *rewardV19) ThisEpochRewardSmoothed() (big.Int, big.Int) {
+	return r.s.ThisEpochRewardSmoothed.PositionEstimate, r.s.ThisEpochRewardSmoothed.VelocityEstimate
+}
+func (r *rewardV19) CumsumRealized() big.Int              { return r.s.CumsumRealized }
+func (r *rewardV19) CumsumBaseline() big.Int              { return r.s.CumsumBaseline }
+func (r *rewardV19) EffectiveNetworkTime() abi.ChainEpoch { return r.s.EffectiveNetworkTime }
 
 // ----- Multisig -----
 
@@ -619,6 +797,12 @@ func LoadMultisig(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGe
 			return nil, fmt.Errorf("decoding multisig v18: %w", err)
 		}
 		return &multisigV18{s: &s}, nil
+	case 19:
+		var s multisig19.State
+		if err := s.UnmarshalCBOR(bytes.NewReader(raw)); err != nil {
+			return nil, fmt.Errorf("decoding multisig v19: %w", err)
+		}
+		return &multisigV19{s: &s}, nil
 	}
 	return nil, ErrUnsupportedVersion{Kind: KindMultisig, Version: info.Version}
 }
@@ -644,6 +828,18 @@ func (m *multisigV18) UnlockDuration() abi.ChainEpoch  { return m.s.UnlockDurati
 func (m *multisigV18) StartEpoch() abi.ChainEpoch      { return m.s.StartEpoch }
 func (m *multisigV18) InitialBalance() abi.TokenAmount { return m.s.InitialBalance }
 func (m *multisigV18) LockedBalance(curr abi.ChainEpoch) abi.TokenAmount {
+	return m.s.AmountLocked(curr - m.s.StartEpoch)
+}
+
+type multisigV19 struct{ s *multisig19.State }
+
+func (m *multisigV19) Version() int                    { return 19 }
+func (m *multisigV19) Signers() []address.Address      { return m.s.Signers }
+func (m *multisigV19) Threshold() uint64               { return m.s.NumApprovalsThreshold }
+func (m *multisigV19) UnlockDuration() abi.ChainEpoch  { return m.s.UnlockDuration }
+func (m *multisigV19) StartEpoch() abi.ChainEpoch      { return m.s.StartEpoch }
+func (m *multisigV19) InitialBalance() abi.TokenAmount { return m.s.InitialBalance }
+func (m *multisigV19) LockedBalance(curr abi.ChainEpoch) abi.TokenAmount {
 	return m.s.AmountLocked(curr - m.s.StartEpoch)
 }
 
@@ -684,6 +880,12 @@ func LoadSystem(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGett
 			return nil, fmt.Errorf("decoding system v18: %w", err)
 		}
 		return &systemV18{s: &s}, nil
+	case 19:
+		var s system19.State
+		if err := s.UnmarshalCBOR(bytes.NewReader(raw)); err != nil {
+			return nil, fmt.Errorf("decoding system v19: %w", err)
+		}
+		return &systemV19{s: &s}, nil
 	}
 	return nil, ErrUnsupportedVersion{Kind: KindSystem, Version: info.Version}
 }
@@ -697,3 +899,8 @@ type systemV18 struct{ s *system18.State }
 
 func (s *systemV18) Version() int           { return 18 }
 func (s *systemV18) BuiltinActors() cid.Cid { return s.s.BuiltinActors }
+
+type systemV19 struct{ s *system19.State }
+
+func (s *systemV19) Version() int           { return 19 }
+func (s *systemV19) BuiltinActors() cid.Cid { return s.s.BuiltinActors }

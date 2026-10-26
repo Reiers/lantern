@@ -1,6 +1,6 @@
 // Versioned power-actor loader.
 //
-// Phase 5: v17 + v18 only. Returns a PowerState that exposes:
+// Scope: actors v17, v18 and v19. Returns a PowerState that exposes:
 //  - Total network power (raw + quality-adjusted)
 //  - Per-miner Claim lookup (raw + QA byte power)
 //  - List of registered miners (used by StateListMiners)
@@ -23,6 +23,8 @@ import (
 	adt17 "github.com/filecoin-project/go-state-types/builtin/v17/util/adt"
 	power18 "github.com/filecoin-project/go-state-types/builtin/v18/power"
 	adt18 "github.com/filecoin-project/go-state-types/builtin/v18/util/adt"
+	power19 "github.com/filecoin-project/go-state-types/builtin/v19/power"
+	adt19 "github.com/filecoin-project/go-state-types/builtin/v19/util/adt"
 
 	"github.com/Reiers/lantern/state/hamt"
 )
@@ -114,8 +116,70 @@ func LoadPower(ctx context.Context, codeCid, headCid cid.Cid, bg hamt.BlockGette
 			return nil, fmt.Errorf("decoding power v18: %w", err)
 		}
 		return &powerV18{s: &s, store: adt18.WrapStore(ctx, store), ctx: ctx}, nil
+	case 19:
+		var s power19.State
+		if err := s.UnmarshalCBOR(bytes.NewReader(raw)); err != nil {
+			return nil, fmt.Errorf("decoding power v19: %w", err)
+		}
+		return &powerV19{s: &s, store: adt19.WrapStore(ctx, store), ctx: ctx}, nil
 	}
 	return nil, ErrUnsupportedVersion{Kind: KindPower, Version: info.Version}
+}
+
+// ----- v19 -----
+
+type powerV19 struct {
+	s     *power19.State
+	store adt19.Store
+	ctx   context.Context
+}
+
+func (p *powerV19) Version() int { return 19 }
+
+func (p *powerV19) Totals() PowerTotals {
+	return PowerTotals{
+		RawBytePower:        p.s.TotalRawBytePower,
+		QualityAdjPower:     p.s.TotalQualityAdjPower,
+		MinerCount:          p.s.MinerCount,
+		MinerAboveMinCount:  p.s.MinerAboveMinPowerCount,
+		ThisEpochRawByte:    p.s.ThisEpochRawBytePower,
+		ThisEpochQualityAdj: p.s.ThisEpochQualityAdjPower,
+		ThisEpochPledge:     p.s.ThisEpochPledgeCollateral,
+	}
+}
+
+func (p *powerV19) MinerPower(ctx context.Context, miner address.Address) (*PowerClaim, bool, error) {
+	claims, err := adt19.AsMap(p.store, p.s.Claims, builtin.DefaultHamtBitwidth)
+	if err != nil {
+		return nil, false, fmt.Errorf("load claims v19: %w", err)
+	}
+	var c power19.Claim
+	found, err := claims.Get(abi.AddrKey(miner), &c)
+	if err != nil {
+		return nil, false, fmt.Errorf("HAMT lookup %s v19: %w", miner, err)
+	}
+	if !found {
+		return nil, false, nil
+	}
+	return &PowerClaim{RawBytePower: c.RawBytePower, QualityAdjPower: c.QualityAdjPower}, true, nil
+}
+
+func (p *powerV19) ListMiners(ctx context.Context) ([]address.Address, error) {
+	claims, err := adt19.AsMap(p.store, p.s.Claims, builtin.DefaultHamtBitwidth)
+	if err != nil {
+		return nil, fmt.Errorf("load claims v19: %w", err)
+	}
+	var out []address.Address
+	var c power19.Claim
+	err = claims.ForEach(&c, func(k string) error {
+		a, err := address.NewFromBytes([]byte(k))
+		if err != nil {
+			return err
+		}
+		out = append(out, a)
+		return nil
+	})
+	return out, err
 }
 
 // ----- v18 -----
