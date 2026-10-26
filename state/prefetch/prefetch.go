@@ -275,8 +275,15 @@ func (p *Prefetcher) walkOne(ctx context.Context, acc *accessor.Accessor, key st
 	}
 	st, err := actors.LoadEVM(wctx, actor.Code, actor.Head, p.bg, p.reg)
 	if err != nil {
+		var uc actors.ErrUnknownCode
+		if errors.As(err, &uc) {
+			// Unknown code CID: the network moved to an actors bundle this
+			// build does not carry. Be loud once; nothing to walk.
+			actors.WarnUnknownCodeOnce(actor.Code, "prefetch")
+			return
+		}
 		// Not an EVM actor (e.g. account placeholder). Nothing to walk.
-		log.Debugw("prefetch: not an EVM actor", "addr", "0x"+key, "code", actor.Code.String())
+		log.Debugw("prefetch: not an EVM actor", "addr", "0x"+key, "code", actor.Code.String(), "err", err)
 		return
 	}
 	// Bytecode: one extra fetch, populates cache.

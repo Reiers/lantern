@@ -55,9 +55,12 @@ func (c *ChainAPI) localEthGetStorageAt(ctx context.Context, addrHex, keyHex str
 		}
 		return "", false, nil
 	}
-	st, err := actors.LoadEVM(ctx, actor.Code, actor.Head, bg, actors.DefaultRegistry())
+	st, err := actors.LoadEVM(ctx, actor.Code, actor.Head, bg, acc.Registry())
 	if err != nil {
-		return zeroSlot, true, nil // not an EVM contract -> no storage
+		if isDefinitelyNotEVM(err, actor.Code, "eth_getStorageAt") {
+			return zeroSlot, true, nil // known non-EVM actor -> no storage
+		}
+		return "", false, nil // unknown code / fault -> not definitive
 	}
 
 	v, _, err := kamt.GetU256(ctx, st.StorageRoot(), key.ToBig(), bg)
