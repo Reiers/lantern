@@ -169,9 +169,11 @@ USAGE
 COMMANDS
   init [--network N] [--no-wallet] [--bootstrap-quorum N] [--peer URL]...
                                                 Setup wizard with multi-source quorum bootstrap
+                                                (N = distinct operators that must agree, default 3)
   devnet-init --lotus-rpc <URL>                 Setup wizard for a local Curio docker devnet (see docker-devnet.md)
   node-type [light|pdp|full] [--network N]      Show or set the node tier (pdp = persistent cache)
-  daemon [--network N] [--listen addr]          Run RPC server (default 127.0.0.1:1234)
+  daemon [--network N] [--listen addr]          Run RPC server (default 127.0.0.1:1234); needs the trust
+                                                anchor written by init/repair (or --allow-rpc-anchor)
   beacon [--cache-dir <p>]                      Run a Lantern beacon (Bitswap-only, no RPC)
   doctor [--bootstrap-quorum N]                 Re-run the quorum probe (read-only)
   repair [--bootstrap-quorum N]                 Re-anchor from a fresh quorum (overwrites bootstrap-anchor.json)
@@ -714,7 +716,7 @@ func (g gatewayHeadFetcher) FetchCandidate(ctx context.Context) (anchorverify.Ca
 	// attributed to the lantern-gateway default upstream (Glif).
 	op := bootstrap.OperatorOf(head.Upstream)
 	if op == "" {
-		op = bootstrap.DefaultGatewayUpstream
+		op = bootstrap.OperatorOf(bootstrap.DefaultGatewayUpstream)
 	}
 	return anchorverify.Candidate{
 		Source:       "gateway",
@@ -754,16 +756,41 @@ func (g glifHeadFetcher) FetchCandidate(ctx context.Context) (anchorverify.Candi
 	}, nil
 }
 
+// FetchCandidateAt returns this RPC's tipset at height h (F10 epoch-aligned
+// agreement).
+func (g glifHeadFetcher) FetchCandidateAt(ctx context.Context, h abi.ChainEpoch) (anchorverify.Candidate, error) {
+	name := g.name
+	if name == "" {
+		name = "glif"
+	}
+	gh, err := glif.New(g.url, 10*time.Second).FetchTipsetByHeight(ctx, h)
+	if err != nil {
+		return anchorverify.Candidate{}, fmt.Errorf("%s tipset@%d: %w", name, h, err)
+	}
+	u := g.url
+	if u == "" {
+		u = glif.DefaultURL
+	}
+	return anchorverify.Candidate{
+		Source:       name,
+		Operator:     bootstrap.OperatorOf(u),
+		Epoch:        gh.Epoch,
+		StateRoot:    gh.StateRoot,
+		TipSetKey:    gh.TipSetKey,
+		ParentWeight: gh.ParentWeight,
+	}, nil
+}
+
 // independentAnchorRPCForNetwork is a public Lotus-compatible RPC run by a
 // different operator than Glif (#153), used as the second independent
-// voter for the boot anchor. chain.love has no calibration endpoint, so
-// calibration uses Filfox.
+// voter for the boot anchor. F10: mainnet used chain.love, but Glif is
+// served from chain.love infrastructure, so both networks now use Filfox.
 func independentAnchorRPCForNetwork(n build.Network) string {
 	switch n {
 	case build.Calibration:
 		return "https://calibration.filfox.info/rpc/v1"
 	case build.Mainnet:
-		return "https://api.chain.love/rpc/v1"
+		return "https://filfox.info/rpc/v1"
 	}
 	return "" // devnet/other: no public second operator
 }
@@ -821,8 +848,6 @@ func verifiedECHead(ctx context.Context, gw string, network build.Network, insec
 	if u := independentAnchorRPCForNetwork(network); u != "" {
 		fetchers = append(fetchers, glifHeadFetcher{url: u, name: "independent-rpc"})
 	}
-	cands := anchorverify.Gather(ctx, pol, fetchers...)
-
 	// Best-effort F3 latest cert for the finality cross-check.
 	var f3 anchorverify.F3Finalized
 	{
@@ -835,14 +860,116 @@ func verifiedECHead(ctx context.Context, gw string, network build.Network, insec
 		}
 		cancel()
 	}
+	f3 = dropStaleF3(f3, network, time.Now(), pol.Warnf)
 
-	res, err := anchorverify.Verify(cands, f3, pol)
+	// Independent operators sample the head a few hundred ms apart and can
+	// straddle an epoch boundary. Re-sample a couple of times before
+	// declaring disagreement (F10: the default voters are now genuinely
+	// different backends, not two front-ends of one node).
+	var (
+		res anchorverify.Result
+		err error
+	)
+	for attempt := 1; attempt <= 3; attempt++ {
+		cands := anchorverify.Gather(ctx, pol, fetchers...)
+		res, err = anchorverify.Verify(cands, f3, pol)
+		if err == nil || !errors.Is(err, anchorverify.ErrNoAgreement) {
+			break
+		}
+		// Heads straddling an epoch boundary are not a disagreement about
+		// the chain. Compare the tipset a few epochs below the lowest
+		// head instead, where honest nodes have converged.
+		if aligned := alignedCandidates(ctx, cands, fetchers, pol); len(aligned) > 0 {
+			if ares, aerr := anchorverify.Verify(aligned, f3, pol); aerr == nil {
+				ares.Method += "-aligned"
+				res, err = ares, nil
+				break
+			}
+		}
+		if attempt == 3 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return anchorverify.Result{}, ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+	}
 	if err != nil {
 		// Hard fail: do not silently fall back to trusting one source.
 		return anchorverify.Result{}, fmt.Errorf("boot anchor verification failed (#54): %w "+
 			"(set --insecure-anchor to override on a single trusted endpoint)", err)
 	}
 	return res, nil
+}
+
+// alignLookbackEpochs is how far below the lowest sampled head the
+// epoch-aligned agreement check compares tipsets.
+const alignLookbackEpochs = 5
+
+// heightCandidateFetcher is implemented by head fetchers that can also
+// return the tipset at a given height (Lotus-compatible RPCs).
+type heightCandidateFetcher interface {
+	FetchCandidateAt(ctx context.Context, h abi.ChainEpoch) (anchorverify.Candidate, error)
+}
+
+// alignedCandidates re-samples every height-capable fetcher at a common
+// epoch alignLookbackEpochs below the lowest head in cands. Independent
+// operators routinely report heads one epoch apart; at a common height
+// they must agree on the tipset or one of them is on another fork.
+func alignedCandidates(ctx context.Context, cands []anchorverify.Candidate, fetchers []anchorverify.HeadFetcher, pol anchorverify.Policy) []anchorverify.Candidate {
+	if len(cands) < 2 {
+		return nil
+	}
+	low := cands[0].Epoch
+	for _, c := range cands[1:] {
+		if c.Epoch < low {
+			low = c.Epoch
+		}
+	}
+	h := low - alignLookbackEpochs
+	if h <= 0 {
+		return nil
+	}
+	var out []anchorverify.Candidate
+	for _, f := range fetchers {
+		hf, ok := f.(heightCandidateFetcher)
+		if !ok {
+			continue
+		}
+		fctx, cancel := context.WithTimeout(ctx, anchorverify.GatherTimeout)
+		c, err := hf.FetchCandidateAt(fctx, h)
+		cancel()
+		if err != nil {
+			if pol.Warnf != nil {
+				pol.Warnf("anchor: aligned fetch at epoch %d failed: %v", h, err)
+			}
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// dropStaleF3 discards an F3 finality that is far behind the wall-clock
+// head (F11). A stale certificate (mainnet, 2026: instance 466453 at epoch
+// 5824156, months behind the live chain) makes every F3 check in
+// anchorverify vacuous: any live head is "a descendant by epoch", and the
+// "F3-consistent heaviest" fallback would accept a single operator's head.
+// Without it, Verify demands real multi-operator agreement or refuses.
+func dropStaleF3(f3 anchorverify.F3Finalized, network build.Network, now time.Time, warnf func(string, ...any)) anchorverify.F3Finalized {
+	if !f3.Available {
+		return f3
+	}
+	lag, _, ok := epochLag(network, now, int64(f3.Epoch))
+	if !ok || lag <= maxAnchorLagEpochs {
+		return f3
+	}
+	if warnf != nil {
+		warnf("anchor: F3 finality is stale (instance %d, epoch %d, ~%.1f days behind wall clock); skipping the F3 cross-check and requiring multi-operator agreement",
+			f3.Instance, f3.Epoch, float64(lag)/2880.0)
+	}
+	return anchorverify.F3Finalized{}
 }
 
 // loadBootstrapAnchorForNetwork reads the persisted quorum anchor
@@ -906,6 +1033,7 @@ func cmdDaemon(args []string) error {
 	notifyBufSize := fs.Int("notify-buf", headnotify.DefaultBufferSize, "ChainNotify per-subscriber buffer size")
 	p2pListen := fs.String("p2p-listen", "/ip4/0.0.0.0/tcp/0,/ip4/0.0.0.0/udp/0/quic-v1", "libp2p listen multiaddrs (comma-separated). Empty disables the libp2p host.")
 	noLibp2p := fs.Bool("no-libp2p", false, "Skip starting the libp2p host (RPC stays up; Net* stats return zero).")
+	allowRPCAnchor := fs.Bool("allow-rpc-anchor", false, "F11: boot even when no init-written trust anchor exists, taking the head from gateway+RPC operator agreement (#54) instead. Weaker than init's F3 quorum (fewer operators, F3 cross-check best-effort). Default: refuse and tell you to run `lantern init`.")
 	insecureAnchor := fs.Bool("insecure-anchor", false, "SECURITY (#54): accept the boot trusted-root from a single source without multi-source agreement or F3 finality cross-check. Intended for localhost/dev against one trusted endpoint only.")
 	allowRemoteRPC := fs.Bool("allow-remote-rpc", false, "SECURITY (#56): permit binding JSON-RPC --listen to a non-loopback address. The RPC holds wallet keys + a signing write path; only loopback is safe without a fronting auth proxy. Off by default — set explicitly to expose the port and rely on Bearer-token perms.")
 	allowEmptyPass := fs.Bool("allow-empty-passphrase", false, "SECURITY (#58): deliberately run with an UNENCRYPTED keystore even when it holds keys. Equivalent to LANTERN_ALLOW_EMPTY_PASS=1. Off by default — the daemon refuses an empty passphrase on a keystore that already holds (possibly funded) signing keys.")
@@ -1120,7 +1248,7 @@ func cmdDaemon(args []string) error {
 	fmt.Printf("Lantern daemon — Lotus-compatible RPC (network: %s)\n", network)
 	fmt.Printf("  data dir:    %s\n", netDir)
 	if *gw != "" {
-		fmt.Println("Fetching trusted head from", *gw)
+		fmt.Println("  gateway:     ", *gw)
 	}
 
 	// #118: bridge-off auto-stale-reset. Runs BEFORE the anchor is loaded
@@ -1129,13 +1257,7 @@ func cmdDaemon(args []string) error {
 	// polling Sync's StaleResetThreshold, #51). Also skipped for devnet
 	// (the flag is flipped to false in the devnet block above).
 	{
-		quorum := 5
-		if network == build.Calibration {
-			quorum = 3
-		}
-		if network == build.Devnet {
-			quorum = 1
-		}
+		quorum := defaultBootstrapQuorum(network)
 		networkName := "filecoin"
 		if network == build.Calibration {
 			networkName = "calibrationnet2"
@@ -1202,8 +1324,24 @@ func cmdDaemon(args []string) error {
 		if *noFallbackRPC {
 			return fmt.Errorf("--no-fallback-rpc: no usable persisted quorum anchor at %s; run `lantern init` or `lantern repair --bootstrap-quorum` first (bridge-off has no gateway/RPC anchor fallback)", filepath.Join(netDir, "bootstrap-anchor.json"))
 		}
+		// F11: without an init-written anchor the only remaining path is
+		// the #54 gateway+RPC head agreement, which is weaker than init's
+		// quorum (fewer operators; the gateway votes as its upstream). It
+		// used to run silently. Now it needs an explicit opt-in, except on
+		// devnet (single-endpoint trust by design) or with
+		// --insecure-anchor (already an explicit weaker-trust opt-in).
+		if network != build.Devnet && !*allowRPCAnchor && !*insecureAnchor {
+			return missingAnchorError(netDir, network)
+		}
 		if *gw == "" {
 			return fmt.Errorf("no persisted quorum anchor at %s and no gateway configured; run `lantern init --network %s` first", filepath.Join(netDir, "bootstrap-anchor.json"), network)
+		}
+		if network != build.Devnet {
+			fmt.Fprintf(os.Stderr, "  ⚠ WARN: no init-written trust anchor at %s.\n"+
+				"    Booting from gateway+RPC head agreement (--allow-rpc-anchor). This is WEAKER than\n"+
+				"    the %d-operator quorum `lantern init` requires. Run `lantern init --network %s`\n"+
+				"    (or `lantern repair`) to write a proper anchor, then restart without the flag.\n",
+				filepath.Join(netDir, "bootstrap-anchor.json"), defaultBootstrapQuorum(network), network)
 		}
 		tr, err = fetchVerifiedTrustedHead(ctx, *gw, network, *insecureAnchor)
 		if err != nil {

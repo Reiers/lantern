@@ -89,7 +89,9 @@ lantern init --network calibration --no-wallet
 lantern node-type pdp --network calibration
 ```
 
-- `init` asks independent sources (libp2p peers and public RPC operators) for the current finalized head and refuses to write a trust anchor unless at least 3 agree. It takes about 15 s and ends with `Lantern initialised` and a list of next steps that all carry `--network calibration`.
+- `init` asks independent sources (libp2p peers and public RPC operators) for the current finalized head and refuses to write a trust anchor unless at least **3 distinct operators** agree and none disagrees. Several endpoints of one operator count once (Glif and chain.love are one operator). It takes about 15 s and ends with `Lantern initialised` and a list of next steps that all carry `--network calibration`.
+- If `init` fails, it prints which sources failed (and which operator runs each), how many operators answered against how many are required, and the flags that help: re-run `lantern doctor --network calibration`, add a source you trust with `--peer https://<your-node>/rpc/v1` (counts as its own operator), `--no-libp2p` if libp2p is blocked, or `--bootstrap-quorum N` to accept fewer operators. A conflict (two sources naming different finalized tipsets) is reported separately and is never fixed by lowering the quorum.
+- **`lantern daemon` refuses to start until `init` (or `lantern repair --network calibration`) has written the trust anchor** (`$LANTERN_HOME/calibration/bootstrap-anchor.json`). `--allow-rpc-anchor` boots without it from a weaker gateway+RPC head agreement and prints a warning; do not use it for this setup.
 - `--no-wallet`: Curio-PDP keeps its own PDP signing key in Yugabyte, so Lantern needs none.
 - `node-type pdp` selects the PDP tier: a persistent 3 GiB block cache, so warm PDP / FWSS / registry contract state survives restarts.
 - `init` mints API tokens under `$LANTERN_HOME/calibration/secrets/` (`token` is the admin token Curio uses).
@@ -389,6 +391,9 @@ Other problems you may run into:
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| `lantern daemon` exits with `no trust anchor at .../bootstrap-anchor.json` | `init` never completed for this network and `LANTERN_HOME`, or `lantern reset --chain-state` removed the anchor. The daemon no longer falls back silently to a gateway+RPC head. | `lantern init --network calibration --no-wallet` (or `lantern repair --network calibration`), with the same `LANTERN_HOME` as the service, then restart. If it fails, `lantern doctor --network calibration` shows which sources failed and which flags help. |
+| `init` / `repair`: `quorum not reached` or `fewer countable operators than quorum` | Fewer than 3 distinct operators answered (public endpoints flake, or libp2p is blocked). | Re-run; follow the printed hints (`--peer`, `--no-libp2p`, `--bootstrap-quorum`). |
+| `init` / `repair`: `conflicting finality answers` | Two sources returned different finalized tipsets for the same F3 instance: one is wrong, broken or on another network. | Do not lower the quorum. Compare against a node you run (`--peer`), re-run later, and file an operator report naming the sources. |
 | `lantern daemon` syncs mainnet or `lantern info` says "not initialised" | A command was run without `--network calibration`. | Add `--network calibration` to every command and to the service. |
 | Compose rejects `docker-compose.lantern.yaml` (unknown tag / invalid `depends_on`) | Compose older than v2.24.4 does not understand `!override`. | Update the Docker Compose plugin. |
 | A `skiff-forest` container is running or downloading a snapshot | `up -d` was run without naming services. | `$C rm -sf forest`, then always `$C up -d --no-build yugabyte skiff`. |

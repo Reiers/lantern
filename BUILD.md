@@ -131,6 +131,17 @@ Compare only the hash column: the `.sha256` file names the CI path (`dist/lanter
 
 <!-- TODO-VERIFY: during the internal dry run the v1.10.0 linux-amd64 clean build did NOT match the published hash although the embedded build info was identical (friction F1, being fixed in a separate PR). Update this section once docs/REPRODUCIBLE-BUILDS.md and scripts/repro-build.sh land, and record the result in docs/VERIFICATION-M2.md. -->
 
+## 7. First run
+
+Every command takes `--network mainnet|calibration` (default mainnet).
+
+```sh
+LANTERN_PASS='' lantern init --network mainnet --no-wallet
+lantern daemon --network mainnet
+```
+
+`init` writes the trust anchor only when at least 3 distinct operators agree on the current F3 finality and no source disagrees. **`lantern daemon` refuses to start without that anchor**; run `lantern init` (or `lantern repair`, which re-anchors from a fresh quorum) first. If `init` fails it prints which sources failed, how many operators answered, and the flags that help (`--peer <url>`, `--no-libp2p`, `--bootstrap-quorum N`); `lantern doctor --network <net>` re-runs the probe read-only. `--allow-rpc-anchor` lets the daemon boot from a weaker gateway+RPC head instead, with a warning. See [TRUST-MODEL.md](TRUST-MODEL.md) section 2.9.
+
 ## Expected timings
 
 Measured on a clean `ubuntu:24.04` container on an 8-core / 16-thread Xeon E5-2667 v2 with a home fibre connection:
@@ -163,5 +174,6 @@ Useful variables: `LANTERN_VERSION=<tag>` (for example a release candidate; defa
 | `go: downloading go1.26.4` then a network error | An older Go tried to fetch the pinned toolchain. Install 1.26.4 directly (step 2) or allow access to `proxy.golang.org`. |
 | `lantern version` prints `dev` | You built without `-ldflags "... -X main.versionTag=$TAG"`. Rebuild with the exact command in step 4. |
 | `go version -m` shows `vcs.modified=true` | The checkout has local changes. `git status`, then `git stash` or a fresh clone. |
+| `lantern daemon` exits with `no trust anchor` | Run `lantern init --network <net>` (or `lantern repair --network <net>`) with the same `LANTERN_HOME`. If the quorum fails, follow its printed hints or run `lantern doctor --network <net>` (step 7). |
 | `sha256sum -c` says "No such file or directory" | The published `.sha256` names `dist/lantern-<os>-<arch>`. Compare the hash column directly (step 6). |
 | Local hash differs from the published hash | Check Go version, flags, tag and `vcs.modified` first, then follow [docs/REPRODUCIBLE-BUILDS.md](docs/REPRODUCIBLE-BUILDS.md). If it still differs, file an [operator report](https://github.com/Reiers/lantern/issues/new?template=operator-report.yml). |

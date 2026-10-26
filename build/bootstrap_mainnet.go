@@ -1,21 +1,45 @@
 // Mainnet libp2p bootstrap peers. Copied verbatim from
-// github.com/filecoin-project/lotus/build/bootstrap/mainnet.pi at commit
-// master @ 2026-05-21. See LICENSE.
+// github.com/filecoin-project/lotus/build/bootstrap/mainnet.pi at tag
+// v1.38.3 (refreshed 2026-10-26, F10). See LICENSE.
 //
 // These are the seed peers Lantern dials on startup to enter the Filecoin
-// mainnet DHT + gossipsub mesh.
+// mainnet DHT + gossipsub mesh, and the libp2p cert-exchange sources the
+// bootstrap quorum asks for F3 finality.
+//
+// Entries may be /dnsaddr roots (no /p2p component). They are expanded at
+// runtime by net/dnsaddr (TXT records at _dnsaddr.<domain>); when DNS
+// resolution fails the snapshot in BootstrapDNSAddrSnapshot is used so a
+// box with a TXT-hostile resolver still finds peers.
+//
+// Removed in the v1.38.3 refresh (all verified dead from a home network on
+// 2026-10-26, and dropped from Lotus upstream):
+//   - bootstrap-venus.mainnet.filincubator.com (no DNS record)
+//   - n1.mainnet.fil.devtty.eu, 12D3KooWAke3... (tcp/443 + quic/443 time out)
 
 package build
 
 // MainnetBootstrapPeers is the canonical bootstrap multiaddr list.
 var MainnetBootstrapPeers = []string{
 	"/dns/bootstrap.filecoin.chain.love/tcp/1235/p2p/12D3KooWBF8cpp65hp2u9LK5mh19x67ftAam84z9LsfaquTDSBpt",
-	"/dns/bootstrap-venus.mainnet.filincubator.com/tcp/8888/p2p/QmQu8C6deXwKvJP2D8B6QGyhngc3ZiDnFzEHBDx8yeBXST",
-	"/dns/bootstrap-mainnet-0.chainsafe-fil.io/tcp/34000/p2p/12D3KooWKKkCZbcigsWTEu1cgNetNbZJqeNtysRtFpq7DTqw3eqH",
-	"/dns/bootstrap-mainnet-1.chainsafe-fil.io/tcp/34000/p2p/12D3KooWGnkd9GQKo3apkShQDaq1d6cKJJmsVe6KiQkacUk1T8oZ",
-	"/dns/bootstrap-mainnet-2.chainsafe-fil.io/tcp/34000/p2p/12D3KooWHQRSDFv4FvAjtU32shQ7znz7oRbLBryXzZ9NMK2feyyH",
-	"/dns/n1.mainnet.fil.devtty.eu/udp/443/quic-v1/p2p/12D3KooWAke3M2ji7tGNKx3BQkTHCyxVhtV1CN68z6Fkrpmfr37F",
-	"/dns/n1.mainnet.fil.devtty.eu/tcp/443/p2p/12D3KooWAke3M2ji7tGNKx3BQkTHCyxVhtV1CN68z6Fkrpmfr37F",
+	"/dnsaddr/bootstrap-mainnet.chainsafe-fil.io",
+}
+
+// BootstrapDNSAddrSnapshot is the last known expansion of every /dnsaddr
+// root in the bootstrap lists, captured from the live TXT records on
+// 2026-10-26. It is only a fallback for when the runtime TXT lookup fails;
+// a successful lookup always wins so operators can rotate peers without a
+// Lantern release.
+var BootstrapDNSAddrSnapshot = map[string][]string{
+	"/dnsaddr/bootstrap-mainnet.chainsafe-fil.io": {
+		"/dns/bootstrap-mainnet-0.chainsafe-fil.io/tcp/34000/p2p/12D3KooWKKkCZbcigsWTEu1cgNetNbZJqeNtysRtFpq7DTqw3eqH",
+		"/dns/bootstrap-mainnet-1.chainsafe-fil.io/tcp/34000/p2p/12D3KooWGnkd9GQKo3apkShQDaq1d6cKJJmsVe6KiQkacUk1T8oZ",
+		"/dns/bootstrap-mainnet-2.chainsafe-fil.io/tcp/34000/p2p/12D3KooWHQRSDFv4FvAjtU32shQ7znz7oRbLBryXzZ9NMK2feyyH",
+	},
+	"/dnsaddr/bootstrap-calibnet.chainsafe-fil.io": {
+		"/dns/bootstrap-calibnet-0.chainsafe-fil.io/tcp/34000/p2p/12D3KooWABQ5gTDHPWyvhJM7jPhtNwNJruzTEo32Lo4gcS5ABAMm",
+		"/dns/bootstrap-calibnet-1.chainsafe-fil.io/tcp/34000/p2p/12D3KooWS3ZRhMYL67b4bD5XQ6fcpTyVQXnDe8H89LvwrDqaSbiT",
+		"/dns/bootstrap-calibnet-2.chainsafe-fil.io/tcp/34000/p2p/12D3KooWEiBN8jBX8EBoM3M47pVRLRWV812gDRUJhMxgyVkUoR48",
+	},
 }
 
 // MainnetGossipTopicMessages is the mainnet message-pool gossipsub topic.

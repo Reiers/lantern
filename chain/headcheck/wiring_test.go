@@ -24,23 +24,33 @@ func operators(srcs []HeadSource) map[string]int {
 func TestDefaultSources_MainnetIsOperatorDiverse(t *testing.T) {
 	srcs := DefaultSources(SourceOptions{Network: build.Mainnet, Gateway: "https://gateway.lantern.reiers.io"})
 	ops := operators(srcs)
-	// gateway (glif.io) + glif (glif.io) + chain.love => 2 distinct voters.
-	if len(ops) != 2 || ops["op:glif.io"] != 2 || ops["op:chain.love"] != 1 {
-		t.Fatalf("want glif.io x2 + chain.love, got %v", ops)
+	// gateway (Glif upstream) + Glif are both chain.love since F10;
+	// Filfox is the independent voter => 2 distinct voters.
+	if len(ops) != 2 || ops["op:chain.love"] != 2 || ops["op:filfox.info"] != 1 {
+		t.Fatalf("want chain.love x2 + filfox.info, got %v", ops)
 	}
 }
 
 func TestDefaultSources_FallbackOverrideSkipsDuplicateIndependent(t *testing.T) {
+	srcs := DefaultSources(SourceOptions{Network: build.Mainnet, FallbackRPC: "https://filfox.info/rpc/v1"})
+	if ops := operators(srcs); len(srcs) != 1 || ops["op:filfox.info"] != 1 {
+		t.Fatalf("fallback=filfox must not add filfox twice, got %v", ops)
+	}
+}
+
+// F10: chain.love as fallback is NOT independent of the Glif default any
+// more, but it is independent of Filfox, so both are kept.
+func TestDefaultSources_FallbackChainLoveKeepsFilfox(t *testing.T) {
 	srcs := DefaultSources(SourceOptions{Network: build.Mainnet, FallbackRPC: "https://api.chain.love/rpc/v1"})
-	if ops := operators(srcs); len(srcs) != 1 || ops["op:chain.love"] != 1 {
-		t.Fatalf("fallback=chain.love must not add chain.love twice, got %v", ops)
+	if ops := operators(srcs); len(srcs) != 2 || ops["op:chain.love"] != 1 || ops["op:filfox.info"] != 1 {
+		t.Fatalf("want chain.love + filfox.info, got %v", ops)
 	}
 }
 
 func TestDefaultSources_CalibrationUsesFilfox(t *testing.T) {
 	ops := operators(DefaultSources(SourceOptions{Network: build.Calibration}))
-	if ops["op:glif.io"] != 1 || ops["op:filfox.info"] != 1 {
-		t.Fatalf("calibration: want glif + filfox, got %v", ops)
+	if ops["op:chain.love"] != 1 || ops["op:filfox.info"] != 1 {
+		t.Fatalf("calibration: want glif (chain.love) + filfox, got %v", ops)
 	}
 }
 

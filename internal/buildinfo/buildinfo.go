@@ -117,3 +117,12 @@ func Network() string {
 func UserAgent() string {
 	return "lantern/" + BuildVersion()
 }
+
+// HTTPUserAgent is the User-Agent Lantern sends to Filecoin JSON-RPC
+// endpoints (F10). Some public endpoints (filfox.info, verified
+// 2026-10-26) answer 403 to Go's default "Go-http-client/1.1", which
+// silently removed an independent operator from the bootstrap quorum and
+// the boot-anchor agreement.
+func HTTPUserAgent() string {
+	return "lantern/" + BuildVersion() + " (+https://github.com/Reiers/lantern)"
+}

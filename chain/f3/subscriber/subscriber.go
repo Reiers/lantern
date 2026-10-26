@@ -32,6 +32,7 @@ import (
 
 	"github.com/Reiers/lantern/chain/f3"
 	"github.com/Reiers/lantern/chain/f3/anchor"
+	"github.com/Reiers/lantern/internal/buildinfo"
 )
 
 var log = logging.Logger("lantern/f3/subscriber")
@@ -66,6 +67,7 @@ func (s *JSONRPCSource) rpc(ctx context.Context, method string, params []any, ou
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", buildinfo.HTTPUserAgent())
 	resp, err := s.Client.Do(req)
 	if err != nil {
 		return err

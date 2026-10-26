@@ -207,8 +207,10 @@ cd lantern
 git checkout <release tag>
 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.versionTag=<release tag>" -o lantern ./cmd/lantern
 
-# First-run wizard, including the multi-source bootstrap quorum.
+# First-run wizard, including the multi-source bootstrap quorum
+# (3 distinct operators must agree, no source may disagree).
 # --network mainnet|calibration (default mainnet) is the same flag on every command.
+# The daemon refuses to start until init (or repair) has written the trust anchor.
 ./lantern init --network mainnet
 
 # Run the daemon (Lotus-compatible RPC on 127.0.0.1:1234)
@@ -426,6 +428,7 @@ header store), use:
 ```sh
 lantern stop                 # if it's running as a service
 lantern reset --chain-state  # clears header store + trust anchor ONLY
+lantern repair               # writes a fresh quorum anchor
 lantern daemon               # re-syncs from live head
 ```
 

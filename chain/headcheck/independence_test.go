@@ -62,7 +62,7 @@ func TestIndependence_SameKindDifferentOperatorsCountTwice(t *testing.T) {
 func TestRPCHeadSource_OperatorIsRegistrableDomain(t *testing.T) {
 	a := NewRPCHeadSource("", bootstrap.KindForest, "https://api.node.glif.io/rpc/v1", "", 0)
 	b := NewRPCHeadSource("", bootstrap.KindForest, "https://api.calibration.node.glif.io/rpc/v1", "", 0)
-	if a.Operator() != "glif.io" || b.Operator() != a.Operator() {
+	if a.Operator() != "chain.love" || b.Operator() != a.Operator() {
 		t.Fatalf("glif URLs must share operator, got %q / %q", a.Operator(), b.Operator())
 	}
 }
@@ -73,8 +73,8 @@ func TestGatewayHeadSource_OperatorFromAdvertisedUpstream(t *testing.T) {
 	}))
 	defer srv.Close()
 	g := NewGatewayHeadSource(srv.URL, 0)
-	if g.Operator() != bootstrap.DefaultGatewayUpstream {
-		t.Fatalf("before probe, gateway must default to %q, got %q", bootstrap.DefaultGatewayUpstream, g.Operator())
+	if want := bootstrap.OperatorOf(bootstrap.DefaultGatewayUpstream); g.Operator() != want {
+		t.Fatalf("before probe, gateway must default to %q, got %q", want, g.Operator())
 	}
 	if _, err := g.HeadEpoch(context.Background()); err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestGatewayHeadSource_LegacyGatewayDefaultsToGlif(t *testing.T) {
 	if _, err := g.HeadEpoch(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if g.Operator() != "glif.io" {
-		t.Fatalf("legacy gateway must be attributed to glif.io, got %q", g.Operator())
+	if g.Operator() != "chain.love" {
+		t.Fatalf("legacy gateway must be attributed to Glif (operator chain.love since F10), got %q", g.Operator())
 	}
 }
