@@ -2278,6 +2278,9 @@ func cmdWallet(args []string) error {
 		return err
 	}
 	cliWalletNetwork = net
+	// Render addresses with the selected network's prefix (t1/t3/t4 on
+	// calibration and devnet, f... on mainnet) for every wallet subcommand.
+	applyAddressNetwork(net)
 
 	if len(args) == 0 {
 		return fmt.Errorf("wallet: subcommand required (new|list|balance|send|export|import|import-lotus) [--network mainnet|calibration]")
@@ -2379,26 +2382,48 @@ func walletDefault(args []string) error {
 }
 
 func walletBalance(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: lantern wallet balance <addr>")
+	if len(args) != 1 {
+		return fmt.Errorf("usage: lantern wallet [--network mainnet|calibration|devnet] balance <addr>")
 	}
 	a, err := addr.NewFromString(args[0])
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
-	tr, err := fetchTrustedHead(ctx, defaultGateway, build.Mainnet)
-	if err != nil {
-		return err
+	// Ask the RUNNING daemon for the selected network, the same way
+	// walletSend does. The previous implementation always built an offline
+	// ChainAPI against the hardcoded mainnet gateway, so on a calibration or
+	// devnet node it reported mainnet balances (#148).
+	network := cliWalletNetwork
+	listen := readRPCListen(networkDataDir(network))
+	if listen == "" {
+		listen = defaultListen
 	}
-	bg, _ := gatewayClient(defaultGateway)
-	chainAPI := handlers.New(tr, bg, nil, nil, "mainnet")
-	bal, err := chainAPI.WalletBalance(ctx, a)
+	token, err := readAdminToken(network)
+	if err != nil {
+		return fmt.Errorf("read admin token: %w (run 'lantern init --network %s' first)", err, network)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	var balStr string
+	if err := daemonRPC(ctx, listen, token, "Filecoin.WalletBalance", []any{a.String()}, &balStr); err != nil {
+		return fmt.Errorf("wallet balance via daemon at %s (is 'lantern daemon --network %s' running?): %w", listen, network, err)
+	}
+	bal, err := parseAttoFIL(balStr)
 	if err != nil {
 		return err
 	}
 	fmt.Println(types.FIL(bal).String())
 	return nil
+}
+
+// parseAttoFIL decodes the attoFIL decimal string Filecoin.WalletBalance
+// returns.
+func parseAttoFIL(s string) (types.BigInt, error) {
+	b, err := types.BigFromString(s)
+	if err != nil {
+		return types.BigInt{}, fmt.Errorf("decode balance %q: %w", s, err)
+	}
+	return b, nil
 }
 
 // daemonRPC is a minimal JSON-RPC 2.0 client for CLI→local-daemon calls.
