@@ -91,6 +91,15 @@ type ChainAPI struct {
 	sentTxOnce sync.Once
 	sentTxIdx  *sentTxIndex
 
+	// EthTxLookback bounds (in epochs back from head) the local
+	// eth_getTransactionReceipt / eth_getTransactionByHash walk. Zero means
+	// LANTERN_ETH_TX_LOOKBACK or the 2000-epoch default (eth_tx_local.go).
+	EthTxLookback abi.ChainEpoch
+	// ethTxC caches per-tipset execution-ordered message indexes and
+	// emitter eth addresses for the local tx lookups.
+	ethTxCacheOnce sync.Once
+	ethTxC         *ethTxCache
+
 	// OnLocalMiss, when set, is invoked with the lowercase 0x-prefixed
 	// `to` address every time an eth_call can't be served locally and
 	// falls back to the bridge (lantern#44 adaptive warming). curio-core

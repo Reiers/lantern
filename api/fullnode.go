@@ -184,6 +184,10 @@ type FullNode interface {
 	EthSendRawTransaction(ctx context.Context, signedTxHex string) (string, error)
 	EthGetTransactionCount(ctx context.Context, addr string, blockParam any) (string, error)
 	EthGetTransactionReceipt(ctx context.Context, txHash string) (any, error)
+	// EthAddressToFilecoinAddress converts a 0x eth address to its Filecoin
+	// address (masked ID -> f0, else f410). Lotus Filecoin.* method; stock
+	// Curio calls it.
+	EthAddressToFilecoinAddress(ctx context.Context, ethAddress string) (address.Address, error)
 	EthFeeHistory(ctx context.Context, blockCount string, newestBlock string, rewardPercentiles []float64) (any, error)
 	// EthBaseFee returns the base fee for the next block as a hex-quantity
 	// string (lotus #13615). No params.

@@ -24,19 +24,19 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/go-state-types/big"
-	"github.com/filecoin-project/go-state-types/exitcode"
 	"github.com/ipfs/go-cid"
 
 	"github.com/Reiers/lantern/api"
 
 	"github.com/Reiers/lantern/chain/ethtx"
-	"github.com/Reiers/lantern/chain/types"
+	"github.com/Reiers/lantern/state/hamt"
 )
 
 // maxSentTxTracked bounds the eth-hash -> msg-CID map. The SP's own
@@ -52,6 +52,9 @@ type sentTxRecord struct {
 	msgCID cid.Cid
 	tx     *ethtx.Eth1559Tx
 	from   [20]byte
+	// sentEpoch is the local head epoch at publish time; the receipt
+	// lookup never searches below it (minus a small slack).
+	sentEpoch abi.ChainEpoch
 }
 
 // sentTxIndex maps a lowercase 0x eth tx hash to the record we published
@@ -150,7 +153,11 @@ func (c *ChainAPI) EthSendRawTransaction(ctx context.Context, signedTxHex string
 		}
 		hashHex := "0x" + hex.EncodeToString(ethHash[:])
 		sender, _ := tx.Sender()
-		c.sentTx().put(strings.ToLower(hashHex), sentTxRecord{msgCID: msgCID, tx: tx, from: sender})
+		var sentEpoch abi.ChainEpoch
+		if c.HeaderStore != nil {
+			sentEpoch = c.HeaderStore.HeadEpoch()
+		}
+		c.sentTx().put(strings.ToLower(hashHex), sentTxRecord{msgCID: msgCID, tx: tx, from: sender, sentEpoch: sentEpoch})
 		log.Infow("eth_sendRawTransaction: published locally",
 			"ethHash", hashHex, "msgCID", msgCID, "from", smsg.Message.From)
 		// lantern#50: kick off background warming of this message's blocks so
@@ -191,16 +198,22 @@ func (c *ChainAPI) EthSendRawTransaction(ctx context.Context, signedTxHex string
 	return txHash, nil
 }
 
-// EthGetTransactionReceipt returns the receipt for a tx. lantern#45 Stage
-// 5: for txs we originated (in the sent-tx index), resolve the Filecoin
-// msg CID and StateSearchMsg locally; otherwise fall back to the bridge.
-// Returns nil (not an error) when not yet on-chain, matching the standard
-// go-ethereum receipt poll loop.
+// EthGetTransactionReceipt returns the receipt for a tx. Served locally
+// (eth_tx_local.go) by walking the canonical chain from head and reading
+// the receipt + events from the child tipset's ParentMessageReceipts, for
+// txs we published AND txs we didn't (matched by recomputed eth hash).
+// Returns nil (not an error) when the tx is not (yet) on chain, like Lotus.
+// The VM bridge is only consulted when configured and the local path could
+// not answer.
 func (c *ChainAPI) EthGetTransactionReceipt(ctx context.Context, txHash string) (any, error) {
-	if out, served, err := c.localEthGetTransactionReceipt(ctx, txHash); served {
-		return out, err
+	out, served, localErr := c.localEthGetTransactionReceipt(ctx, txHash)
+	if served {
+		return out, nil
 	}
 	if c.Bridge == nil {
+		if localErr != nil {
+			return nil, localErr
+		}
 		return nil, errBridgeUnconfigured
 	}
 	params, err := json.Marshal([]any{txHash})
@@ -211,94 +224,117 @@ func (c *ChainAPI) EthGetTransactionReceipt(ctx context.Context, txHash string) 
 	if err != nil {
 		return nil, fmt.Errorf("bridge eth_getTransactionReceipt: %w", err)
 	}
-	var out any
-	if err := json.Unmarshal(raw, &out); err != nil {
+	var res any
+	if err := json.Unmarshal(raw, &res); err != nil {
 		return nil, fmt.Errorf("decode eth_getTransactionReceipt result: %w", err)
 	}
-	return out, nil
+	return res, nil
 }
 
-// localEthGetTransactionReceipt resolves a receipt locally for a tx we
-// originated. Returns (receiptOrNil, served, err). served==false means
-// "we don't know this hash, fall back to the bridge".
-func (c *ChainAPI) localEthGetTransactionReceipt(ctx context.Context, txHash string) (any, bool, error) {
-	if c.HeaderStore == nil {
+// ethTxLookupResult is the shared local resolution for receipt + by-hash.
+type ethTxLookupResult struct {
+	hash  string // normalized lowercase 0x hash
+	rec   sentTxRecord
+	sent  bool
+	hit   *ethTxHit // nil when not found in the window
+	bg    hamt.BlockGetter
+	found bool
+}
+
+// sentTxSearchSlack is how many epochs before the recorded send epoch we
+// still search for a tx we published (clock/head skew margin).
+const sentTxSearchSlack abi.ChainEpoch = 20
+
+// lookupEthTxLocal resolves txHash on the local chain. served=false with a
+// nil error means "cannot serve locally, no reason" (no header store,
+// malformed hash).
+func (c *ChainAPI) lookupEthTxLocal(ctx context.Context, txHash string) (*ethTxLookupResult, bool, error) {
+	if c.HeaderStore == nil || c.BlockGetter == nil {
 		return nil, false, nil
 	}
-	rec, ok := c.sentTx().getRecord(strings.ToLower(txHash))
+	h, ok := parseEthHash(txHash)
 	if !ok {
-		log.Debugw("eth_getTransactionReceipt: tx not in local sent index, bridging", "txHash", txHash)
-		return nil, false, nil // not ours -> bridge
+		return nil, false, nil
 	}
-	lookup, err := c.StateSearchMsg(ctx, types.TipSetKey{}, rec.msgCID, 0, false)
-	if err != nil {
-		log.Debugw("eth_getTransactionReceipt: StateSearchMsg error, bridging", "txHash", txHash, "msgCID", rec.msgCID, "err", err)
-		return nil, false, nil // degrade to bridge on lookup error
+	res := &ethTxLookupResult{hash: normalizeHashHex(txHash), bg: c.ethTxBlockGetter()}
+	res.rec, res.sent = c.sentTx().getRecord(res.hash)
+	var known cid.Cid
+	minEpoch := abi.ChainEpoch(-1)
+	if res.sent {
+		known = res.rec.msgCID
+		if res.rec.sentEpoch > 0 {
+			minEpoch = res.rec.sentEpoch - sentTxSearchSlack
+		}
 	}
-	if lookup == nil {
-		// Known tx, not yet on-chain. Serve a definitive "pending" (nil)
-		// so the poll loop keeps polling locally rather than hitting the
-		// bridge for a tx only we can resolve.
+	hit, err := c.findEthTx(ctx, res.bg, h, known, minEpoch)
+	switch {
+	case errors.Is(err, errEthTxNotFound):
+		return res, true, nil
+	case err != nil:
+		ethLocalMiss("eth_tx_lookup", res.hash, "", err.Error(), c.Bridge != nil)
+		return nil, false, fmt.Errorf("local eth tx lookup %s: %w", res.hash, err)
+	}
+	res.hit, res.found = hit, true
+	return res, true, nil
+}
+
+// localEthGetTransactionReceipt returns (receiptOrNil, served, err).
+func (c *ChainAPI) localEthGetTransactionReceipt(ctx context.Context, txHash string) (any, bool, error) {
+	res, served, err := c.lookupEthTxLocal(ctx, txHash)
+	if !served {
+		return nil, false, err
+	}
+	if !res.found {
+		// Ours and pending, or unknown with no bridge to ask: null, like
+		// Lotus. Unknown with a bridge: let the bridge try (older than
+		// our lookback window).
+		if !res.sent && c.Bridge != nil {
+			return nil, false, nil
+		}
 		return nil, true, nil
 	}
-	return ethReceiptFromLookup(txHash, lookup, rec), true, nil
-}
-
-// localEthGetTransactionByHash resolves a tx object locally for a tx we
-// originated. Returns (txObjOrNil, served, err). served==false means "we
-// don't know this hash, fall back to the bridge". For a known tx we return
-// the tx object with blockHash/blockNumber set once it's on-chain, or null
-// block fields while still pending (the shape go-ethereum's TransactionByHash
-// uses to report isPending).
-func (c *ChainAPI) localEthGetTransactionByHash(ctx context.Context, txHash string) (any, bool, error) {
-	if c.HeaderStore == nil {
-		return nil, false, nil
-	}
-	rec, ok := c.sentTx().getRecord(strings.ToLower(txHash))
-	if !ok || rec.tx == nil {
-		log.Debugw("eth_getTransactionByHash: tx not in local sent index, bridging", "txHash", txHash)
-		return nil, false, nil // not ours -> bridge
-	}
-	lookup, err := c.StateSearchMsg(ctx, types.TipSetKey{}, rec.msgCID, 0, false)
+	out, err := c.buildEthReceipt(ctx, res.bg, res.hit, res.hash)
 	if err != nil {
-		log.Debugw("eth_getTransactionByHash: StateSearchMsg error, bridging", "txHash", txHash, "msgCID", rec.msgCID, "err", err)
-		return nil, false, nil // degrade to bridge on lookup error
+		ethLocalMiss("eth_getTransactionReceipt", res.hash, "", "build: "+err.Error(), c.Bridge != nil)
+		return nil, false, fmt.Errorf("build local receipt %s: %w", res.hash, err)
 	}
-	// lookup==nil => known tx, not yet mined: return the tx with null block
-	// fields (pending). lookup!=nil => mined: include blockHash/blockNumber.
-	return ethTxFromRecord(txHash, rec, lookup), true, nil
+	return out, true, nil
 }
 
-// ethTxFromRecord shapes the eth tx JSON object the way go-ethereum's
-// TransactionByHash expects. blockHash/blockNumber are null while pending.
+// localEthGetTransactionByHash returns (txObjOrNil, served, err). A tx we
+// published that isn't mined yet is returned with null block fields (the
+// shape go-ethereum's TransactionByHash reports as pending).
+func (c *ChainAPI) localEthGetTransactionByHash(ctx context.Context, txHash string) (any, bool, error) {
+	res, served, err := c.lookupEthTxLocal(ctx, txHash)
+	if !served {
+		return nil, false, err
+	}
+	if !res.found {
+		if res.sent && res.rec.tx != nil {
+			return ethTxFromRecord(res.hash, res.rec, nil), true, nil
+		}
+		if c.Bridge != nil {
+			return nil, false, nil
+		}
+		return nil, true, nil
+	}
+	obj, ok, err := c.buildEthTxObject(ctx, res.bg, res.hit, res.hash)
+	if err != nil {
+		return nil, false, fmt.Errorf("build local tx %s: %w", res.hash, err)
+	}
+	if !ok {
+		return nil, false, nil // native message: not rebuilt locally
+	}
+	return obj, true, nil
+}
+
+// ethTxFromRecord shapes the eth tx JSON object for a tx we published.
+// blockHash/blockNumber are null while pending (lookup == nil).
 func ethTxFromRecord(txHash string, rec sentTxRecord, lookup *api.MsgLookup) map[string]any {
-	tx := rec.tx
-	obj := map[string]any{
-		"hash":                 strings.ToLower(txHash),
-		"from":                 "0x" + hex.EncodeToString(rec.from[:]),
-		"nonce":                "0x" + uint64Hex(tx.Nonce),
-		"value":                "0x" + bigHex(&tx.Value),
-		"gas":                  "0x" + uint64Hex(tx.GasLimit),
-		"maxFeePerGas":         "0x" + bigHex(&tx.MaxFeePerGas),
-		"maxPriorityFeePerGas": "0x" + bigHex(&tx.MaxPriorityFeePerGas),
-		"input":                "0x" + hex.EncodeToString(tx.Input),
-		"chainId":              "0x" + uint64Hex(tx.ChainID),
-		"type":                 "0x2",
-		"v":                    "0x" + bigHex(&tx.V),
-		"r":                    "0x" + bigHex(&tx.R),
-		"s":                    "0x" + bigHex(&tx.S),
-		"transactionIndex":     nil,
-		"blockHash":            nil,
-		"blockNumber":          nil,
-	}
-	if tx.To != nil {
-		obj["to"] = "0x" + hex.EncodeToString(tx.To[:])
-	} else {
-		obj["to"] = nil
-	}
+	obj := ethTxJSON(txHash, "0x"+hex.EncodeToString(rec.from[:]), rec.tx)
 	if lookup != nil {
 		obj["blockNumber"] = "0x" + abiEpochHex(lookup.Height)
-		obj["blockHash"] = tipsetEthHash(lookup.TipSet)
+		obj["blockHash"] = ethTipsetHash(lookup.TipSet)
 		obj["transactionIndex"] = "0x0"
 	}
 	return obj
@@ -311,58 +347,6 @@ func bigHex(v *big.Int) string {
 		return "0"
 	}
 	return v.Text(16)
-}
-
-// ethReceiptFromLookup shapes the eth-receipt JSON object from a Filecoin
-// MsgLookup. We populate the fields go-ethereum clients (and the
-// curio-core #81 watcher) read: status, blockNumber, transactionHash,
-// gasUsed, blockHash, transactionIndex, cumulativeGasUsed, logs,
-// logsBloom. status = 1 when the message exit code is Ok, else 0.
-func ethReceiptFromLookup(txHash string, lookup *api.MsgLookup, rec sentTxRecord) map[string]any {
-	status := "0x0"
-	if lookup.Receipt.ExitCode == exitcode.Ok {
-		status = "0x1"
-	}
-	blockNum := "0x" + abiEpochHex(lookup.Height)
-
-	// blockHash: first CID of the including tipset, hashed into a 32-byte
-	// eth-shaped hash slot. Clients mostly key off blockNumber + status;
-	// we provide a stable non-empty hash from the tipset key.
-	blockHash := tipsetEthHash(lookup.TipSet)
-
-	// Standard eth_getTransactionReceipt requires from/to/contractAddress and
-	// (post-1559) effectiveGasPrice. Omitting them breaks strict clients
-	// (cast/ethers deserialize "missing field `from`") and any cost display
-	// (effectiveGasPrice * gasUsed). from/to come from the locally-tracked
-	// sent-tx record; effectiveGasPrice is the tx's maxFeePerGas as a
-	// conservative stand-in (Lantern V1 has no per-tipset base-fee receipt
-	// reconstruction; clients that need exact effective price still bridge).
-	out := map[string]any{
-		"transactionHash":   strings.ToLower(txHash),
-		"transactionIndex":  "0x0",
-		"blockHash":         blockHash,
-		"blockNumber":       blockNum,
-		"from":              "0x" + hex.EncodeToString(rec.from[:]),
-		"cumulativeGasUsed": "0x" + uint64Hex(uint64(lookup.Receipt.GasUsed)),
-		"gasUsed":           "0x" + uint64Hex(uint64(lookup.Receipt.GasUsed)),
-		"status":            status,
-		"logs":              []any{},
-		"logsBloom":         "0x" + strings.Repeat("00", 256),
-		"type":              "0x2",
-	}
-	// to / contractAddress: contract creation has nil To (*[20]byte).
-	if rec.tx != nil && rec.tx.To != nil {
-		out["to"] = "0x" + hex.EncodeToString(rec.tx.To[:])
-		out["contractAddress"] = nil
-	} else {
-		out["to"] = nil
-		// contractAddress left nil; Lantern V1 doesn't reconstruct created addr.
-		out["contractAddress"] = nil
-	}
-	if rec.tx != nil {
-		out["effectiveGasPrice"] = "0x" + rec.tx.MaxFeePerGas.Text(16)
-	}
-	return out
 }
 
 // abiEpochHex / uint64Hex format quantities without a leading-zero-padded
@@ -387,23 +371,4 @@ func uint64Hex(v uint64) string {
 		v >>= 4
 	}
 	return string(buf[i:])
-}
-
-// tipsetEthHash derives a stable 32-byte 0x hash from a tipset key for the
-// receipt's blockHash field. Not consensus-meaningful; clients key off
-// blockNumber + status. We use the first block CID's bytes, right-padded.
-func tipsetEthHash(tsk types.TipSetKey) string {
-	cids := tsk.Cids()
-	if len(cids) == 0 {
-		return "0x" + strings.Repeat("00", 32)
-	}
-	b := cids[0].Bytes()
-	var out [32]byte
-	// Use the multihash digest tail (skip CID prefix) for entropy.
-	if len(b) >= 32 {
-		copy(out[:], b[len(b)-32:])
-	} else {
-		copy(out[32-len(b):], b)
-	}
-	return "0x" + hex.EncodeToString(out[:])
 }

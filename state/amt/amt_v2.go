@@ -86,6 +86,39 @@ func ForEachV2CIDs(ctx context.Context, root cid.Cid, bg hamt.BlockGetter) ([]ci
 	return out, nil
 }
 
+// CountV2 returns the element count recorded in a legacy (v2) AMT root.
+// Used to cross-check a reconstructed tipset message order against the
+// number of receipts in the child tipset's ParentMessageReceipts AMT.
+func CountV2(ctx context.Context, root cid.Cid, bg hamt.BlockGetter) (uint64, error) {
+	if !root.Defined() {
+		return 0, nil
+	}
+	prs := newPathRecordingStore(bg)
+	cstore := cbornode.NewCborStore(prs)
+	r, err := amtv2.LoadAMT(ctx, cstore, root)
+	if err != nil {
+		return 0, fmt.Errorf("loading v2 AMT root %s: %w", root, err)
+	}
+	return r.Count, nil
+}
+
+// ForEachV2Raw walks a legacy (v2) AMT in index order, handing each raw
+// value to fn. Used to enumerate ParentMessageReceipts in one pass.
+func ForEachV2Raw(ctx context.Context, root cid.Cid, bg hamt.BlockGetter, fn func(i uint64, raw []byte) error) error {
+	if !root.Defined() {
+		return nil
+	}
+	prs := newPathRecordingStore(bg)
+	cstore := cbornode.NewCborStore(prs)
+	r, err := amtv2.LoadAMT(ctx, cstore, root)
+	if err != nil {
+		return fmt.Errorf("loading v2 AMT root %s: %w", root, err)
+	}
+	return r.ForEach(ctx, func(i uint64, d *cbg.Deferred) error {
+		return fn(i, d.Raw)
+	})
+}
+
 // isV2NotFound reports whether a v2 AMT Get error means the index was absent
 // rather than a real failure. v2 returns a typed *amtv2.ErrNotFound; match on
 // the type so a genuine fetch error is never masked.
