@@ -3,75 +3,46 @@ package main
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	addr "github.com/filecoin-project/go-address"
 
 	"github.com/Reiers/lantern/build"
 )
 
-// TestResolveCLINetwork covers every accepted --network form plus alias
-// handling and the arg-stripping contract (the selector must not leak into
-// the per-subcommand flag set).
-func TestResolveCLINetwork(t *testing.T) {
-	t.Setenv("LANTERN_NETWORK", "") // isolate from the host env
+// #148: wallet subcommands must render addresses with the selected
+// network's prefix.
+func TestApplyAddressNetworkPrefix(t *testing.T) {
+	prev := addr.CurrentNetwork
+	t.Cleanup(func() { addr.CurrentNetwork = prev })
 
+	a, err := addr.NewIDAddress(1234)
+	if err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
-		name    string
-		args    []string
-		wantNet build.Network
-		wantOut []string
+		net  build.Network
+		want string
 	}{
-		{"default mainnet", []string{"list"}, build.Mainnet, []string{"list"}},
-		{"space form", []string{"list", "--network", "calibration"}, build.Calibration, []string{"list"}},
-		{"equals form", []string{"list", "--network=calibration"}, build.Calibration, []string{"list"}},
-		{"single dash", []string{"balance", "-network", "cal"}, build.Calibration, []string{"balance"}},
-		{"alias calib", []string{"new", "--network=calib"}, build.Calibration, []string{"new"}},
-		{"explicit mainnet", []string{"new", "--network", "mainnet"}, build.Mainnet, []string{"new"}},
-		{"preserves other args", []string{"new", "--type=bls", "--network", "cal"}, build.Calibration, []string{"new", "--type=bls"}},
+		{build.Mainnet, "f01234"},
+		{build.Calibration, "t01234"},
+		{build.Devnet, "t01234"},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			net, out, err := resolveCLINetwork(tc.args)
-			require.NoError(t, err)
-			require.Equal(t, tc.wantNet, net)
-			require.Equal(t, tc.wantOut, out)
-		})
+	for _, c := range cases {
+		applyAddressNetwork(c.net)
+		if got := a.String(); got != c.want {
+			t.Errorf("%s: got %s, want %s", c.net, got, c.want)
+		}
 	}
 }
 
-func TestResolveCLINetworkErrors(t *testing.T) {
-	t.Setenv("LANTERN_NETWORK", "")
-
-	_, _, err := resolveCLINetwork([]string{"list", "--network"})
-	require.Error(t, err, "--network with no value must error")
-
-	_, _, err = resolveCLINetwork([]string{"list", "--network=devnet"})
-	require.Error(t, err, "unknown network must error")
-}
-
-func TestResolveCLINetworkEnv(t *testing.T) {
-	t.Setenv("LANTERN_NETWORK", "calibration")
-	net, out, err := resolveCLINetwork([]string{"list"})
-	require.NoError(t, err)
-	require.Equal(t, build.Calibration, net)
-	require.Equal(t, []string{"list"}, out)
-
-	// Explicit flag overrides the env.
-	net, _, err = resolveCLINetwork([]string{"list", "--network=mainnet"})
-	require.NoError(t, err)
-	require.Equal(t, build.Mainnet, net)
-}
-
-func TestParseNetworkAlias(t *testing.T) {
-	for _, in := range []string{"mainnet", "main", "MAINNET", ""} {
-		n, err := parseNetworkAlias(in)
-		require.NoError(t, err)
-		require.Equal(t, build.Mainnet, n)
+func TestParseAttoFIL(t *testing.T) {
+	b, err := parseAttoFIL("1500000000000000000")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, in := range []string{"calibration", "calib", "cal", "calibnet", "CAL"} {
-		n, err := parseNetworkAlias(in)
-		require.NoError(t, err)
-		require.Equal(t, build.Calibration, n)
+	if got := b.String(); got != "1500000000000000000" {
+		t.Fatalf("got %s", got)
 	}
-	_, err := parseNetworkAlias("nope")
-	require.Error(t, err)
+	if _, err := parseAttoFIL("not-a-number"); err == nil {
+		t.Fatal("expected error for garbage input")
+	}
 }

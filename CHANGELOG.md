@@ -4,6 +4,8 @@ All notable changes to Lantern.
 
 ## Unreleased
 
+- **wallet: `wallet balance` and address display are network-aware (#148).** `wallet balance` queries the running daemon for the selected network instead of the hardcoded mainnet gateway; wallet subcommands render t-prefixed addresses on calibration/devnet. Approach proposed by @sharmis-tp.
+
 ### Bridge-off eth blocks include transactions (Curio reorg check)
 Stock Curio-PDP's reorg check (`tasks/pdpv0/task_reorg_check.go`) walks the chain with go-ethereum's ethclient: `eth_getBlockByNumber("latest", true)`, then `eth_getBlockByHash(parentHash, true)` block by block, looking for its tx hashes in each block's transactions. Bridge-off Lantern returned every block with `transactions: []` and `transactionsRoot` 0x00, which go-ethereum rejects outright ("server returned empty transaction list but block header indicates transactions"); even a parseable empty body would have made Curio believe its txs were reorged out.
 
