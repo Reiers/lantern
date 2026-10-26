@@ -1,0 +1,19 @@
+{
+  "name": "lantern-pdp-upload-test",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal Filecoin Onchain Cloud client to create a data set on a Lantern-backed Curio-PDP provider (calibration).",
+  "type": "module",
+  "license": "Apache-2.0 OR MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "upload": "node upload-test.mjs",
+    "status": "node upload-test.mjs status"
+  },
+  "dependencies": {
+    "@filoz/synapse-sdk": "^2.0.2",
+    "viem": "^2.57.11"
+  }
+}

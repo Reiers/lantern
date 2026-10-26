@@ -11,8 +11,8 @@
 
   [![CI](https://github.com/Reiers/lantern/actions/workflows/ci.yml/badge.svg)](https://github.com/Reiers/lantern/actions/workflows/ci.yml)
   [![License: Apache 2.0 OR MIT](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](#license)
-  [![Release: v1.9.0-rc1](https://img.shields.io/badge/release-v1.9.0--rc1-0090ff.svg)](https://github.com/Reiers/lantern/releases)
-  [![Go: 1.25+](https://img.shields.io/badge/go-1.25%2B-00ADD8.svg)](go.mod)
+  [![Latest release](https://img.shields.io/github/v/release/Reiers/lantern?label=release&color=0090ff)](https://github.com/Reiers/lantern/releases/latest)
+  [![Go toolchain 1.26.4](https://img.shields.io/badge/go-1.26.4-00ADD8.svg)](BUILD.md)
 
   **One line to install:**
 
@@ -40,7 +40,7 @@ Lantern is a pure-Go Filecoin node. **~40 MB binary, zero CGo, no `filecoin-ffi`
 
 > **🚧 Lantern is undergoing a major expansion.** It began as a light client; it is growing into a full node you can run on a Mac mini — snapshot-free boot, tunable single-digit-GB on-disk footprint, and pure-Go block validation with **no Rust**. See [the Full Node epic (#87)](https://github.com/Reiers/lantern/issues/87). The Light and PDP tiers are production-shape today; the Full tier is landing tier by tier.
 
-**Current release:** [v1.8.4](https://github.com/Reiers/lantern/releases/tag/v1.8.4) on mainnet + calibration. **In production today** as the chain backend embedded in [Curio Core](https://curiocore.io) (which ran a full PDP hot-storage flow on Filecoin **mainnet** end-to-end on Lantern) and as a secondary node on the mainnet SP `f03678816` (sp.reiers.io).
+**Current release:** [latest release](https://github.com/Reiers/lantern/releases/latest) (mainnet + calibration; changes in [CHANGELOG.md](CHANGELOG.md)). **Operators:** build from source with [BUILD.md](BUILD.md), then run Lantern as the chain node for stock Curio-PDP with [RUN-PDP.md](RUN-PDP.md). **In production today** as the chain backend embedded in [Curio Core](https://curiocore.io) (which ran a full PDP hot-storage flow on Filecoin **mainnet** end-to-end on Lantern) and as a secondary node on the mainnet SP `f03678816` (sp.reiers.io).
 
 ## What is Lantern?
 
@@ -199,18 +199,20 @@ For everything else - wallet, balance queries, miner info, market deals, deal st
 
 ## Building from source
 
-**Go 1.25+, no CGo, no filecoin-ffi:**
+**Go 1.26.4, no CGo, no filecoin-ffi.** The full walkthrough (Go install without sudo, release tag checkout, the exact release build flags, verification, timings) is in **[BUILD.md](BUILD.md)**. Running Lantern as the chain node for a stock Curio-PDP provider is in **[RUN-PDP.md](RUN-PDP.md)**.
 
 ```sh
 git clone https://github.com/Reiers/lantern.git
 cd lantern
-CGO_ENABLED=0 go build -o lantern ./cmd/lantern
+git checkout <release tag>
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.versionTag=<release tag>" -o lantern ./cmd/lantern
 
-# First-run wizard — includes the multi-source bootstrap quorum.
-./lantern init --bootstrap-quorum=5
+# First-run wizard, including the multi-source bootstrap quorum.
+# --network mainnet|calibration (default mainnet) is the same flag on every command.
+./lantern init --network mainnet
 
 # Run the daemon (Lotus-compatible RPC on 127.0.0.1:1234)
-./lantern daemon
+./lantern daemon --network mainnet
 ```
 
 **Health-check the trust anchor anytime:**
@@ -236,6 +238,12 @@ keystore, point it at a passphrase file (kept out of the unit, `chmod 600`):
 ```sh
 printf %s 'your-passphrase' > ~/.lantern/pass.txt && chmod 600 ~/.lantern/pass.txt
 lantern service install --passphrase-file ~/.lantern/pass.txt
+```
+
+For calibration, or a different listen address, pass them to `service install`; flags after `--` go to `lantern daemon` unchanged:
+
+```sh
+lantern service install --network calibration --listen 172.17.0.1:1234 -- --allow-remote-rpc
 ```
 
 To run in the foreground without a passphrase prompt, set an explicit empty pass:
@@ -266,7 +274,7 @@ Or use Lantern's own CLI:
 
 ## Status
 
-**Current release: [v1.8.4](https://github.com/Reiers/lantern/releases/tag/v1.8.4)** — production on mainnet + calibration.
+**Current release: see [releases/latest](https://github.com/Reiers/lantern/releases/latest)**, production on mainnet + calibration.
 
 What works today:
 
@@ -289,9 +297,11 @@ Validated against a real `lotus v1.36` CLI binding to a live Lantern daemon on m
 
 ### Release history (condensed)
 
+Releases after v1.8.4 (v1.8.5, v1.9.x, v1.10.x and later) are described in [CHANGELOG.md](CHANGELOG.md) and on the [releases page](https://github.com/Reiers/lantern/releases).
+
 | Release | What landed |
 |---|---|
-| v1.8.4 (current) | **Fix: standalone `lantern daemon` Bitswap couldn't fetch cold blocks** — it negotiated the IPFS-default protocol instead of Filecoin's `/chain/...` prefix, so the swarm served zero blocks and the gateway carried the whole cold tail ([#50](https://github.com/Reiers/lantern/issues/50)). Now Bitswap serves cold state blocks from the mainnet swarm. Plus a live Bitswap detail panel on the dashboard dev page. |
+| v1.8.4 | **Fix: standalone `lantern daemon` Bitswap couldn't fetch cold blocks**: it negotiated the IPFS-default protocol instead of Filecoin's `/chain/...` prefix, so the swarm served zero blocks and the gateway carried the whole cold tail ([#50](https://github.com/Reiers/lantern/issues/50)). Now Bitswap serves cold state blocks from the mainnet swarm. Plus a live Bitswap detail panel on the dashboard dev page. |
 | v1.8.3 | **Bridge-off RPC parity for stock Curio** ([#76](https://github.com/Reiers/lantern/issues/76)). Local `eth_getLogs` ([#73](https://github.com/Reiers/lantern/issues/73)), `eth_getCode` ([#74](https://github.com/Reiers/lantern/issues/74)), `eth_getStorageAt`/`eth_getBlockByHash` ([#75](https://github.com/Reiers/lantern/issues/75)); mpool pending→confirm→rebroadcast ([#47](https://github.com/Reiers/lantern/issues/47)); message/receipt block availability ([#50](https://github.com/Reiers/lantern/issues/50)); gossip-aware ChainHead poll skip ([#71](https://github.com/Reiers/lantern/issues/71)). The PDP read+write+event hot path now runs with **no `--vm-bridge-rpc`** and zero Glif — what upstream's PDP-only Curio build ("maxboom") needs. |
 | v1.8.2 | **Built-in FEVM warm-set** ([#69](https://github.com/Reiers/lantern/issues/69)). Per-network default warm-set (PDPVerifier, FWSS, ServiceProviderRegistry, USDFC) merged with consumer-supplied addresses, so the zero-Glif read path works for **any** Lotus-API consumer with no wiring. |
 | v1.8.1 | **Sync resilience + chain-watcher fixes** (both field-reported). Header backfill moved off the Glif critical path onto the bitswap+gateway fetcher ([#53](https://github.com/Reiers/lantern/issues/53)) — fixes the desync that surfaced as `cannot draw randomness from future epoch`. `ChainGetTipSet(key)` now served from the header store ([#68](https://github.com/Reiers/lantern/issues/68)) — fixes Curio's chain watcher looping on `tipset not in local store`. |

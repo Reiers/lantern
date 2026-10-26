@@ -1,0 +1,96 @@
+name: Operator report
+description: Report a result or a friction point from following BUILD.md or RUN-PDP.md.
+title: "[operator] "
+labels: ["operator-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for running Lantern. One report per problem is ideal; a full run summary is welcome too.
+        **Never paste API tokens, private keys or the contents of secrets/.** Redact them as <redacted>.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Report type
+      options:
+        - Friction point / bug while following a guide
+        - Full run summary (worked end to end)
+        - Documentation error or gap
+    validations:
+      required: true
+  - type: dropdown
+    id: guide
+    attributes:
+      label: Guide
+      options:
+        - BUILD.md
+        - RUN-PDP.md
+        - Both
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: step
+    attributes:
+      label: Step / section
+      placeholder: "RUN-PDP.md step 5"
+  - type: input
+    id: lantern-version
+    attributes:
+      label: Lantern version
+      description: Output of `lantern version`.
+      placeholder: "lantern v1.10.1-rc1 (abcdef123456) Lantern+mainnet"
+    validations:
+      required: true
+  - type: input
+    id: network
+    attributes:
+      label: Filecoin network
+      placeholder: calibration
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS and version, CPU / RAM, Docker and Compose versions, Curio-PDP image tag, NAT or public IP.
+      placeholder: |
+        Ubuntu 24.04, 8 cores / 32 GB, Docker 27.x, Compose v2.29, filecoin/curio-pdp:calibnet, behind NAT with Cloudflare Tunnel
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The exact command you ran and the exact output or error.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Lantern (`journalctl --user -u lantern` or `$LANTERN_HOME/lantern.log`) and Curio (`docker compose ... logs skiff`). Redact tokens.
+      render: shell
+  - type: textarea
+    id: timings
+    attributes:
+      label: Timings (optional)
+      description: Build time, time to a synced daemon, time to registration / first proof.
+  - type: dropdown
+    id: severity
+    attributes:
+      label: How much did this block you?
+      options:
+        - Blocked, could not continue
+        - Worked around it
+        - Minor annoyance / wording
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I redacted tokens, private keys and wallet secrets.
+          required: true

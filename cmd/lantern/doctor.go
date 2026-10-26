@@ -31,8 +31,8 @@ func cmdDoctor(args []string) error {
 	countGateway := fs.Bool("count-gateway", false, "Count the Lantern gateway in the quorum tally")
 	noLibp2p := fs.Bool("no-libp2p", false, "Skip libp2p sources (HTTP only)")
 	libp2pSettle := fs.Duration("libp2p-settle", 15*time.Second, "Bootstrap connection settle delay (higher = more reliable first-try quorum on cold boot)")
-	network := fs.String("network", "filecoin", "F3 network name. Auto-derived from --filecoin-network when not set.")
-	filNetwork := fs.String("filecoin-network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration")
+	network := fs.String("network", "", networkFlagHelp)
+	filNetwork := fs.String("filecoin-network", "", filNetworkFlagHelp)
 	var peers peerList
 	fs.Var(&peers, "peer", "Additional source URL (repeatable)")
 	fs.Parse(args)
@@ -111,8 +111,8 @@ func cmdRepair(args []string) error {
 	countGateway := fs.Bool("count-gateway", false, "Count the gateway in the quorum")
 	noLibp2p := fs.Bool("no-libp2p", false, "Skip libp2p sources")
 	libp2pSettle := fs.Duration("libp2p-settle", 15*time.Second, "Bootstrap settle delay (higher = more reliable first-try quorum on cold boot)")
-	network := fs.String("network", "filecoin", "F3 network name. Auto-derived from --filecoin-network when not set.")
-	filNetwork := fs.String("filecoin-network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration")
+	network := fs.String("network", "", networkFlagHelp)
+	filNetwork := fs.String("filecoin-network", "", filNetworkFlagHelp)
 	var peers peerList
 	fs.Var(&peers, "peer", "Additional source URL (repeatable)")
 	fs.Parse(args)

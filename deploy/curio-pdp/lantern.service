@@ -1,0 +1,46 @@
+# Lantern daemon as a systemd *user* service, serving a local Curio-PDP
+# Docker stack on calibration.
+#
+# Install (as the user that owns the Lantern data directory, no sudo):
+#   mkdir -p ~/.config/systemd/user ~/.config/lantern
+#   cp lantern.service ~/.config/systemd/user/lantern.service
+#   cat > ~/.config/lantern/lantern.env <<EOF
+#   LANTERN_HOME=$HOME/.lantern
+#   LANTERN_PASS=
+#   EOF
+#   chmod 600 ~/.config/lantern/lantern.env
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now lantern.service
+#   journalctl --user -u lantern -f
+#
+# Keep the service running after you log out (one-time, needs sudo or an
+# admin):
+#   sudo loginctl enable-linger $USER
+#
+# LANTERN_PASS= (explicit empty) runs with an unencrypted keystore. That is
+# fine here: the node was initialised with --no-wallet and holds no keys
+# (Curio-PDP keeps its own PDP signing key in Yugabyte). If you do store keys
+# in Lantern, put a real passphrase in lantern.env instead.
+#
+# Network binding: --listen is the docker0 bridge IP (check with
+# "ip -4 addr show docker0") so containers can reach Lantern. Non-loopback
+# binds need --allow-remote-rpc; privileged RPC methods still require the
+# Bearer token. Never bind 0.0.0.0 on a host with a public interface.
+#
+# docker0 only exists once Docker is running. If Lantern starts first, the
+# bind fails and systemd retries every 10 s until it succeeds.
+
+[Unit]
+Description=Lantern Filecoin node (calibration, for Curio-PDP)
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/lantern/lantern.env
+ExecStart=%h/.local/bin/lantern daemon --network calibration --listen 172.17.0.1:1234 --allow-remote-rpc --metrics 127.0.0.1:9092
+Restart=always
+RestartSec=10
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target
