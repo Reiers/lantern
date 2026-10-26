@@ -57,7 +57,8 @@ var secretsNames = map[string]bool{
 func cmdReset(args []string) error {
 	fs := flag.NewFlagSet("reset", flag.ExitOnError)
 	chainState := fs.Bool("chain-state", false, "Clear rebuildable chain state (header store + bootstrap anchor) so the node re-syncs from live head. This is the only supported mode.")
-	filNetwork := fs.String("filecoin-network", string(build.DefaultNetwork), "Filecoin network: mainnet | calibration")
+	networkFlag := fs.String("network", "", "Filecoin network: mainnet | calibration (default mainnet)")
+	filNetwork := fs.String("filecoin-network", "", "Alias of --network (mainnet | calibration), kept for existing scripts.")
 	yes := fs.Bool("yes", false, "Skip the confirmation prompt.")
 	fs.Parse(args)
 
@@ -67,9 +68,19 @@ func cmdReset(args []string) error {
 			"  (rebuildable; re-synced from live head on next start). Keys are never touched.")
 	}
 
-	filNet := build.Network(*filNetwork)
+	netName := *networkFlag
+	if netName != "" && *filNetwork != "" && netName != *filNetwork {
+		return fmt.Errorf("conflicting flags: --network %s vs --filecoin-network %s", netName, *filNetwork)
+	}
+	if netName == "" {
+		netName = *filNetwork
+	}
+	if netName == "" {
+		netName = string(build.DefaultNetwork)
+	}
+	filNet := build.Network(netName)
 	if !filNet.Valid() {
-		return fmt.Errorf("invalid --filecoin-network %q: want one of mainnet, calibration", *filNetwork)
+		return fmt.Errorf("invalid --network %q: want one of mainnet, calibration", netName)
 	}
 
 	if err := migrateLegacyDataDir(filNet); err != nil {

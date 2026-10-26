@@ -4,6 +4,19 @@ All notable changes to Lantern.
 
 ## Unreleased
 
+### Operator docs (Milestone 2)
+- **BUILD.md**: clean machine to a verified binary. Go 1.26.4 install with or without sudo, release tag checkout, the exact release build command (`-trimpath -ldflags "-s -w -X main.versionTag=<tag>"`), version and build-info checks, measured timings, pointer to docs/REPRODUCIBLE-BUILDS.md, the one-line installer as an alternative.
+- **RUN-PDP.md**: end-to-end calibration walkthrough for stock Curio-PDP (`filecoin/curio-pdp:calibnet`) with Lantern as its only chain node: init, PDP tier, daemon as a systemd user service on the docker0 bridge (with the `--allow-remote-rpc` / token security model), the Curio-PDP compose stack without Forest, admin GUI, storage, PDP wallet and funding, public HTTPS (Cloudflare Tunnel or Curio TLS), FWSS registration, a client data set and proof checks, plus a troubleshooting table of every error hit in the dry run.
+- **deploy/curio-pdp/**: `docker-compose.lantern.yaml` (removes skiff's Forest dependency), `env.lantern.example`, `lantern.service` (systemd user unit), `upload-test.mjs` + `package.json` (synapse-sdk client that creates a data set on your provider and reads proving status from PDPVerifier).
+- **docs/VERIFICATION-M2.md** template and an **operator report** issue form (`.github/ISSUE_TEMPLATE/operator-report.yml`).
+- README no longer pins a "current release" version (links to releases/latest) and links BUILD.md / RUN-PDP.md.
+
+### CLI UX
+- **`--network` is the one network flag.** `init`, `doctor`, `repair` and `reset` take `--network mainnet|calibration` like `daemon`, `info`, `node-type` and `wallet`. `--filecoin-network` stays as an alias; passing both with different values is an error; a non-network `--network` value is still accepted as a legacy F3 network name override.
+- **`lantern init` next steps carry the network.** After `init --network calibration` the suggested commands are `lantern daemon --network calibration` etc. Previously a bare `lantern daemon` was printed, which would start mainnet.
+- **`lantern service install --network <net>` and extra daemon flags.** `lantern service install --network calibration --listen 172.17.0.1:1234 -- --allow-remote-rpc` writes a unit (systemd) or plist (launchd) that runs the daemon with those flags. Previously the service always ran a mainnet daemon with only `--listen`. Arguments are quoted for systemd.
+- `lantern help` banner: "lantern, a pure-Go Filecoin node" (was "Filecoin light node (Phase 4)"); usage lists `--network` on every command and documents `node-type`.
+
 ### NV29 (Solstice) support
 Mainnet (epoch 6470279) and calibration (epoch 4109133) are both on network version 29 with builtin-actors v19. v1.10.0 stopped at actors v18 and NV27, so on both networks every FEVM contract (PDPVerifier, FWSS, ServiceProviderRegistry, USDFC, ...) was served as having no code by local `eth_getCode`, and stock Curio-PDP failed with `GetPDPConfig: no contract code at given address`.
 

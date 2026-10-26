@@ -158,22 +158,28 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `lantern — Filecoin light node (Phase 4)
+	fmt.Fprintln(os.Stderr, `lantern, a pure-Go Filecoin node (Lotus-compatible RPC for Curio and FEVM clients)
 
 USAGE
-  lantern <command> [args...]
+  lantern <command> [--network mainnet|calibration] [args...]
+
+  --network selects the Filecoin network for every command below
+  (default: mainnet). Run each command with the same --network value.
 
 COMMANDS
-  init [--bootstrap-quorum N] [--peer URL]...   Setup wizard with multi-source quorum bootstrap
+  init [--network N] [--no-wallet] [--bootstrap-quorum N] [--peer URL]...
+                                                Setup wizard with multi-source quorum bootstrap
   devnet-init --lotus-rpc <URL>                 Setup wizard for a local Curio docker devnet (see docker-devnet.md)
-  daemon [--gateway <url>]                      Run RPC server (default 127.0.0.1:1234)
+  node-type [light|pdp|full] [--network N]      Show or set the node tier (pdp = persistent cache)
+  daemon [--network N] [--listen addr]          Run RPC server (default 127.0.0.1:1234)
   beacon [--cache-dir <p>]                      Run a Lantern beacon (Bitswap-only, no RPC)
   doctor [--bootstrap-quorum N]                 Re-run the quorum probe (read-only)
   repair [--bootstrap-quorum N]                 Re-anchor from a fresh quorum (overwrites bootstrap-anchor.json)
   reset --chain-state                           Clear rebuildable chain state (headerstore + anchor) so a
                                                 long-stopped node re-syncs from live head. NEVER touches keys.
   service {install|uninstall|start|stop|restart|status}
-                                                Manage the OS service (launchd / systemd user)
+                                                Manage the OS service (launchd / systemd user).
+                                                install [--network N] [--listen addr] [-- <extra daemon flags>]
   stop / restart                                Aliases for 'service stop' / 'service restart'
   wallet new --type={bls|secp|delegated}
   wallet list
@@ -186,7 +192,7 @@ COMMANDS
     (keys are per-chain; picks which keystore to open. Or set LANTERN_NETWORK)
   chain head
   state get-actor <addr>
-  info                                          Show daemon status + FULLNODE_API_INFO
+  info [--network N] [--token-only]             Show daemon status + FULLNODE_API_INFO
   version
   help
 
@@ -1197,7 +1203,7 @@ func cmdDaemon(args []string) error {
 			return fmt.Errorf("--no-fallback-rpc: no usable persisted quorum anchor at %s; run `lantern init` or `lantern repair --bootstrap-quorum` first (bridge-off has no gateway/RPC anchor fallback)", filepath.Join(netDir, "bootstrap-anchor.json"))
 		}
 		if *gw == "" {
-			return fmt.Errorf("no persisted quorum anchor at %s and no gateway configured; run `lantern init --filecoin-network %s` first", filepath.Join(netDir, "bootstrap-anchor.json"), network)
+			return fmt.Errorf("no persisted quorum anchor at %s and no gateway configured; run `lantern init --network %s` first", filepath.Join(netDir, "bootstrap-anchor.json"), network)
 		}
 		tr, err = fetchVerifiedTrustedHead(ctx, *gw, network, *insecureAnchor)
 		if err != nil {
@@ -2320,7 +2326,7 @@ func walletSend(args []string) error {
 	}
 	token, err := readAdminToken(network)
 	if err != nil {
-		return fmt.Errorf("read admin token: %w (run `lantern init --filecoin-network %s` first)", err, network)
+		return fmt.Errorf("read admin token: %w (run `lantern init --network %s` first)", err, network)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
@@ -2527,7 +2533,7 @@ func cmdInfo(args []string) error {
 	// --token-only: emit just the raw token (or fail) for scripting.
 	if *tokenOnly {
 		if tokenErr != nil {
-			return fmt.Errorf("no admin token under %s (run `lantern init --filecoin-network %s`)", netDir, network)
+			return fmt.Errorf("no admin token under %s (run `lantern init --network %s`)", netDir, network)
 		}
 		fmt.Println(token)
 		return nil
@@ -2545,7 +2551,7 @@ func cmdInfo(args []string) error {
 	fmt.Printf("Data dir: %s (network: %s)\n", netDir, network)
 
 	if tokenErr != nil {
-		fmt.Printf("Admin token: (not initialised — run `lantern init --filecoin-network %s`)\n", network)
+		fmt.Printf("Admin token: (not initialised: run `lantern init --network %s`)\n", network)
 	} else {
 		short := token
 		if len(short) > 20 {
