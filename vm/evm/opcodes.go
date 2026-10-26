@@ -3,8 +3,10 @@ package evm
 // OpCode is a single EVM instruction byte.
 type OpCode byte
 
-// The opcode subset this interpreter recognises. Values are the canonical
-// EVM opcode bytes.
+// Opcode bytes. The set mirrors the builtin-actors EVM jump table
+// (actors/evm/src/interpreter/execution.rs, v19). BLOBHASH, BLOBBASEFEE and
+// CALLCODE are named only so error messages are readable: FEVM leaves them
+// undefined.
 const (
 	STOP       OpCode = 0x00
 	ADD        OpCode = 0x01
@@ -33,6 +35,7 @@ const (
 	SHL    OpCode = 0x1b
 	SHR    OpCode = 0x1c
 	SAR    OpCode = 0x1d
+	CLZ    OpCode = 0x1e // EIP-7939, FEVM from actors v18 (NV28)
 
 	SHA3 OpCode = 0x20
 
@@ -57,11 +60,14 @@ const (
 	COINBASE    OpCode = 0x41
 	TIMESTAMP   OpCode = 0x42
 	NUMBER      OpCode = 0x43
-	DIFFICULTY  OpCode = 0x44
+	PREVRANDAO  OpCode = 0x44 // EIP-4399 (formerly DIFFICULTY)
+	DIFFICULTY  OpCode = PREVRANDAO
 	GASLIMIT    OpCode = 0x45
 	CHAINID     OpCode = 0x46
 	SELFBALANCE OpCode = 0x47
 	BASEFEE     OpCode = 0x48
+	BLOBHASH    OpCode = 0x49 // undefined in FEVM
+	BLOBBASEFEE OpCode = 0x4a // undefined in FEVM
 
 	POP      OpCode = 0x50
 	MLOAD    OpCode = 0x51
@@ -75,10 +81,10 @@ const (
 	MSIZE    OpCode = 0x59
 	GAS      OpCode = 0x5a
 	JUMPDEST OpCode = 0x5b
-	TLOAD    OpCode = 0x5c // EIP-1153, FEVM NV25+
-	TSTORE   OpCode = 0x5d // EIP-1153, FEVM NV25+
-	MCOPY    OpCode = 0x5e // EIP-5656, FEVM NV25+
-	PUSH0    OpCode = 0x5f
+	TLOAD    OpCode = 0x5c // EIP-1153
+	TSTORE   OpCode = 0x5d // EIP-1153
+	MCOPY    OpCode = 0x5e // EIP-5656
+	PUSH0    OpCode = 0x5f // EIP-3855
 
 	PUSH1  OpCode = 0x60
 	PUSH32 OpCode = 0x7f
@@ -114,6 +120,8 @@ func (op OpCode) baseGas() uint64 {
 	switch {
 	case op == SLOAD:
 		return 2100
+	case op == TLOAD || op == TSTORE:
+		return 100
 	case op == SHA3:
 		return 30
 	case op >= PUSH1 && op <= PUSH32, op >= DUP1 && op <= DUP16, op >= SWAP1 && op <= SWAP16:
@@ -146,17 +154,18 @@ var opNames = map[OpCode]string{
 	MOD: "MOD", SMOD: "SMOD", ADDMOD: "ADDMOD", MULMOD: "MULMOD", EXP: "EXP",
 	SIGNEXTEND: "SIGNEXTEND", LT: "LT", GT: "GT", SLT: "SLT", SGT: "SGT", EQ: "EQ",
 	ISZERO: "ISZERO", AND: "AND", OR: "OR", XOR: "XOR", NOT: "NOT", BYTE: "BYTE",
-	SHL: "SHL", SHR: "SHR", SAR: "SAR", SHA3: "SHA3", ADDRESS: "ADDRESS",
+	SHL: "SHL", SHR: "SHR", SAR: "SAR", CLZ: "CLZ", SHA3: "SHA3", ADDRESS: "ADDRESS",
 	BALANCE: "BALANCE", ORIGIN: "ORIGIN", CALLER: "CALLER", CALLVALUE: "CALLVALUE",
 	CALLDATALOAD: "CALLDATALOAD", CALLDATASIZE: "CALLDATASIZE", CALLDATACOPY: "CALLDATACOPY",
 	CODESIZE: "CODESIZE", CODECOPY: "CODECOPY", GASPRICE: "GASPRICE",
 	EXTCODESIZE: "EXTCODESIZE", EXTCODECOPY: "EXTCODECOPY", RETURNDATASIZE: "RETURNDATASIZE",
 	RETURNDATACOPY: "RETURNDATACOPY", EXTCODEHASH: "EXTCODEHASH", BLOCKHASH: "BLOCKHASH",
-	COINBASE: "COINBASE", TIMESTAMP: "TIMESTAMP", NUMBER: "NUMBER", DIFFICULTY: "DIFFICULTY",
+	COINBASE: "COINBASE", TIMESTAMP: "TIMESTAMP", NUMBER: "NUMBER", PREVRANDAO: "PREVRANDAO",
 	GASLIMIT: "GASLIMIT", CHAINID: "CHAINID", SELFBALANCE: "SELFBALANCE", BASEFEE: "BASEFEE",
+	BLOBHASH: "BLOBHASH", BLOBBASEFEE: "BLOBBASEFEE", TLOAD: "TLOAD", TSTORE: "TSTORE", MCOPY: "MCOPY",
 	POP: "POP", MLOAD: "MLOAD", MSTORE: "MSTORE", MSTORE8: "MSTORE8", SLOAD: "SLOAD",
 	SSTORE: "SSTORE", JUMP: "JUMP", JUMPI: "JUMPI", PC: "PC", MSIZE: "MSIZE", GAS: "GAS",
-	JUMPDEST: "JUMPDEST", TLOAD: "TLOAD", TSTORE: "TSTORE", MCOPY: "MCOPY", PUSH0: "PUSH0", CREATE: "CREATE", CALL: "CALL", CALLCODE: "CALLCODE",
+	JUMPDEST: "JUMPDEST", PUSH0: "PUSH0", CREATE: "CREATE", CALL: "CALL", CALLCODE: "CALLCODE",
 	RETURN: "RETURN", DELEGATECALL: "DELEGATECALL", CREATE2: "CREATE2",
 	STATICCALL: "STATICCALL", REVERT: "REVERT", INVALID: "INVALID", SELFDESTRUCT: "SELFDESTRUCT",
 	LOG0: "LOG0", LOG1: "LOG1", LOG2: "LOG2", LOG3: "LOG3", LOG4: "LOG4",

@@ -6,6 +6,7 @@ toolchain go1.26.4
 
 require (
 	github.com/consensys/gnark-crypto v0.20.1
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/dgraph-io/badger/v4 v4.5.1
 	github.com/drand/drand/v2 v2.1.4
 	github.com/drand/kyber v1.3.2
@@ -59,7 +60,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cskr/pubsub v1.0.2 // indirect
 	github.com/davidlazar/go-crypto v0.0.0-20200604182044-b73af7476f6c // indirect
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
 	github.com/dgraph-io/ristretto/v2 v2.1.0 // indirect
 	github.com/drand/kyber-bls12381 v0.3.4 // indirect
 	github.com/dunglas/httpsfv v1.1.0 // indirect

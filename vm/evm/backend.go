@@ -2,13 +2,20 @@
 // view/pure contract calls against locally-verified Filecoin FEVM state
 // (lantern#43 Part B, Stage 3).
 //
-// Scope: read-only `eth_call`. It implements the opcode subset that
-// Solidity view/pure functions emit (arithmetic, comparison, bitwise,
-// SHA3, environment/calldata, memory, storage SLOAD, control flow, and
-// CALL/STATICCALL to other contracts for cross-contract reads). State
-// mutation opcodes (SSTORE, CREATE/CREATE2, SELFDESTRUCT, LOG*) are not
-// reachable on a read-only call and cause a revert if hit, exactly as a
-// staticcall would.
+// Scope: local `eth_call`. It implements the instruction set of the
+// Filecoin EVM actor (builtin-actors actors/evm, v16..v19, i.e. NV24..NV29)
+// with FEVM semantics where they differ from Ethereum: arithmetic,
+// comparison, bitwise (incl. CLZ from NV28), KECCAK256, environment /
+// calldata, memory (incl. MCOPY), storage (SLOAD/SSTORE on an ephemeral
+// overlay), transient storage (TLOAD/TSTORE, EIP-1153), control flow, LOGs
+// and CALL/STATICCALL/DELEGATECALL for cross-contract reads.
+//
+// Anything Lantern cannot reproduce exactly (an opcode FEVM does not
+// define, an environment value the backend can't supply, contract
+// creation, value transfers, an unimplemented precompile) faults with an
+// error wrapping ErrUnsupported. The eth_call handler treats every fault as
+// "not served locally" and falls back to the bridge (or errors when the
+// bridge is off); it never turns a fault into a result.
 //
 // It deliberately avoids vendoring go-ethereum's full core/vm (which drags
 // in core/types, params, and the CGo secp256k1 crypto) to keep Lantern
@@ -37,11 +44,57 @@ type Backend interface {
 	GetBalance(addr Address) (uint256.Int, error)
 
 	// BlockNumber / Timestamp / ChainID expose the environment a view call
-	// observes. These can be the head tipset's epoch/time and the network
-	// chain id (314 / 314159).
+	// observes: FEVM's NUMBER is the epoch of the tipset the call executes
+	// in (Lotus eth_call "latest" = head's parent), TIMESTAMP is that
+	// tipset's min timestamp, CHAINID is 314 / 314159.
 	BlockNumber() uint64
 	Timestamp() uint64
 	ChainID() uint64
+}
+
+// ActorKind classifies an address the way the FEVM's get_contract_type
+// does (builtin-actors actors/evm/src/interpreter/instructions/ext.rs).
+type ActorKind int
+
+const (
+	// ActorNotFound: no actor at this address.
+	ActorNotFound ActorKind = iota
+	// ActorAccount: account, placeholder or ethaccount actor.
+	ActorAccount
+	// ActorEVM: an EVM contract actor.
+	ActorEVM
+	// ActorNative: any other builtin actor (miner, multisig, ...).
+	ActorNative
+)
+
+// KindBackend is optionally implemented by a Backend that can classify
+// addresses. It is needed for FEVM-exact EXTCODESIZE / EXTCODEHASH /
+// EXTCODECOPY and CALL semantics on non-EVM actors. Backends without it get
+// the legacy "empty code" behaviour (used by offline test harnesses).
+type KindBackend interface {
+	ActorKind(addr Address) (ActorKind, error)
+}
+
+// EnvBackend is optionally implemented by a Backend that can supply the
+// rest of the block / message environment FEVM exposes. When the backend
+// doesn't implement it (or a method returns an error) the opcode faults
+// with ErrUnsupported instead of guessing a value.
+type EnvBackend interface {
+	// BaseFee is the base fee of the execution tipset (FEVM BASEFEE; also
+	// GASPRICE, since eth_call messages carry a zero gas premium).
+	BaseFee() (uint256.Int, error)
+	// TipsetCIDDigest returns the multihash digest of the tipset-key CID
+	// at epoch (null rounds resolve to the nearest earlier tipset, as the
+	// FVM's tipset_cid does). Used by BLOCKHASH.
+	TipsetCIDDigest(epoch uint64) ([]byte, error)
+	// PrevRandao returns the FEVM PREVRANDAO word: beacon randomness for
+	// the execution epoch drawn with DST EvmPrevRandao and entropy
+	// "prevrandao".
+	PrevRandao() (uint256.Int, error)
+	// NetworkVersion returns the network version of the execution epoch
+	// and whether it is known. Used to gate instructions added by actor
+	// upgrades (CLZ, NV28 / actors v18).
+	NetworkVersion() (uint64, bool)
 }
 
 // Address is a 20-byte EVM address.

@@ -10,16 +10,24 @@ package handlers
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-state-types/builtin"
+	gscrypto "github.com/filecoin-project/go-state-types/crypto"
 	"github.com/holiman/uint256"
+	"github.com/multiformats/go-multihash"
+	"golang.org/x/crypto/blake2b"
 
+	"github.com/Reiers/lantern/build"
+	"github.com/Reiers/lantern/chain/beacon"
 	"github.com/Reiers/lantern/chain/trustedroot"
+	ltypes "github.com/Reiers/lantern/chain/types"
 	"github.com/Reiers/lantern/state/accessor"
 	"github.com/Reiers/lantern/state/actors"
 	"github.com/Reiers/lantern/state/hamt"
@@ -43,6 +51,14 @@ type evmBackend struct {
 	// hot path so lazy-fetch misses get a real second chance before we
 	// declare "not served locally" (lantern#44).
 	bg hamt.BlockGetter
+
+	// execTS is the tipset the call executes in: Lotus eth_call "latest"
+	// resolves to head's parent and runs on TipSetState(parent) =
+	// head.ParentState(), with NUMBER/TIMESTAMP/BASEFEE/PREVRANDAO taken
+	// from that tipset (chain/stmgr/call.go callInternal VMOpts). nil when
+	// no header store is wired (probe / one-shot): the env-dependent
+	// opcodes then fault and the call falls back.
+	execTS *ltypes.TipSet
 }
 
 // GetCode resolves addr -> EVM actor -> bytecode (CID + hash verified).
@@ -77,7 +93,12 @@ func (b *evmBackend) GetBalance(a evm.Address) (uint256.Int, error) {
 	}
 	actor, _, err := b.acc.GetActor(b.ctx, filAddr)
 	if err != nil {
-		return uint256.Int{}, nil // unknown -> 0
+		if isActorNotFound(err) {
+			return uint256.Int{}, nil // unknown -> 0
+		}
+		// A fetch/decode fault is not "zero balance": fault so the call
+		// falls back instead of returning a wrong result.
+		return uint256.Int{}, fmt.Errorf("balance %s: %w", filAddr, err)
 	}
 	var out uint256.Int
 	out.SetFromBig(actor.Balance.Int)
@@ -87,6 +108,142 @@ func (b *evmBackend) GetBalance(a evm.Address) (uint256.Int, error) {
 func (b *evmBackend) BlockNumber() uint64 { return b.blockNo }
 func (b *evmBackend) Timestamp() uint64   { return b.tstamp }
 func (b *evmBackend) ChainID() uint64     { return b.chainID }
+
+// isActorNotFound reports whether err means "no actor at this address"
+// (as opposed to a block fetch / decode fault).
+func isActorNotFound(err error) bool {
+	return errors.Is(err, accessor.ErrAddressNotFound) || errors.Is(err, hamt.ErrNotFound)
+}
+
+// ActorKind implements evm.KindBackend (FEVM get_contract_type).
+func (b *evmBackend) ActorKind(a evm.Address) (evm.ActorKind, error) {
+	filAddr, err := ethAddrToFilecoin(a.Bytes())
+	if err != nil {
+		return evm.ActorNotFound, nil
+	}
+	actor, _, err := b.acc.GetActor(b.ctx, filAddr)
+	if err != nil {
+		if isActorNotFound(err) {
+			return evm.ActorNotFound, nil
+		}
+		return 0, fmt.Errorf("actor %s: %w", filAddr, err)
+	}
+	if b.reg == nil {
+		return 0, fmt.Errorf("actor %s: no code registry", filAddr)
+	}
+	ci, ok := b.reg.Lookup(actor.Code)
+	if !ok {
+		actors.WarnUnknownCodeOnce(actor.Code, "eth_call")
+		return 0, fmt.Errorf("actor %s: unknown code CID %s", filAddr, actor.Code)
+	}
+	switch ci.Kind {
+	case actors.KindEvm:
+		return evm.ActorEVM, nil
+	case actors.KindAccount, actors.KindPlaceholder, actors.KindEthAccount:
+		return evm.ActorAccount, nil
+	default:
+		return evm.ActorNative, nil
+	}
+}
+
+var errNoExecTipset = errors.New("execution tipset unavailable (no header store)")
+
+// BaseFee implements evm.EnvBackend. Lotus eth_call builds its message
+// with GasFeeCap = 0 (EthCall.ToFilecoinMessage), and callInternal then
+// zeroes the VM base fee ("If the fee cap is set to zero, make gas free",
+// chain/stmgr/call.go), so BASEFEE (and GASPRICE = base fee + zero premium)
+// observed by an eth_call is 0, not the tipset's ParentBaseFee. Verified
+// live against Glif (Multicall3.getBasefee() returns 0).
+func (b *evmBackend) BaseFee() (uint256.Int, error) {
+	return uint256.Int{}, nil
+}
+
+// TipsetCIDDigest implements evm.EnvBackend for BLOCKHASH: the multihash
+// digest of the tipset-key CID at epoch on the execution tipset's chain
+// (null rounds resolve to the nearest earlier tipset, matching the FVM's
+// tipset_cid via Lotus TipSetGetterForTipset).
+//
+// The key is taken from the block headers' Parents links walked back from
+// the execution tipset, never from the header store's canonical-by-height
+// index: that index can hold a tipset with only the subset of blocks this
+// node saw (e.g. 1 of 3), whose key CID differs from the real tipset's.
+// Parents always carries the full key the next tipset was mined on.
+func (b *evmBackend) TipsetCIDDigest(epoch uint64) ([]byte, error) {
+	if b.execTS == nil || b.c == nil || b.c.HeaderStore == nil {
+		return nil, errNoExecTipset
+	}
+	if epoch >= uint64(b.execTS.Height()) {
+		return nil, fmt.Errorf("epoch %d not before execution epoch %d", epoch, b.execTS.Height())
+	}
+	key := b.execTS.Parents()
+	for steps := 0; steps < 1024; steps++ {
+		var hdr *ltypes.BlockHeader
+		for _, c := range key.Cids() {
+			if h, err := b.c.HeaderStore.Get(c); err == nil && h != nil {
+				hdr = h
+				break
+			}
+		}
+		if hdr == nil {
+			return nil, fmt.Errorf("no header for ancestor tipset %s", key)
+		}
+		if uint64(hdr.Height) <= epoch {
+			c, err := key.Cid()
+			if err != nil {
+				return nil, err
+			}
+			dmh, err := multihash.Decode(c.Hash())
+			if err != nil {
+				return nil, err
+			}
+			return dmh.Digest, nil
+		}
+		key = ltypes.NewTipSetKey(hdr.Parents...)
+	}
+	return nil, fmt.Errorf("ancestor walk to epoch %d exceeded bound", epoch)
+}
+
+// PrevRandao implements evm.EnvBackend: builtin-actors System::get_randomness
+// = get_randomness_from_beacon(EvmPrevRandao, curr_epoch, "prevrandao"),
+// i.e. DrawRandomnessFromDigest(blake2b(beacon.Data), 10, epoch, entropy)
+// with the beacon entry for the execution epoch (the last entry carried by
+// the execution tipset's blocks).
+func (b *evmBackend) PrevRandao() (uint256.Int, error) {
+	if b.execTS == nil || len(b.execTS.Blocks()) == 0 {
+		return uint256.Int{}, errNoExecTipset
+	}
+	entries := b.execTS.Blocks()[0].BeaconEntries
+	if len(entries) == 0 {
+		return uint256.Int{}, fmt.Errorf("execution tipset %d carries no beacon entry", b.execTS.Height())
+	}
+	digest := blake2b.Sum256(entries[len(entries)-1].Data)
+	const dstEvmPrevRandao = gscrypto.DomainSeparationTag(10) // builtin-actors DomainSeparationTag::EvmPrevRandao
+	r, err := beacon.DrawRandomnessFromDigest(digest, dstEvmPrevRandao, b.execTS.Height(), []byte("prevrandao"))
+	if err != nil {
+		return uint256.Int{}, err
+	}
+	var out uint256.Int
+	out.SetBytes(r)
+	return out, nil
+}
+
+// NetworkVersion implements evm.EnvBackend.
+func (b *evmBackend) NetworkVersion() (uint64, bool) {
+	if b.execTS == nil || b.c == nil {
+		return 0, false
+	}
+	sched := networkUpgradeSchedule(b.c.NetworkName)
+	if sched == nil {
+		return 0, false
+	}
+	return uint64(build.NetworkVersionAt(sched, b.execTS.Height())), true
+}
+
+var (
+	_ evm.Backend     = (*evmBackend)(nil)
+	_ evm.KindBackend = (*evmBackend)(nil)
+	_ evm.EnvBackend  = (*evmBackend)(nil)
+)
 
 // loadEVMActor resolves an eth address to its EVM actor state. ok=false
 // (no error) when the address is unknown or its code CID is known to be a
@@ -101,7 +258,10 @@ func (b *evmBackend) loadEVMActor(a evm.Address) (actors.EVMState, bool, error) 
 	}
 	actor, _, err := b.acc.GetActor(b.ctx, filAddr)
 	if err != nil {
-		return nil, false, nil
+		if isActorNotFound(err) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("load actor %s: %w", filAddr, err)
 	}
 	st, err := actors.LoadEVM(b.ctx, actor.Code, actor.Head, b.bg, b.reg)
 	if err != nil {
@@ -144,6 +304,9 @@ type ethCallObject struct {
 	Data string `json:"data"`
 	// `input` is an alias for `data` used by some clients.
 	Input string `json:"input"`
+	// Value is the attoFIL sent with the call. The local interpreter does
+	// not model balance moves, so a non-zero value is not served locally.
+	Value string `json:"value"`
 }
 
 // localEthCall executes an eth_call locally against verified state. It
@@ -174,6 +337,11 @@ func (c *ChainAPI) localEthCallWithReason(ctx context.Context, call ethCallObjec
 	if err != nil {
 		return "", false, "malformed call data hex", nil
 	}
+	if v := strings.TrimPrefix(strings.TrimPrefix(call.Value, "0x"), "0X"); v != "" {
+		if n, ok := new(big.Int).SetString(v, 16); !ok || n.Sign() != 0 {
+			return "", false, "call carries a value transfer (not modeled locally)", nil
+		}
+	}
 	var from evm.Address
 	if call.From != "" {
 		if fb, err := decodeEthAddr(call.From); err == nil {
@@ -187,9 +355,11 @@ func (c *ChainAPI) localEthCallWithReason(ctx context.Context, call ethCallObjec
 	// boot TrustedRoot when no header store is wired (probe / one-shot).
 	acc := c.Accessor
 	blockNo := uint64(0)
+	tstamp := uint64(0)
 	if c.Trusted != nil {
 		blockNo = uint64(c.Trusted.Epoch)
 	}
+	var execTS *ltypes.TipSet
 	if c.HeaderStore != nil {
 		if head := c.HeaderStore.Head(); head != nil {
 			liveRoot := head.ParentState()
@@ -199,7 +369,19 @@ func (c *ChainAPI) localEthCallWithReason(ctx context.Context, call ethCallObjec
 					StateRoot: liveRoot,
 				}
 				acc = accessor.New(liveTR, c.BlockGetter)
-				blockNo = uint64(head.Height())
+				// head.ParentState() is the state after executing head's
+				// parent: exactly what Lotus eth_call "latest" runs on
+				// (TipSetState(head.Parents())). The FEVM environment
+				// (NUMBER, TIMESTAMP, BASEFEE, PREVRANDAO, BLOCKHASH
+				// window) is that parent tipset's, so resolve it rather
+				// than reporting head's height.
+				parent, err := c.HeaderStore.GetTipSet(head.Parents())
+				if err != nil || parent == nil {
+					return "", false, fmt.Sprintf("execution tipset (head %d parent) not in header store", head.Height()), nil
+				}
+				execTS = parent
+				blockNo = uint64(parent.Height())
+				tstamp = parent.MinTimestamp()
 			}
 		}
 	}
@@ -224,7 +406,9 @@ func (c *ChainAPI) localEthCallWithReason(ctx context.Context, call ethCallObjec
 		reg:     acc.Registry(),
 		chainID: chainIDForNetwork(c.NetworkName),
 		blockNo: blockNo,
+		tstamp:  tstamp,
 		bg:      bg,
+		execTS:  execTS,
 	}
 
 	// Override the accessor's view of the blockstore so its actor lookups

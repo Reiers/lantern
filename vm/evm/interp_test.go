@@ -2,6 +2,7 @@ package evm
 
 import (
 	"encoding/hex"
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -23,6 +24,13 @@ func (n *nullBackend) BlockNumber() uint64                     { return 100 }
 func (n *nullBackend) Timestamp() uint64                       { return 200 }
 func (n *nullBackend) ChainID() uint64                         { return 314159 }
 
+// runRaw executes code directly (no GetCode lookup) as a top-level frame
+// with a zero caller.
+func runRaw(be Backend, code []byte) (*Result, error) {
+	cs := &callState{b: be, ov: newOverlay()}
+	return newInterpreter(cs, frame{}, code).run()
+}
+
 // runCode runs raw bytecode with empty input and returns the result.
 func runCode(t *testing.T, codeHex string, be Backend) *Result {
 	t.Helper()
@@ -30,11 +38,7 @@ func runCode(t *testing.T, codeHex string, be Backend) *Result {
 	if err != nil {
 		t.Fatalf("bad code hex: %v", err)
 	}
-	ip := &interpreter{
-		b: be, ov: newOverlay(), code: code, stack: newStack(), mem: &memory{},
-		jumpdest: analyzeJumpdests(code),
-	}
-	res, err := ip.run()
+	res, err := runRaw(be, code)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -147,9 +151,12 @@ func TestInterp_LogIsNoOp(t *testing.T) {
 func TestInterp_UnsupportedOpcodeErrors(t *testing.T) {
 	// 0x0c is undefined -> error (not a silent success).
 	code, _ := hex.DecodeString("0c")
-	ip := &interpreter{b: &nullBackend{}, code: code, stack: newStack(), mem: &memory{}, jumpdest: map[uint64]bool{}}
-	if _, err := ip.run(); err == nil {
-		t.Error("expected error on undefined opcode")
+	_, err := runRaw(&nullBackend{}, code)
+	if err == nil {
+		t.Fatal("expected error on undefined opcode")
+	}
+	if !errors.Is(err, ErrUnsupported) {
+		t.Errorf("undefined opcode should wrap ErrUnsupported, got %v", err)
 	}
 }
 

@@ -13,8 +13,7 @@ type Result struct {
 	// Return is the RETURN data (for a successful call) or the REVERT
 	// data (when Reverted is true).
 	Return []byte
-	// Reverted is true if the call ended in REVERT or a fault that maps to
-	// a revert (e.g. an unsupported state-mutation opcode on a read call).
+	// Reverted is true if the call ended in REVERT or INVALID.
 	Reverted bool
 	// GasUsed is a coarse gas counter (read calls are not gas-billed on
 	// chain; this is informational / for an estimate ceiling).
@@ -26,51 +25,105 @@ type Result struct {
 // error code 3.
 var ErrExecutionReverted = errors.New("execution reverted")
 
-// callMaxSteps bounds interpreter steps so a malformed view call can't spin
-// forever. View functions are short; this is generous.
+// ErrUnsupported is wrapped by every fault where Lantern cannot reproduce
+// the FEVM result locally: an opcode the FEVM does not define (BLOBHASH,
+// BLOBBASEFEE, CALLCODE, ...), an environment value the backend can't
+// supply, contract creation, value transfers, unimplemented precompiles,
+// resource caps. Callers must never turn such a fault into a result;
+// eth_call falls back to the bridge or returns an error.
+var ErrUnsupported = errors.New("evm: unsupported")
+
+// callMaxSteps bounds interpreter steps (across all frames of one call) so
+// a malformed view call can't spin forever. View functions are short;
+// this is generous.
 const callMaxSteps = 10_000_000
+
+// maxCallDepth mirrors the FVM call-depth limit. Deeper nesting is not
+// served locally.
+const maxCallDepth = 1024
+
+// blockGasLimit is the FEVM GASLIMIT constant (builtin-actors context.rs).
+const blockGasLimit = 10_000_000_000
+
+// clzMinNetworkVersion is the first network version whose EVM actor
+// (v18) defines CLZ.
+const clzMinNetworkVersion = 28
 
 // Call executes `input` against the code at `to` and returns the result.
 //
-// eth_call semantics: state mutations (SSTORE / value moves) and LOGs that
+// eth_call semantics: state mutations (SSTORE / TSTORE) and LOGs that
 // happen during the call are applied to an ephemeral overlay that is
 // discarded when the call returns -- chain state is never touched. This is
 // what lets write-shaped calls (ERC-20 transferFrom inside a DEX swap,
 // router reentrancy) execute correctly instead of falsely reverting.
+// ORIGIN is the eth_call sender for every frame.
 func Call(b Backend, caller, to Address, input []byte) (*Result, error) {
-	return callWithState(b, newOverlay(), caller, to, input)
+	cs := &callState{b: b, ov: newOverlay(), origin: caller}
+	return cs.run(frame{caller: caller, self: to, codeAddr: to, input: input})
 }
 
-// callWithState is the entry that threads a shared overlay through a call
-// frame, so nested sub-calls observe the same ephemeral writes.
-func callWithState(b Backend, ov *overlay, caller, to Address, input []byte) (*Result, error) {
-	code, err := b.GetCode(to)
+// callState is shared by every frame of one top-level call.
+type callState struct {
+	b      Backend
+	ov     *overlay
+	origin Address
+	steps  int
+}
+
+// frame describes one execution context.
+type frame struct {
+	caller   Address
+	self     Address // storage / ADDRESS context
+	codeAddr Address // whose bytecode runs (differs from self for DELEGATECALL)
+	input    []byte
+	value    uint256.Int
+	readonly bool // STATICCALL context (sticky for nested frames)
+	depth    int
+}
+
+func (cs *callState) run(f frame) (*Result, error) {
+	if f.depth > maxCallDepth {
+		return nil, fmt.Errorf("%w: call depth limit (%d) exceeded", ErrUnsupported, maxCallDepth)
+	}
+	code, err := cs.b.GetCode(f.codeAddr)
 	if err != nil {
-		return nil, fmt.Errorf("evm: get code %x: %w", to, err)
+		return nil, fmt.Errorf("evm: get code %x: %w", f.codeAddr, err)
 	}
 	if len(code) == 0 {
 		// Calling an account with no code returns empty success.
 		return &Result{Return: nil}, nil
 	}
-	ip := &interpreter{
-		b:        b,
-		ov:       ov,
-		caller:   caller,
-		self:     to,
+	ip := newInterpreter(cs, f, code)
+	return ip.run()
+}
+
+func newInterpreter(cs *callState, f frame, code []byte) *interpreter {
+	return &interpreter{
+		b:        cs.b,
+		cs:       cs,
+		ov:       cs.ov,
+		caller:   f.caller,
+		self:     f.self,
+		value:    f.value,
+		readonly: f.readonly,
+		depth:    f.depth,
 		code:     code,
-		input:    input,
+		input:    f.input,
 		stack:    newStack(),
 		mem:      &memory{},
 		jumpdest: analyzeJumpdests(code),
 	}
-	return ip.run()
 }
 
 type interpreter struct {
 	b        Backend
+	cs       *callState
 	ov       *overlay
 	caller   Address
 	self     Address
+	value    uint256.Int
+	readonly bool
+	depth    int
 	code     []byte
 	input    []byte
 	stack    *stack
@@ -82,10 +135,10 @@ type interpreter struct {
 }
 
 func (ip *interpreter) run() (*Result, error) {
-	steps := 0
 	for ip.pc < uint64(len(ip.code)) {
-		if steps++; steps > callMaxSteps {
-			return nil, errors.New("evm: step limit exceeded")
+		ip.cs.steps++
+		if ip.cs.steps > callMaxSteps {
+			return nil, fmt.Errorf("%w: step limit exceeded", ErrUnsupported)
 		}
 		op := OpCode(ip.code[ip.pc])
 		ip.gas += op.baseGas()
@@ -93,7 +146,9 @@ func (ip *interpreter) run() (*Result, error) {
 		switch {
 		case op >= PUSH1 && op <= PUSH32:
 			n := int(op - PUSH1 + 1)
-			ip.pushImmediate(n)
+			if err := ip.pushImmediate(n); err != nil {
+				return nil, err
+			}
 			continue
 		case op >= DUP1 && op <= DUP16:
 			if err := ip.stack.dup(int(op - DUP1 + 1)); err != nil {
@@ -119,8 +174,9 @@ func (ip *interpreter) run() (*Result, error) {
 }
 
 // pushImmediate reads the next n code bytes as a big-endian word and pushes
-// it, advancing pc past the immediate.
-func (ip *interpreter) pushImmediate(n int) {
+// it, advancing pc past the immediate. Bytes past the end of code read as
+// zero (FEVM pads truncated immediates the same way).
+func (ip *interpreter) pushImmediate(n int) error {
 	start := ip.pc + 1
 	end := start + uint64(n)
 	var buf [32]byte
@@ -131,12 +187,38 @@ func (ip *interpreter) pushImmediate(n int) {
 	}
 	var v uint256.Int
 	v.SetBytes(buf[:])
-	ip.stack.push(v)
 	ip.pc = end
+	return ip.stack.push(v)
+}
+
+// errUndefined is the FEVM's EVM_CONTRACT_UNDEFINED_INSTRUCTION abort.
+func (ip *interpreter) errUndefined(op OpCode) error {
+	return fmt.Errorf("%w: opcode 0x%02x (%s) is undefined in the FEVM at pc %d", ErrUnsupported, byte(op), op.String(), ip.pc)
+}
+
+// env returns the optional environment backend or an ErrUnsupported fault.
+func (ip *interpreter) env(op OpCode) (EnvBackend, error) {
+	e, ok := ip.b.(EnvBackend)
+	if !ok {
+		return nil, fmt.Errorf("%w: %s needs execution environment the backend does not provide", ErrUnsupported, op)
+	}
+	return e, nil
+}
+
+func (ip *interpreter) envWord(op OpCode, get func(EnvBackend) (uint256.Int, error)) error {
+	e, err := ip.env(op)
+	if err != nil {
+		return err
+	}
+	v, err := get(e)
+	if err != nil {
+		return fmt.Errorf("%w: %s: %v", ErrUnsupported, op, err)
+	}
+	return ip.stack.push(v)
 }
 
 // exec runs a single non-PUSH/DUP/SWAP opcode. Returns done=true with a
-// Result when the call terminates (STOP/RETURN/REVERT/invalid).
+// Result when the call terminates (STOP/RETURN/REVERT/INVALID).
 func (ip *interpreter) exec(op OpCode) (bool, *Result, error) {
 	switch op {
 	case STOP:
@@ -149,47 +231,76 @@ func (ip *interpreter) exec(op OpCode) (bool, *Result, error) {
 		return false, nil, ip.binaryOp(op)
 	case ISZERO, NOT:
 		return false, nil, ip.unaryOp(op)
+	case CLZ:
+		// EIP-7939, defined by the EVM actor from v18 (NV28).
+		if e, ok := ip.b.(EnvBackend); ok {
+			if nv, known := e.NetworkVersion(); known && nv < clzMinNetworkVersion {
+				return false, nil, ip.errUndefined(op)
+			}
+		}
+		return false, nil, ip.opClz()
 
 	case SHA3:
 		return false, nil, ip.opSha3()
 
 	// ---- environment / calldata ----
 	case ADDRESS:
-		ip.stack.push(addrToWord(ip.self))
+		return false, nil, ip.stack.push(addrToWord(ip.self))
 	case CALLER:
-		ip.stack.push(addrToWord(ip.caller))
+		return false, nil, ip.stack.push(addrToWord(ip.caller))
 	case ORIGIN:
-		ip.stack.push(addrToWord(ip.caller))
+		// FEVM: the eth address of the message origin, identical in every
+		// frame (not the immediate caller).
+		return false, nil, ip.stack.push(addrToWord(ip.cs.origin))
 	case CALLVALUE:
-		ip.stack.push(uint256.Int{})
+		return false, nil, ip.stack.push(ip.value)
 	case CALLDATASIZE:
-		ip.stack.push(*uint256.NewInt(uint64(len(ip.input))))
+		return false, nil, ip.stack.push(*uint256.NewInt(uint64(len(ip.input))))
 	case CALLDATALOAD:
 		return false, nil, ip.opCalldataload()
 	case CALLDATACOPY:
-		return false, nil, ip.opCalldatacopy()
+		return false, nil, ip.opCopyToMemory(ip.input)
 	case CODESIZE:
-		ip.stack.push(*uint256.NewInt(uint64(len(ip.code))))
+		return false, nil, ip.stack.push(*uint256.NewInt(uint64(len(ip.code))))
 	case CODECOPY:
-		return false, nil, ip.opCodecopy()
+		return false, nil, ip.opCopyToMemory(ip.code)
 	case RETURNDATASIZE:
-		ip.stack.push(*uint256.NewInt(uint64(len(ip.ret))))
+		return false, nil, ip.stack.push(*uint256.NewInt(uint64(len(ip.ret))))
 	case RETURNDATACOPY:
 		return false, nil, ip.opReturndatacopy()
 	case GAS:
-		ip.stack.push(*uint256.NewInt(0xffffffff))
+		// Not gas-metered locally; a large constant keeps gasleft() checks
+		// passing. (FEVM returns the real remaining gas.)
+		return false, nil, ip.stack.push(*uint256.NewInt(0xffffffff))
+	case GASPRICE:
+		// FEVM: base_fee + message gas premium. eth_call messages carry a
+		// zero premium (Lotus EthCall.ToFilecoinMessage), so this is the
+		// base fee.
+		return false, nil, ip.envWord(op, func(e EnvBackend) (uint256.Int, error) { return e.BaseFee() })
 	case CHAINID:
-		ip.stack.push(*uint256.NewInt(ip.b.ChainID()))
+		return false, nil, ip.stack.push(*uint256.NewInt(ip.b.ChainID()))
 	case NUMBER:
-		ip.stack.push(*uint256.NewInt(ip.b.BlockNumber()))
+		return false, nil, ip.stack.push(*uint256.NewInt(ip.b.BlockNumber()))
 	case TIMESTAMP:
-		ip.stack.push(*uint256.NewInt(ip.b.Timestamp()))
+		return false, nil, ip.stack.push(*uint256.NewInt(ip.b.Timestamp()))
+	case COINBASE:
+		// FEVM: always the zero address (multiple winners per tipset).
+		return false, nil, ip.stack.push(uint256.Int{})
+	case GASLIMIT:
+		// FEVM: the constant block gas limit.
+		return false, nil, ip.stack.push(*uint256.NewInt(blockGasLimit))
+	case BASEFEE:
+		return false, nil, ip.envWord(op, func(e EnvBackend) (uint256.Int, error) { return e.BaseFee() })
+	case PREVRANDAO:
+		return false, nil, ip.envWord(op, func(e EnvBackend) (uint256.Int, error) { return e.PrevRandao() })
+	case BLOCKHASH:
+		return false, nil, ip.opBlockhash()
 	case SELFBALANCE:
 		bal, err := ip.b.GetBalance(ip.self)
 		if err != nil {
 			return false, nil, err
 		}
-		ip.stack.push(bal)
+		return false, nil, ip.stack.push(bal)
 	case BALANCE:
 		return false, nil, ip.opBalance()
 
@@ -201,21 +312,19 @@ func (ip *interpreter) exec(op OpCode) (bool, *Result, error) {
 	case MSTORE8:
 		return false, nil, ip.opMstore8()
 	case MSIZE:
-		ip.stack.push(*uint256.NewInt(uint64(ip.mem.len())))
+		return false, nil, ip.stack.push(*uint256.NewInt(uint64(ip.mem.len())))
 	case MCOPY:
 		return false, nil, ip.opMcopy()
-
-	// ---- transient storage (EIP-1153) ----
-	case TLOAD:
-		return false, nil, ip.opTload()
-	case TSTORE:
-		return false, nil, ip.opTstore()
 
 	// ---- storage ----
 	case SLOAD:
 		return false, nil, ip.opSload()
 	case SSTORE:
 		return false, nil, ip.opSstore()
+	case TLOAD:
+		return false, nil, ip.opTload()
+	case TSTORE:
+		return false, nil, ip.opTstore()
 
 	// ---- logs: observable side effects, no effect on return data ----
 	case LOG0, LOG1, LOG2, LOG3, LOG4:
@@ -232,9 +341,9 @@ func (ip *interpreter) exec(op OpCode) (bool, *Result, error) {
 	case JUMPDEST:
 		// no-op marker
 	case PC:
-		ip.stack.push(*uint256.NewInt(ip.pc))
+		return false, nil, ip.stack.push(*uint256.NewInt(ip.pc))
 	case PUSH0:
-		ip.stack.push(uint256.Int{})
+		return false, nil, ip.stack.push(uint256.Int{})
 
 	// ---- external code reads (for cross-contract view CALLs) ----
 	case EXTCODESIZE:
@@ -262,15 +371,19 @@ func (ip *interpreter) exec(op OpCode) (bool, *Result, error) {
 		}
 		return true, &Result{Return: data, Reverted: true, GasUsed: ip.gas}, nil
 
-	// ---- contract creation / destruction: out of scope ----
+	// ---- contract creation / destruction: not modeled locally ----
 	case CREATE, CREATE2, SELFDESTRUCT:
-		return true, &Result{Reverted: true, GasUsed: ip.gas}, nil
+		return false, nil, fmt.Errorf("%w: %s at pc %d (contract creation/destruction is not modeled locally)", ErrUnsupported, op, ip.pc)
 
 	case INVALID:
 		return true, &Result{Reverted: true, GasUsed: ip.gas}, nil
 
+	// ---- defined in Ethereum (Cancun) but not by the FEVM ----
+	case BLOBHASH, BLOBBASEFEE, CALLCODE:
+		return false, nil, ip.errUndefined(op)
+
 	default:
-		return false, nil, fmt.Errorf("evm: unsupported opcode 0x%02x (%s) at pc %d", byte(op), op.String(), ip.pc)
+		return false, nil, fmt.Errorf("%w: unsupported opcode 0x%02x (%s) at pc %d", ErrUnsupported, byte(op), op.String(), ip.pc)
 	}
 	return false, nil, nil
 }
