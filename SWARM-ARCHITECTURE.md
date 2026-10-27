@@ -105,7 +105,7 @@ lantern beacon \
 
 The beacon joins the swarm, announces `lantern/beacon/v1` in the DHT, persistently caches blocks via Badger, and serves Bitswap from cache. Cache-miss backfill from an upstream gateway is scaffolded (`--gateway`) pending upstream Bitswap wantlist subscriber API.
 
-We will run 2-3 of these on lex / Hetzner once Phase 10 lands in production so the network has always-available beacons. Third parties operate their own.
+We will run 2-3 of these on our own servers once Phase 10 lands in production so the network has always-available beacons. Third parties operate their own.
 
 ### 3. DHT-based beacon discovery — ✅ DELIVERED
 

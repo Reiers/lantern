@@ -566,7 +566,7 @@ func glifURLForNetwork(n build.Network) string {
 // back to the per-network Glif public endpoint.
 //
 // Motivation (fleet incident 2026-07-23): Glif public mainnet began
-// HTTP-403'ing our Hetzner census's egress IP with the -32156 "Access
+// HTTP-403'ing our public census server's egress IP with the -32156 "Access
 // denied" body. Because glifURLForNetwork was the ONLY reachable RPC
 // URL in the daemon path, the census's chain-fetch source went dark
 // and the inline gossip backfill (3-epoch cap) could not self-heal,

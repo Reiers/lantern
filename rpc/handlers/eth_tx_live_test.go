@@ -20,7 +20,7 @@ import (
 )
 
 // Live-path regression for 0x468f...01d4 (CreateDataSet sent by stock
-// Curio-PDP through lantern-m2 on calibration, included at 4189932 in a
+// Curio-PDP through a calibration test node, included at 4189932 in a
 // 2-block tipset, executed at 4189933, 10 logs). Curio stored a receipt
 // for it with logs [] and blockHash = digest of the first block CID; that
 // came from the pre-#173 binary (ecf21fa), but the scenarios below pin the

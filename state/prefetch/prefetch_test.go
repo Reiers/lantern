@@ -3,7 +3,7 @@
 // These tests exercise the wiring (config defaults, address parsing,
 // coalescing, inflight gating, Trigger never blocks) without standing
 // up a real chain head + state tree. The real "does it warm the cache"
-// proof is the cc-smoke soak (see docs/issues/0044-...).
+// proof is the soak on a calibration test deployment (see docs/issues/0044-...).
 package prefetch
 
 import (

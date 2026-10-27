@@ -77,7 +77,7 @@ interpreter independently. That's the cost and the moat.
 
 ### Stage 5 — curio-core cutover
 - curio-core runs `--vm-bridge-rpc-disable` and completes PDP + payments reads
-  against local eth_call only. Validate on cc-smoke.
+  against local eth_call only. Validate on a calibration test deployment.
 - Keep VMBridge as opt-in fallback.
 
 ## Verification corpus (capture once, replay forever)
@@ -101,7 +101,7 @@ until Stage 3 matches Glif on the corpus.
 - Full precompile coverage (add as real calls demand).
 - State *writes* of any kind.
 
-## Status 2026-06-15 — Stages 1-5 landed, local eth_call live on cc-smoke
+## Status 2026-06-15 — Stages 1-5 landed, local eth_call live on a calibration test deployment
 
 All five stages implemented and released as Lantern **v1.6.0 → v1.6.4**:
 
@@ -110,7 +110,7 @@ All five stages implemented and released as Lantern **v1.6.0 → v1.6.4**:
 - **Stage 3** (`vm/evm/`): pure-Go read-only EVM interpreter. ✅ Glif parity (3 registry view fns).
 - **Stage 4** (`rpc/handlers/evmexec.go`): `ChainAPI.EthCall` local-first + VMBridge fallback,
   live-head anchoring, revert→code-3. ✅ integration parity with `Bridge=nil`.
-- **Stage 5**: curio-core pinned to v1.6.4, deployed to cc-smoke. PDPVerifier contract
+- **Stage 5**: curio-core pinned to v1.6.4, deployed to a calibration test deployment. PDPVerifier contract
   reads now **served locally** (pure-Go EVM, no Glif); proof loop intact; daemon stable.
 
 Two KAMT correctness bugs were found and fixed *because of* the live cutover (they only

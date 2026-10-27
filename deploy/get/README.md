@@ -24,4 +24,4 @@ wrangler pages deploy . --project-name=lantern-get --branch=main
 
 ## History
 - 2026-05-22 12:15 CPH: initial Pages deployment. Replaces previous
-  ad-hoc Hetzner nginx setup (which was working but is now redundant).
+  ad-hoc self-hosted nginx setup (which was working but is now redundant).
