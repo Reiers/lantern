@@ -8,6 +8,7 @@ body:
       value: |
         Thanks for running Lantern. One report per problem is ideal; a full run summary is welcome too.
         **Never paste API tokens, private keys or the contents of secrets/.** Redact them as <redacted>.
+        Wallet addresses, provider IDs, data set IDs and transaction hashes are public on chain and help us verify a run; include them if you are comfortable doing so.
   - type: dropdown
     id: kind
     attributes:
@@ -35,11 +36,38 @@ body:
       label: Step / section
       placeholder: "RUN-PDP.md step 5"
   - type: input
+    id: hardware
+    attributes:
+      label: Hardware
+      description: CPU model and threads, RAM, disk type and size. VM or bare metal.
+      placeholder: "8 cores / 16 threads, 32 GB RAM, 1 TB NVMe, bare metal"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      description: Distribution, version and kernel.
+      placeholder: "Ubuntu 24.04, kernel 6.8"
+    validations:
+      required: true
+  - type: input
     id: lantern-version
     attributes:
       label: Lantern version
-      description: Output of `lantern version`.
-      placeholder: "lantern v1.10.1-rc1 (abcdef123456) Lantern+mainnet"
+      description: Output of `lantern version`. RUN-PDP.md needs v1.10.1-rc1 or later.
+      placeholder: "lantern v1.10.1 (abcdef123456) Lantern+mainnet"
+    validations:
+      required: true
+  - type: dropdown
+    id: lantern-source
+    attributes:
+      label: How you obtained Lantern
+      options:
+        - Built from source (BUILD.md)
+        - Downloaded release binary (RUN-PDP.md step 2.2)
+        - One-line installer
+        - Other
     validations:
       required: true
   - type: input
@@ -51,16 +79,46 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: OS and version, CPU / RAM, Docker and Compose versions, Curio-PDP image tag, NAT or public IP.
+      description: Docker and Compose versions, Curio-PDP image tag, NAT or public IP, how HTTPS was exposed.
       placeholder: |
-        Ubuntu 24.04, 8 cores / 32 GB, Docker 27.x, Compose v2.29, filecoin/curio-pdp:calibnet, behind NAT with Cloudflare Tunnel
+        Docker 27.x, Compose v2.29, filecoin/curio-pdp:calibnet, behind NAT with Cloudflare Tunnel (Curio GUI step)
     validations:
       required: true
+  - type: input
+    id: build-time
+    attributes:
+      label: Build time
+      description: Total wall-clock for BUILD.md from a clean machine, and the go build step alone. "not built" if you downloaded.
+      placeholder: "total 90 s, go build 55 s"
+  - type: input
+    id: time-to-first-proof
+    attributes:
+      label: Time to first proof
+      description: From data set creation to the first provePossession transaction (about one proving period, ~2 h on calibration). Also the total time from a clean machine if you tracked it.
+      placeholder: "2h 05m after data set creation; 3h 40m from clean machine"
+  - type: textarea
+    id: steps
+    attributes:
+      label: Step results
+      description: Pass or fail for each step you reached, with a short note. Delete lines you did not reach.
+      value: |
+        BUILD.md (or download):                     pass / fail
+        2.1 Docker + Compose >= 2.24.4:             pass / fail
+        3.  lantern init + node-type pdp:           pass / fail   (quorum: N operators agree)
+        4.  daemon as a user service on docker0:    pass / fail   (option A / B)
+        5.  Curio-PDP up against Lantern:           pass / fail   (Chain page Reachability ok?)
+        6.  admin GUI over SSH tunnel:              pass / fail
+        7.  storage attached:                       pass / fail
+        8.  PDP wallet created and funded:          pass / fail
+        9.  public HTTPS, /pdp/ping:                pass / fail
+        10. FWSS registration:                      pass / fail
+        11. client data set created:                pass / fail
+        12. proofs land (how many periods):         pass / fail
   - type: textarea
     id: what-happened
     attributes:
-      label: What happened
-      description: The exact command you ran and the exact output or error.
+      label: What happened / friction
+      description: For a problem, the exact command you ran and the exact output or error. For a run summary, every point where the guides were unclear, wrong or slow, however small.
       render: shell
     validations:
       required: true
@@ -74,11 +132,6 @@ body:
       label: Relevant logs
       description: Lantern (`journalctl --user -u lantern` or `$LANTERN_HOME/lantern.log`) and Curio (`docker compose ... logs skiff`). Redact tokens.
       render: shell
-  - type: textarea
-    id: timings
-    attributes:
-      label: Timings (optional)
-      description: Build time, time to a synced daemon, time to registration / first proof.
   - type: dropdown
     id: severity
     attributes:
@@ -87,6 +140,7 @@ body:
         - Blocked, could not continue
         - Worked around it
         - Minor annoyance / wording
+        - Nothing, worked end to end
   - type: checkboxes
     id: checks
     attributes:

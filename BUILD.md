@@ -1,5 +1,7 @@
 # Building Lantern from source
 
+> **Minimum Lantern version for Curio-PDP: v1.10.1-rc1 or later.** v1.10.0 and older predate the NV29 network upgrade and cannot serve stock Curio-PDP on calibration or mainnet.
+
 This guide takes a clean machine to a verified `lantern` binary. It needs no C compiler, no Rust and no `filecoin-ffi`: Lantern is pure Go and builds with `CGO_ENABLED=0`.
 
 When you have a binary, continue with [RUN-PDP.md](RUN-PDP.md) to run it as the chain node for a stock Curio-PDP storage provider.
@@ -10,6 +12,7 @@ When you have a binary, continue with [RUN-PDP.md](RUN-PDP.md) to run it as the 
 - [4. Build](#4-build)
 - [5. Verify](#5-verify)
 - [6. Optional: check the build against the published release](#6-optional-check-the-build-against-the-published-release)
+- [7. First run](#7-first-run)
 - [Expected timings](#expected-timings)
 - [Alternative: the one-line installer](#alternative-the-one-line-installer)
 - [Troubleshooting](#troubleshooting)
@@ -69,26 +72,26 @@ If you already have Go 1.21 or newer, `go` reads the `toolchain go1.26.4` line i
 
 ## 3. Clone and check out a release tag
 
-Build a release tag, not `main`. Find the newest one at <https://github.com/Reiers/lantern/releases/latest> (release candidates such as `v1.10.1-rc1` are listed as pre-releases on <https://github.com/Reiers/lantern/releases>).
+Build a release tag, not `main`: **v1.10.1-rc1 or later**. Find the newest one at <https://github.com/Reiers/lantern/releases/latest> (release candidates are listed as pre-releases on <https://github.com/Reiers/lantern/releases>).
 
 ```sh
 git clone https://github.com/Reiers/lantern.git
 cd lantern
-TAG=v1.10.1-rc1                              # replace with the tag you want
+TAG=v1.10.1-rc1                              # or a newer release
 git checkout "$TAG"
 ```
 
-<!-- TODO-VERIFY: set TAG to the release the M2 operator should build. It must include NV29 (Solstice, PR #172) and the bridge-off receipt fix; v1.10.0 does NOT work with Curio-PDP on calibration or mainnet since NV29. -->
-
-> **Network upgrade note.** Calibration (epoch 4109133) and mainnet (epoch 6470279) run network version 29 (Solstice, builtin-actors v19). Lantern v1.10.0 and older predate it and serve FEVM contracts as "no code", so Curio-PDP fails. Use a release that lists NV29 support in [CHANGELOG.md](CHANGELOG.md).
+> **Network upgrade note.** Calibration (epoch 4109133) and mainnet (epoch 6470279) run network version 29 (Solstice, builtin-actors v19). Lantern v1.10.0 and older predate it and serve FEVM contracts as "no code", so Curio-PDP fails. v1.10.1 adds NV29 support plus the fixes stock Curio-PDP needs when Lantern is its only chain node (receipts with event logs, a persistent transaction index, Cancun opcodes in the local FEVM); see [CHANGELOG.md](CHANGELOG.md).
 
 ## 4. Build
 
-This is the exact command the release workflow runs (same flags, same `versionTag`):
+These are the flags the release uses (same `versionTag`):
 
 ```sh
-CGO_ENABLED=0 go build   -trimpath   -ldflags "-s -w -X main.versionTag=$TAG"   -o lantern   ./cmd/lantern
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.versionTag=$TAG" -o lantern ./cmd/lantern
 ```
+
+This gives a working binary. It is usually **not** byte-identical to the published one, because the module cache path ends up in the binary; for a byte-for-byte check use the container script in step 6.
 
 The first build downloads all Go modules (most of the time is spent here and in compiling the dependency graph). The result is a single static binary of about 43 MB.
 
@@ -104,7 +107,7 @@ export PATH="$HOME/.local/bin:$PATH"         # if not already on PATH
 
 ```sh
 lantern version
-# lantern v1.10.1-rc1 (<12-char commit>) Lantern+mainnet
+# lantern v1.10.1 (<12-char commit>) Lantern+mainnet
 
 go version -m "$(command -v lantern)" | grep -E 'go1|vcs.revision|vcs.modified|CGO_ENABLED|-trimpath'
 ```
@@ -117,19 +120,19 @@ go version -m "$(command -v lantern)" | grep -E 'go1|vcs.revision|vcs.modified|C
 
 ## 6. Optional: check the build against the published release
 
-Lantern release binaries are meant to be reproducible: the same tag, Go version and flags should give the same bytes. The procedure, and a script that does the comparison for you, live in [docs/REPRODUCIBLE-BUILDS.md](docs/REPRODUCIBLE-BUILDS.md).
-
-A quick manual comparison (Linux x86_64 shown):
+Lantern releases from v1.10.1 on are byte-reproducible with a pinned container toolchain. With Docker installed (no local Go needed), from your checkout:
 
 ```sh
-curl -fsSLO "https://github.com/Reiers/lantern/releases/download/$TAG/lantern-linux-amd64.sha256"
-echo "published: $(awk '{print $1}' lantern-linux-amd64.sha256)"
-echo "local:     $(sha256sum lantern | awk '{print $1}')"     # macOS: shasum -a 256 lantern
+./scripts/repro-build.sh "$TAG" linux/amd64          # or linux/arm64, darwin/arm64; omit for all
 ```
 
-Compare only the hash column: the `.sha256` file names the CI path (`dist/lantern-linux-amd64`), so `sha256sum -c` against a differently named local file reports "No such file".
+It clones the tag, builds it in the pinned `golang:1.26.4` image with a fixed module cache path, and compares the result with the published `.sha256`. The last line per target says `MATCH` (exit code 0) or reports the mismatch (exit code 1). Details, and what this does and does not prove: [docs/REPRODUCIBLE-BUILDS.md](docs/REPRODUCIBLE-BUILDS.md).
 
-<!-- TODO-VERIFY: during the internal dry run the v1.10.0 linux-amd64 clean build did NOT match the published hash although the embedded build info was identical (friction F1, being fixed in a separate PR). Update this section once docs/REPRODUCIBLE-BUILDS.md and scripts/repro-build.sh land, and record the result in docs/VERIFICATION-M2.md. -->
+Why not compare the `go build` from step 4? `-trimpath` does not strip some assembler include paths, so the module cache path (for example `~/go/pkg/mod`) lands in the binary and changes the bytes even though `go version -m` looks identical. The container fixes that path.
+
+To check only that a downloaded binary is intact: `sha256sum -c lantern-linux-amd64.sha256` next to the downloaded file (macOS: `shasum -a 256 -c`). Releases before v1.10.1 name the CI path `dist/lantern-<os>-<arch>` in that file, so for those compare the hash column by eye.
+
+Record the result in [docs/VERIFICATION-M2.md](docs/VERIFICATION-M2.md) if you are doing a verification run.
 
 ## 7. First run
 
@@ -166,6 +169,8 @@ curl -fsSL https://get.golantern.io | bash
 
 Useful variables: `LANTERN_VERSION=<tag>` (for example a release candidate; default is the latest stable release), `LANTERN_NODE_TYPE=pdp`, `LANTERN_NO_SERVICE=1`, `LANTERN_YES=1` (non-interactive). The installer anchors **mainnet** only. For the calibration Curio-PDP walkthrough, install with `LANTERN_NO_SERVICE=1` and then follow [RUN-PDP.md](RUN-PDP.md) from step 3 (`lantern init --network calibration`).
 
+To skip both building and the installer, download the release binary and its `.sha256` directly: [RUN-PDP.md step 2.2](RUN-PDP.md#22-lantern).
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -175,5 +180,6 @@ Useful variables: `LANTERN_VERSION=<tag>` (for example a release candidate; defa
 | `lantern version` prints `dev` | You built without `-ldflags "... -X main.versionTag=$TAG"`. Rebuild with the exact command in step 4. |
 | `go version -m` shows `vcs.modified=true` | The checkout has local changes. `git status`, then `git stash` or a fresh clone. |
 | `lantern daemon` exits with `no trust anchor` | Run `lantern init --network <net>` (or `lantern repair --network <net>`) with the same `LANTERN_HOME`. If the quorum fails, follow its printed hints or run `lantern doctor --network <net>` (step 7). |
-| `sha256sum -c` says "No such file or directory" | The published `.sha256` names `dist/lantern-<os>-<arch>`. Compare the hash column directly (step 6). |
-| Local hash differs from the published hash | Check Go version, flags, tag and `vcs.modified` first, then follow [docs/REPRODUCIBLE-BUILDS.md](docs/REPRODUCIBLE-BUILDS.md). If it still differs, file an [operator report](https://github.com/Reiers/lantern/issues/new?template=operator-report.yml). |
+| `sha256sum -c` says "No such file or directory" | The file is not in the current directory, or it is a release before v1.10.1 whose `.sha256` names `dist/lantern-<os>-<arch>`. Compare the hash column directly (step 6). |
+| Hash of your `go build` differs from the published hash | Expected for a plain `go build` (module cache path). Use `./scripts/repro-build.sh "$TAG"` (step 6). If that reports a mismatch, file an [operator report](https://github.com/Reiers/lantern/issues/new?template=operator-report.yml). |
+| Curio logs `no contract code at given address` | Lantern older than v1.10.1 (no NV29 support). Build v1.10.1-rc1 or later. |

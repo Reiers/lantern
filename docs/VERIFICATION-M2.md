@@ -35,42 +35,47 @@ Milestone 2 criteria:
 | Network | <public IP / behind NAT; how HTTPS was exposed: Cloudflare Tunnel, own TLS, reverse proxy> |
 | Docker / Compose | <docker version> / <docker compose version> |
 | Curio | image <filecoin/curio-pdp:calibnet@sha256:...>, curio repo commit <sha> |
+| Hardware summary | <one line: CPU / RAM / disk, as entered in the operator report> |
 
-## Build (BUILD.md)
+## Build or download (BUILD.md, RUN-PDP.md step 2)
 
 | | |
 |---|---|
-| Lantern tag | <vX.Y.Z or rc> |
-| Go | <go version output> |
-| Build command | as in BUILD.md step 4 / <deviations> |
+| How Lantern was obtained | <built from source per BUILD.md / downloaded release binary / one-line installer> |
+| Lantern tag | <v1.10.1-rc1 or later> |
+| Go (if built) | <go version output> |
+| Build command | <as in BUILD.md step 4 / deviations> |
 | Time: prerequisites | <s> |
 | Time: Go install | <s> |
 | Time: clone + checkout | <s> |
 | Time: go build | <s> |
-| **Total build time** | **<s>** |
+| **Total build time** | **<s>** (or "not built") |
 | `lantern version` | <output> |
 | Binary sha256 | <hash> |
-| Matches published release hash | <yes / no / not checked>; method: <docs/REPRODUCIBLE-BUILDS.md, scripts/repro-build.sh> |
+| Matches published release hash | <MATCH / mismatch / not checked>; method: <scripts/repro-build.sh, sha256sum -c on the download> |
 
 ## Run (RUN-PDP.md)
 
-| Step | Result | Time taken | Notes |
+| Step | Pass / fail | Time taken | Notes |
 |---|---|---|---|
-| 3. lantern init --network calibration --no-wallet | <ok / problem> | <min> | <anchor epoch, quorum> |
-| 4. Daemon as a service on docker0 | <option A / B> | | <listen address> |
-| 5. Curio-PDP up against Lantern | | | <no Forest container confirmed> |
-| 6. Admin GUI over SSH | | | |
-| 7. Storage attached | | | <capacity> |
-| 8. PDP wallet created and funded | | | <faucet used> |
-| 9. Public HTTPS | | | <method> |
-| 10. FWSS registration | | | |
-| 11. Client data set created | | | |
-| 12. Proofs observed | | | <number of proving periods> |
+| 2.1 Docker Engine + Compose >= 2.24.4 | <pass / fail> | <min> | <docker / compose versions> |
+| 2.2 Lantern on PATH (v1.10.1+) | | | <built / downloaded> |
+| 3. `lantern init --network calibration --no-wallet` + `node-type pdp` | | | <quorum line: N distinct operators agree (need 3); anchor epoch> |
+| 4. Daemon as a systemd user service on docker0 with `--allow-remote-rpc` | | | <option A / B; listen address; StateNetworkVersion> |
+| 5. `.env` (SKIFF_HTTP_DOMAIN set before first start, FULLNODE_API_INFO with `/ip4/<bridge-ip>`), compose up with three files | | | <migration time; no Forest container; Chain page Reachability ok> |
+| 6. Admin GUI over SSH tunnel (port 4701) | | | |
+| 7. Storage attached (>= 100 GiB free) | | | <capacity> |
+| 8. PDP wallet created and funded (>= 6 tFIL) | | | <faucet used> |
+| 9. Public HTTPS, `/pdp/ping` | | | <Curio GUI tunnel / hand-run cloudflared / own domain and TLS; 503 before wallet, 200 after> |
+| 10. FWSS registration | | | <minutes to provider ID> |
+| 11. Client data set created (`upload-test.mjs`) | | | <minutes to data set ID; extra USDFC needed?> |
+| 12. Proofs observed | | | <number of consecutive proving periods> |
+| **Time to first proof** | | **<h:mm from data set creation to first provePossession>** | |
 
 Lantern daemon command line exactly as run (must not contain `--vm-bridge-rpc` for a bridge-off result):
 
 ```
-<lantern daemon --network calibration --listen 172.17.0.1:1234 --allow-remote-rpc ...>
+<lantern daemon --network calibration --listen <bridge-ip>:1234 --allow-remote-rpc ...>
 ```
 
 `FULLNODE_API_INFO` host part (token redacted): `<redacted>:/ip4/<ip>/tcp/1234/http`
@@ -104,15 +109,19 @@ Friction found during the maintainers' own dry run before the external run (for 
 
 | ID | Description | Resolution |
 |---|---|---|
-| F1 | Clean v1.10.0 linux-amd64 build did not reproduce the published sha256 | <link> |
-| F2 | Stale release references in README / REPRODUCIBLE-BUILDS, outdated `lantern help` banner | <this PR> |
-| F3 | `init` used `--filecoin-network` while other commands use `--network` | <this PR: --network works everywhere> |
-| F4 | Release `.sha256` files name the CI path, so `sha256sum -c` fails next to a downloaded file | <link> |
-| F5 | `init` "Next steps" printed a bare `lantern daemon` (mainnet) after a calibration init | <this PR> |
-| F6 | Unauthenticated read methods return results (by design); write methods are rejected without a token | documented in RUN-PDP.md |
+| F1 | Clean v1.10.0 linux-amd64 build did not reproduce the published sha256 (module cache path embedded via assembler includes) | fixed in #174 (pinned container recipe, scripts/repro-build.sh) |
+| F2 | Stale release references in README / REPRODUCIBLE-BUILDS, outdated `lantern help` banner | fixed in #175 |
+| F3 | `init` used `--filecoin-network` while other commands use `--network` | fixed in #175 (`--network` works everywhere) |
+| F4 | Release `.sha256` files name the CI path, so `sha256sum -c` fails next to a downloaded file | fixed in #174 for releases from v1.10.1 |
+| F5 | `init` "Next steps" printed a bare `lantern daemon` (mainnet) after a calibration init | fixed in #175 |
+| F6 | Unauthenticated read methods return results (by design); write methods are rejected without a token | documented in RUN-PDP.md step 4 |
 | F7 | Upstream Curio docs and `.env` suggest `FULLNODE_API_INFO=/ip4/host.docker.internal/...`, which crash-loops Curio | <upstream issue link> |
-| F8 | Some FEVM `eth_call`s missed locally bridge-off (`FEVM method requires --vm-bridge-rpc`) | <link> |
-| F9 | Bridge-off `eth_getTransactionReceipt` missing / missing event logs, blocking data set creation | <link> |
+| F8 | Some FEVM `eth_call`s missed locally bridge-off (`unsupported opcode 0x5e`, MCOPY) | fixed in #177 and #178; remaining gaps tracked in #183 |
+| F9 | Bridge-off `eth_getTransactionReceipt` missing / missing event logs, blocking data set creation (`DataSetCreated event not found in receipt`) | fixed in #173 and #177 |
+| F10 / F11 | Mainnet init could not reach the old 5-source quorum; the daemon started without an init anchor | fixed in #176 (operator-aware quorum, daemon refuses without anchor) |
+| F12 | After a Lantern restart, receipt lookups for older txs exceeded Curio's RPC timeout (`i/o timeout`) | fixed in #179 (persistent eth tx index) |
+| Reorg | Curio's reorg check failed on bridge-off eth blocks without transactions | fixed in #180 |
+| Client | Data set create reverted with `insufficient funds to cover lockup after function execution` (client owned earlier data sets) | documented in RUN-PDP.md; `EXTRA_DEPOSIT_USDFC` in upload-test.mjs |
 | NV29 | Lantern v1.10.0 predated NV29 (Solstice): FEVM contracts served as "no code" | fixed in #172 |
 
 ## Operator statement

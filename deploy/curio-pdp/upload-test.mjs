@@ -21,10 +21,16 @@
 //                       For "status" you can point it at your own Lantern, e.g.
 //                       http://172.17.0.1:1234/rpc/v1, to read through it.
 //   SIZE_BYTES          Size of the random test piece (default 4194304 = 4 MiB).
+//   EXTRA_DEPOSIT_USDFC Optional. Deposit this many USDFC into Filecoin Pay
+//                       before preparing (for example 5). Each data set locks
+//                       funds and "prepare" only sizes one new data set, so a
+//                       client that already owns data sets may need more; the
+//                       symptom is a create tx reverting with "insufficient
+//                       funds to cover lockup after function execution".
 //
 // Requires Node.js 20 or newer.
 
-import { Synapse, calibration } from '@filoz/synapse-sdk'
+import { Synapse, calibration, formatUnits, parseUnits } from '@filoz/synapse-sdk'
 import { createPublicClient, http } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { randomBytes } from 'node:crypto'
@@ -94,6 +100,25 @@ async function upload() {
   })
   log('provider', String(ctx.provider?.id), ctx.provider?.name, 'existing dataSetId', String(ctx.dataSetId))
 
+  const decimals = synapse.payments.decimals()
+  const showPay = async (label) =>
+    log(label, 'Filecoin Pay available', formatUnits(await synapse.payments.balance(), decimals), 'USDFC; wallet', formatUnits(await synapse.payments.walletBalance(), decimals), 'USDFC')
+  await showPay('before:')
+
+  const extra = process.env.EXTRA_DEPOSIT_USDFC || ''
+  if (extra) {
+    if (!/^\d+(\.\d+)?$/.test(extra)) die('EXTRA_DEPOSIT_USDFC must be a decimal amount, e.g. 5')
+    const hash = await synapse.payments.deposit({
+      amount: parseUnits(extra, decimals),
+      onApprovalTransaction: (h) => log('USDFC approval tx', h),
+    })
+    log('extra deposit tx', hash)
+    const pub = createPublicClient({ chain: calibration, transport: http(RPC_URL) })
+    const rcpt = await pub.waitForTransactionReceipt({ hash })
+    log('extra deposit status', rcpt.status)
+    await showPay('after extra deposit:')
+  }
+
   const data = randomBytes(size)
   const prep = await synapse.storage.prepare({ context: ctx, pieceSizes: [BigInt(size)] })
   log('prepare: ready', prep.costs?.ready, 'deposit needed', String(prep.transaction?.depositAmount ?? 0n))
@@ -104,9 +129,9 @@ async function upload() {
 
   let dataSetId = ctx.dataSetId
   const res = await ctx.upload(data, {
-    onUploadComplete: (piece) => log('uploaded piece', String(piece)),
+    onStored: (_providerId, piece) => log('stored piece', String(piece)),
     onPiecesAdded: (tx) => log('add-pieces tx (sent by your provider through Lantern)', tx),
-    onPiecesConfirmed: (ds, pieces) => {
+    onPiecesConfirmed: (ds, _providerId, pieces) => {
       dataSetId = ds
       log('confirmed: data set', String(ds), json(pieces).slice(0, 300))
     },
