@@ -1,6 +1,6 @@
 # Building Lantern from source
 
-> **Minimum Lantern version for Curio-PDP: v1.10.1 or later.** v1.10.0 and older predate the NV29 network upgrade and cannot serve stock Curio-PDP on calibration or mainnet.
+> **Minimum Lantern version for Curio-PDP: v1.10.1-rc1 or later.** v1.10.0 and older predate the NV29 network upgrade and cannot serve stock Curio-PDP on calibration or mainnet.
 
 This guide takes a clean machine to a verified `lantern` binary. It needs no C compiler, no Rust and no `filecoin-ffi`: Lantern is pure Go and builds with `CGO_ENABLED=0`.
 
@@ -72,12 +72,12 @@ If you already have Go 1.21 or newer, `go` reads the `toolchain go1.26.4` line i
 
 ## 3. Clone and check out a release tag
 
-Build a release tag, not `main`: **v1.10.1 or later**. Find the newest one at <https://github.com/Reiers/lantern/releases/latest> (release candidates are listed as pre-releases on <https://github.com/Reiers/lantern/releases>).
+Build a release tag, not `main`: **v1.10.1-rc1 or later**. Find the newest one at <https://github.com/Reiers/lantern/releases/latest> (release candidates are listed as pre-releases on <https://github.com/Reiers/lantern/releases>).
 
 ```sh
 git clone https://github.com/Reiers/lantern.git
 cd lantern
-TAG=v1.10.1                                  # or a newer release
+TAG=v1.10.1-rc1                              # or a newer release
 git checkout "$TAG"
 ```
 
@@ -182,4 +182,4 @@ To skip both building and the installer, download the release binary and its `.s
 | `lantern daemon` exits with `no trust anchor` | Run `lantern init --network <net>` (or `lantern repair --network <net>`) with the same `LANTERN_HOME`. If the quorum fails, follow its printed hints or run `lantern doctor --network <net>` (step 7). |
 | `sha256sum -c` says "No such file or directory" | The file is not in the current directory, or it is a release before v1.10.1 whose `.sha256` names `dist/lantern-<os>-<arch>`. Compare the hash column directly (step 6). |
 | Hash of your `go build` differs from the published hash | Expected for a plain `go build` (module cache path). Use `./scripts/repro-build.sh "$TAG"` (step 6). If that reports a mismatch, file an [operator report](https://github.com/Reiers/lantern/issues/new?template=operator-report.yml). |
-| Curio logs `no contract code at given address` | Lantern older than v1.10.1 (no NV29 support). Build v1.10.1 or later. |
+| Curio logs `no contract code at given address` | Lantern older than v1.10.1 (no NV29 support). Build v1.10.1-rc1 or later. |

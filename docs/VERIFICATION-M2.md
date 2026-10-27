@@ -42,7 +42,7 @@ Milestone 2 criteria:
 | | |
 |---|---|
 | How Lantern was obtained | <built from source per BUILD.md / downloaded release binary / one-line installer> |
-| Lantern tag | <v1.10.1 or later> |
+| Lantern tag | <v1.10.1-rc1 or later> |
 | Go (if built) | <go version output> |
 | Build command | <as in BUILD.md step 4 / deviations> |
 | Time: prerequisites | <s> |

@@ -55,7 +55,7 @@ body:
     id: lantern-version
     attributes:
       label: Lantern version
-      description: Output of `lantern version`. RUN-PDP.md needs v1.10.1 or later.
+      description: Output of `lantern version`. RUN-PDP.md needs v1.10.1-rc1 or later.
       placeholder: "lantern v1.10.1 (abcdef123456) Lantern+mainnet"
     validations:
       required: true
