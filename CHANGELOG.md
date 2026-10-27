@@ -4,6 +4,8 @@ All notable changes to Lantern.
 
 ## Unreleased
 
+- **docs: operator-ready RUN-PDP.md and BUILD.md from a 24 hour calibration run.** Minimum Lantern version v1.10.1, Docker/Compose install, init quorum output explained, Curio GUI page names, FWSS registration fee (5 FIL), time to first proof, a "What success looks like" section and troubleshooting rows for every error hit in the run. BUILD.md now points at `scripts/repro-build.sh` for byte-for-byte checks. Operator report template and docs/VERIFICATION-M2.md ask for hardware, OS, how Lantern was obtained, build time, time to first proof and per-step pass/fail. `deploy/curio-pdp/upload-test.mjs`: fixed upload callbacks (`onStored`, `onPiecesConfirmed` arguments), prints the Filecoin Pay balance, new `EXTRA_DEPOSIT_USDFC` for clients that already own data sets.
+
 - **wallet: `wallet balance` and address display are network-aware (#148).** `wallet balance` queries the running daemon for the selected network instead of the hardcoded mainnet gateway; wallet subcommands render t-prefixed addresses on calibration/devnet. Approach proposed by @sharmis-tp.
 
 ### Bridge-off eth blocks include transactions (Curio reorg check)

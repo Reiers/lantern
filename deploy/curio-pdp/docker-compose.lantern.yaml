@@ -17,7 +17,8 @@
 # Always name the services ("yugabyte skiff"). A bare "up -d" would still
 # start the Forest container from the base file.
 #
-# Requires Docker Compose v2.24.4 or newer for the "!override" merge tag.
+# Requires Docker Compose v2.24.4 or newer for the "!override" merge tag,
+# and Lantern v1.10.1 or later as the chain node.
 # Full walkthrough: RUN-PDP.md in https://github.com/Reiers/lantern
 
 services:
