@@ -365,7 +365,7 @@ The **PDP Guide** domain step shows "HTTP.DomainName configured" and "Reachable 
 
 ## 10. Register with FWSS
 
-In the GUI open **PDP** (tools section). In the **Filecoin Service Registry** section click **Register Provider** and fill in name, description, location (free text, for example `EU-NO`) and storage capacity in GiB (minimum **100**). Submit.
+In the GUI open **PDP** (tools section). In the **Filecoin Service Registry** section click **Register Provider** and fill in name, description (**at most 128 characters**, longer is rejected by the registry contract), location (free text, for example `EU-NO`) and storage capacity in GiB (minimum **100**). Submit.
 
 Curio signs the registration transaction with the PDP key and sends it to Lantern (`eth_sendRawTransaction`); Lantern publishes it from its local message pool to the calibration network. The registry charges the 5 FIL fee from step 8. After the transaction lands (a minute or two) the section shows your **provider ID** and the PDP Guide marks "Service provider registry" as OK. Note the provider ID for step 11. You can look the transaction up on a calibration explorer such as <https://calibration.filfox.info> or <https://filecoin-testnet.blockscout.com> (status `1` / Success).
 
@@ -476,6 +476,7 @@ Other problems you may run into:
 | Lantern service fails at boot with "cannot assign requested address" | `docker0` does not exist yet. | Nothing to do: systemd restarts Lantern until Docker is up. Check `systemctl --user status lantern` after boot. |
 | User service stops when you log out | Lingering not enabled. | `sudo loginctl enable-linger $USER`. |
 | **Register Provider** button is disabled | PDP key missing or not funded. | Step 8; wait until the balance shows in the PDP Guide. |
+| Registration fails with `description is too long, max 128 characters allowed` | Registry limit on the description field. Nothing was sent, no fee charged. | Shorten the description to 128 characters or fewer and submit again. |
 | Unauthenticated `Filecoin.WalletList` returns `null` | Read methods need no token, and the node has no wallets. | Expected. Write, sign and admin methods return `missing permission` without the token. |
 
 Still stuck? File an [operator report](https://github.com/Reiers/lantern/issues/new?template=operator-report.yml) with the step number, the exact error and your versions (redact tokens and keys).
