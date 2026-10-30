@@ -37,6 +37,7 @@ import (
 	"github.com/Reiers/lantern/api"
 	"github.com/Reiers/lantern/build"
 	lbeacon "github.com/Reiers/lantern/chain/beacon"
+	"github.com/Reiers/lantern/chain/header/backfill"
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	headnotify "github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/msgsearch"
@@ -64,6 +65,17 @@ type ChainAPI struct {
 	// StateGetRandomnessFromBeacon, StateSearchMsg and StateWaitMsg are
 	// available; otherwise they return ErrNotImpl.
 	HeaderStore *hstore.Store
+
+	// HeaderBackfill tunes the resolver that serves ChainGetTipSetByHeight
+	// (and friends) for heights below the header store's coverage by
+	// walking verified parent links back from the head (chain/header/
+	// backfill). Zero values take the package defaults.
+	HeaderBackfill backfill.Config
+
+	hbfMu    sync.Mutex
+	hbf      *backfill.Resolver
+	hbfStore *hstore.Store
+	hbfChain backfill.ChainFetcher
 
 	// LocalFEVMDisabled forces eth_call to skip local FEVM execution and
 	// forward to the VMBridge unconditionally (lantern#43 Part B). Default
@@ -480,7 +492,10 @@ func mustZeroIDAddr() address.Address {
 //     this fell straight through to ErrTipSetNotFound, surfacing as
 //     "tipset not in local store (only current head is cached in V1)" and
 //     stalling Curio's chain watcher.
-func (c *ChainAPI) ChainGetTipSet(_ context.Context, key types.TipSetKey) (*types.TipSet, error) {
+//  3. A verified fetch by CID (header backfill): the key names the block
+//     CIDs, so every fetched header must hash to one of them. Fetched
+//     headers are persisted so the next lookup is local.
+func (c *ChainAPI) ChainGetTipSet(ctx context.Context, key types.TipSetKey) (*types.TipSet, error) {
 	if c.Trusted == nil {
 		return nil, errors.New("trusted root not initialised")
 	}
@@ -494,8 +509,92 @@ func (c *ChainAPI) ChainGetTipSet(_ context.Context, key types.TipSetKey) (*type
 		if ts, err := c.HeaderStore.GetTipSet(key); err == nil {
 			return ts, nil
 		}
+		if r := c.headerBackfill(); r != nil {
+			if ts, err := r.LoadTipSet(ctx, key); err == nil {
+				return ts, nil
+			}
+		}
 	}
 	return nil, ErrTipSetNotFound
+}
+
+// headerBackfill returns the lazily built header backfill resolver for the
+// current header store, or nil when no store is wired.
+func (c *ChainAPI) headerBackfill() *backfill.Resolver {
+	c.hbfMu.Lock()
+	defer c.hbfMu.Unlock()
+	if c.HeaderStore == nil {
+		return nil
+	}
+	if c.hbf != nil && c.hbfStore == c.HeaderStore {
+		return c.hbf
+	}
+	if c.hbf != nil {
+		c.hbf.Close()
+	}
+	r := backfill.New(c.HeaderStore, c.HeaderBackfill)
+	r.SetBlockFetcher(func() backfill.BlockFetcher {
+		if bg := c.BlockGetter; bg != nil {
+			return bg
+		}
+		return nil
+	})
+	if c.hbfChain != nil {
+		r.SetChainFetcher(c.hbfChain)
+	}
+	c.hbf, c.hbfStore = r, c.HeaderStore
+	return r
+}
+
+// SetHeaderChainFetcher wires a ChainExchange client so header backfill
+// can pull verified runs of up to several hundred tipsets per request from
+// Filecoin peers instead of one tipset per content-addressed fetch.
+func (c *ChainAPI) SetHeaderChainFetcher(f backfill.ChainFetcher) {
+	c.hbfMu.Lock()
+	c.hbfChain = f
+	r := c.hbf
+	c.hbfMu.Unlock()
+	if r != nil {
+		r.SetChainFetcher(f)
+	}
+}
+
+// StartHeaderBackfill runs a low-priority background prefetch of the last
+// depth epochs of headers (newest first) after startDelay, so lookback
+// readers such as Curio's StorageGCMark are served locally from their
+// first run. No-op when no header store is wired or depth <= 0.
+func (c *ChainAPI) StartHeaderBackfill(ctx context.Context, depth abi.ChainEpoch, startDelay time.Duration) {
+	r := c.headerBackfill()
+	if r == nil || depth <= 0 {
+		return
+	}
+	go func() { _ = r.Prefetch(ctx, depth, startDelay) }()
+}
+
+// HeaderBackfillStats reports the header backfill counters (zero value
+// when no header store is wired).
+func (c *ChainAPI) HeaderBackfillStats() backfill.Stats {
+	if r := c.headerBackfill(); r != nil {
+		return r.Stats()
+	}
+	return backfill.Stats{}
+}
+
+// backfillStart resolves the tipset a by-height lookup walks from: the
+// store head for an empty key, otherwise the named tipset (from the store,
+// or fetched by CID). Returns nil when the store has no head yet.
+func (c *ChainAPI) backfillStart(ctx context.Context, r *backfill.Resolver, tsk types.TipSetKey) (*types.TipSet, error) {
+	if tsk.IsEmpty() {
+		return c.HeaderStore.Head(), nil
+	}
+	if head := c.HeaderStore.Head(); head != nil && head.Key() == tsk {
+		return head, nil
+	}
+	ts, err := r.LoadTipSet(ctx, tsk)
+	if err != nil {
+		return nil, fmt.Errorf("chain: load start tipset %s: %w", tsk, err)
+	}
+	return ts, nil
 }
 
 func tipsetKeyMatches(a, b types.TipSetKey) bool {
@@ -507,25 +606,55 @@ func tipsetKeyMatches(a, b types.TipSetKey) bool {
 
 // ChainGetTipSetByHeight walks back to the tipset at h. Tier 1 (#45).
 //
-// Phase 6: served from the persistent header store when configured.
-func (c *ChainAPI) ChainGetTipSetByHeight(_ context.Context, h abi.ChainEpoch, _ types.TipSetKey) (*types.TipSet, error) {
+// Served from the persistent header store when configured, with Lotus
+// semantics: tsk names the chain to walk (empty = head), and a null round
+// at h resolves to the first non-null tipset BELOW h. Heights older than
+// the store's coverage (a node younger than the lookback, e.g. Curio's
+// ~24h StorageGCMark finality lookup) are backfilled by walking verified
+// parent links back from the start tipset (chain/header/backfill), bounded
+// by a max lookback and a per-call timeout. A timeout returns a retryable
+// error, not "not found"; the walk keeps going and is persisted.
+func (c *ChainAPI) ChainGetTipSetByHeight(ctx context.Context, h abi.ChainEpoch, tsk types.TipSetKey) (*types.TipSet, error) {
 	if c.Trusted == nil {
 		return nil, errors.New("trusted root not initialised")
 	}
-	if h == c.Trusted.Epoch {
-		return synthesizeTipSet(c.Trusted), nil
-	}
 	if c.HeaderStore == nil {
+		if h == c.Trusted.Epoch {
+			return synthesizeTipSet(c.Trusted), nil
+		}
 		return nil, ErrNotImpl("ChainGetTipSetByHeight", "header store not configured")
 	}
-	return c.HeaderStore.GetTipSetByHeight(h)
+	r := c.headerBackfill()
+	from, err := c.backfillStart(ctx, r, tsk)
+	if err != nil {
+		return nil, err
+	}
+	if from == nil {
+		// No synced head yet: legacy behaviour.
+		if h == c.Trusted.Epoch {
+			return synthesizeTipSet(c.Trusted), nil
+		}
+		return c.HeaderStore.GetTipSetByHeight(h)
+	}
+	return r.TipSetByHeight(ctx, h, from)
 }
 
 // ChainGetTipSetAfterHeight returns the first tipset at or after h.
-// Tier 2 (#20).
+// Tier 2 (#20). Same walk as ChainGetTipSetByHeight, but a null round at h
+// resolves to the first non-null tipset ABOVE h (Lotus semantics).
 func (c *ChainAPI) ChainGetTipSetAfterHeight(ctx context.Context, h abi.ChainEpoch, key types.TipSetKey) (*types.TipSet, error) {
 	if c.Trusted == nil {
 		return nil, errors.New("trusted root not initialised")
+	}
+	if c.HeaderStore != nil {
+		r := c.headerBackfill()
+		from, err := c.backfillStart(ctx, r, key)
+		if err != nil {
+			return nil, err
+		}
+		if from != nil {
+			return r.TipSetAfterHeight(ctx, h, from)
+		}
 	}
 	if h <= c.Trusted.Epoch {
 		return synthesizeTipSet(c.Trusted), nil
@@ -537,10 +666,16 @@ func (c *ChainAPI) ChainGetTipSetAfterHeight(ctx context.Context, h abi.ChainEpo
 //
 // V1: we don't persist block headers other than the synthetic current
 // head. Phase 5 wires the header store lookup.
-func (c *ChainAPI) ChainGetBlock(_ context.Context, k cid.Cid) (*types.BlockHeader, error) {
+func (c *ChainAPI) ChainGetBlock(ctx context.Context, k cid.Cid) (*types.BlockHeader, error) {
 	if c.HeaderStore != nil {
 		if bh, err := c.HeaderStore.Get(k); err == nil {
 			return bh, nil
+		}
+		// Header backfill: fetch by CID (verified against k) and persist.
+		if r := c.headerBackfill(); r != nil {
+			if bh, err := r.LoadBlock(ctx, k); err == nil {
+				return bh, nil
+			}
 		}
 	}
 	return nil, ErrNotImpl("ChainGetBlock", "header-by-CID not in header store; configure a sync source or backfill")
