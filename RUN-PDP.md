@@ -71,7 +71,7 @@ You need:
 - **A Linux host** (the run used Ubuntu 26.04; the Lantern build was also checked in a clean Ubuntu 24.04 container). The walkthrough uses a systemd user service and the `docker0` bridge.
 - **git** and **curl**.
 - **A public hostname** for the PDP API (a domain you control; for the Cloudflare Tunnel option the domain must be on Cloudflare).
-- **tFIL** for the PDP wallet (at least about 6 tFIL, step 8) and, for the client test, a second wallet with tFIL and **USDFC** (step 11).
+- **tFIL** for the PDP wallet (at least about 11 tFIL: 5 FIL registry fee plus a 5 FIL minimum balance Curio's health check requires, step 8) and, for the client test, a second wallet with tFIL and **USDFC** (step 11).
 - **Node.js 20+** on any machine for the client test in step 11.
 
 ### 2.1 Docker Engine and Compose 2.24.4 or newer
@@ -307,7 +307,7 @@ In the GUI open **Storage** (or the storage step of the **PDP Guide**), enter `/
 
 In the GUI open **Wallets** (PDP wallet section) or the wallet step of the **PDP Guide** and click **Create**. Curio generates a secp256k1 key, stores it in Yugabyte and shows the private key **once**: save it somewhere safe before closing the dialog. Only one PDP key is allowed per Curio cluster. Note the `0x` address.
 
-**How much tFIL:** registering with FWSS costs a **5 FIL registration fee** charged by the service provider registry, plus gas, and every proving period costs a little gas. Fund **at least about 6 tFIL** on calibration and keep an eye on the balance. On mainnet the same fee applies in real FIL. The GUI's **Register Provider** button stays disabled until the wallet is funded.
+**How much tFIL:** registering with FWSS costs a **5 FIL registration fee** charged by the service provider registry, plus gas, and every proving period costs a little gas. **Curio also marks the provider unhealthy (`/pdp/ping` returns 503 "Balance for PDP wallet ... is below 5 FIL") whenever the PDP wallet holds less than 5 FIL**, and clients skip unhealthy providers. So fund **at least about 11 tFIL** (5 FIL fee, plus 5 FIL that must stay in the wallet, plus gas) and top up before the balance drops under 5 FIL. On mainnet the same applies in real FIL. The GUI's **Register Provider** button stays disabled until the wallet is funded.
 
 Fund the `0x` address with tFIL from any calibration faucet, for example:
 
@@ -476,6 +476,7 @@ Other problems you may run into:
 | Lantern service fails at boot with "cannot assign requested address" | `docker0` does not exist yet. | Nothing to do: systemd restarts Lantern until Docker is up. Check `systemctl --user status lantern` after boot. |
 | User service stops when you log out | Lingering not enabled. | `sudo loginctl enable-linger $USER`. |
 | **Register Provider** button is disabled | PDP key missing or not funded. | Step 8; wait until the balance shows in the PDP Guide. |
+| `/pdp/ping` returns 503 `Balance for PDP wallet ... is below 5 FIL` | Curio's health check wants at least 5 FIL in the PDP wallet. Proving continues, but clients treat the provider as unhealthy. | Top up the PDP wallet above 5 FIL (the check refreshes within a few minutes). |
 | Registration fails with `description is too long, max 128 characters allowed` | Registry limit on the description field. Nothing was sent, no fee charged. | Shorten the description to 128 characters or fewer and submit again. |
 | Unauthenticated `Filecoin.WalletList` returns `null` | Read methods need no token, and the node has no wallets. | Expected. Write, sign and admin methods return `missing permission` without the token. |
 
