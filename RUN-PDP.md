@@ -33,6 +33,8 @@ Curio-PDP needs a Lotus-compatible chain API (`FULLNODE_API_INFO`). The upstream
 
 ## Contents
 
+- [Already running Curio-PDP with Lotus? Switch it to Lantern](#already-running-curio-pdp-with-lotus-switch-it-to-lantern)
+
 1. [Hardware](#1-hardware)
 2. [Prerequisites: Docker and Lantern](#2-prerequisites-docker-and-lantern)
 3. [Initialise Lantern for calibration](#3-initialise-lantern-for-calibration)
@@ -50,6 +52,26 @@ Curio-PDP needs a Lotus-compatible chain API (`FULLNODE_API_INFO`). The upstream
 15. [Troubleshooting](#15-troubleshooting)
 
 Throughout, replace placeholders in angle brackets (`<like-this>`). `pdp.example.com` stands for your provider's public hostname.
+
+## Already running Curio-PDP with Lotus? Switch it to Lantern
+
+If you already operate a Curio-PDP provider (native install or Docker) backed by Lotus or Forest, you do not need the fresh Docker stack in steps 5 to 10. Keep your Curio, your registration, your PDP key and your data sets, and only replace the chain node:
+
+1. Install Lantern v1.10.1-rc1 or later ([BUILD.md](BUILD.md) or a release binary) on a host Curio can reach.
+2. `lantern init --network calibration --no-wallet` and `lantern node-type pdp --network calibration` (step 3). If an older Lantern data directory exists and the daemon reports "no trust anchor", run `lantern repair --network calibration`.
+3. Start the daemon. If Curio runs on the same host or container, loopback is enough and no `--allow-remote-rpc` is needed:
+   ```
+   lantern daemon --network calibration --listen 127.0.0.1:1234
+   ```
+   If Curio runs elsewhere (another container, the Docker bridge), bind to an address Curio can reach and add `--allow-remote-rpc` (step 4 explains the security model).
+4. `lantern info --network calibration` prints `FULLNODE_API_INFO=<token>:/ip4/<ip>/tcp/<port>/http`.
+5. Put **only** that value in Curio's `FULLNODE_API_INFO` (for example `/etc/curio.env` or your systemd unit) and restart Curio. Do not list Lotus as well: with several entries Curio fails over between them, and you are no longer testing Lantern. Lotus can keep running; Curio just should not know about it.
+6. Check the Curio GUI **Chain** page: **RPC nodes 1/1**, the Lantern version, in sync. Then wait for your next proving window and confirm `provePossession` txs land (step 12).
+
+Notes:
+- **Lantern holds no keys.** Curio-PDP keeps the PDP key in its own database and sends Lantern only signed transactions, so nothing needs importing into Lantern. Check the key is listed on Curio's PDP page.
+- For about the first 24 hours a fresh Lantern only has block headers from its own start, so Curio's `StorageGCMark` task may log `get finality tipset: header/store: not found`. It is storage garbage collection, not proving, and clears once the node is older than a day (and is fixed in the next release).
+
 
 ## 1. Hardware
 
