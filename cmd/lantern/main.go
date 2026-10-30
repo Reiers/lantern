@@ -59,6 +59,7 @@ import (
 	"github.com/Reiers/lantern/chain/f3/subscriber"
 	"github.com/Reiers/lantern/chain/fullvalidate"
 	"github.com/Reiers/lantern/chain/headcheck"
+	"github.com/Reiers/lantern/chain/header/backfill"
 	hstore "github.com/Reiers/lantern/chain/header/store"
 	headnotify "github.com/Reiers/lantern/chain/headnotify"
 	"github.com/Reiers/lantern/chain/trustedroot"
@@ -1031,6 +1032,9 @@ func cmdDaemon(args []string) error {
 	hsPath := fs.String("header-store", "", "Header store BadgerDB path (default: <data-dir>/<network>/headerstore)")
 	syncInterval := fs.Duration("sync-interval", 6*time.Second, "Header-store sync poll interval")
 	devnetHeadPollInterval := fs.Duration("devnet-head-poll-interval", 0, "Devnet-only: override the header-store poll interval on devnet (default 0 = auto: use BlockDelaySecs from devnet-config, or 4s if unavailable). Fixes lantern#123 findings 8+9: a single-node docker devnet can't form a gossipsub mesh, so head updates come only from RPC polling; the mainnet-oriented 30s cadence lags a 4s-cadence devnet by ~7x block time. Ignored on mainnet/calibration.")
+	hbfLookback := fs.Int64("header-backfill-lookback", int64(backfill.DefaultMaxLookback), "Max epochs below the start tipset that ChainGetTipSetByHeight / ChainGetTipSetAfterHeight will backfill missing headers for (verified parent-link walk). Lookups deeper than this return an error.")
+	hbfTimeout := fs.Duration("header-backfill-timeout", backfill.DefaultCallTimeout, "Per-call budget for a header backfill lookup. On timeout the RPC returns a retryable error while the walk continues in the background.")
+	hbfStartup := fs.Int64("header-backfill-startup", -1, "Epochs of headers to prefetch in the background at startup (newest first) so lookback readers such as Curio's StorageGCMark work on a fresh node. -1 = tier default (pdp/full ~1 day, light off), 0 = skip.")
 	staleResetThreshold := fs.Int64("stale-reset-threshold", 2880, "Epochs behind live head past which a persisted header store re-anchors near live head instead of backfilling (#51). 0 disables. Chain state only; keys are never touched.")
 	notifyBufSize := fs.Int("notify-buf", headnotify.DefaultBufferSize, "ChainNotify per-subscriber buffer size")
 	p2pListen := fs.String("p2p-listen", "/ip4/0.0.0.0/tcp/0,/ip4/0.0.0.0/udp/0/quic-v1", "libp2p listen multiaddrs (comma-separated). Empty disables the libp2p host.")
@@ -1523,6 +1527,10 @@ func cmdDaemon(args []string) error {
 			}
 		}
 		defer store.Close()
+		chainAPI.HeaderBackfill = backfill.Config{
+			MaxLookback: abi.ChainEpoch(*hbfLookback),
+			CallTimeout: *hbfTimeout,
+		}
 		chainAPI.HeaderStore = store
 		// #87: follow the live verified head for actor-state reads instead of
 		// staying pinned to the boot trusted-root. Without this the accessor
@@ -1811,6 +1819,9 @@ func cmdDaemon(args []string) error {
 			return out
 		})
 		fmt.Printf("  chainxchg: /fil/chain/xchg/0.0.1 active (responder + peer-fetch client, #91)\n")
+		// Header backfill (ChainGetTipSetByHeight below store coverage)
+		// pulls verified header runs over the same protocol.
+		chainAPI.SetHeaderChainFetcher(xchgClient)
 
 		// Issue #1: subscribe to /fil/blocks/<network> on gossipsub so
 		// new heads land in the header store within ~1-3s of network
@@ -2087,6 +2098,27 @@ func cmdDaemon(args []string) error {
 				return fmt.Errorf("bridge-off seed: set store head: %w", serr)
 			}
 			fmt.Printf("  seed:     store head seeded from anchor @ %d (%d blocks) via chainxchg peers - gateway-free, Glif-free (#91/#109)\n", tr.Epoch, len(seedBlocks))
+		}
+	}
+
+	// Header backfill prefetch: on a fresh node the header store only covers
+	// the time since boot, so a lookback reader (Curio's StorageGCMark asks
+	// for head - ~2891) would wait on an on-demand walk. Prefetch the last
+	// ~day in the background, newest first, once peers have had a moment to
+	// connect. Lookups work without it; this just makes the first one local.
+	if store != nil {
+		depth := abi.ChainEpoch(*hbfStartup)
+		if depth < 0 {
+			depth = 0
+			if profile.UsesPersistentCache() {
+				depth = backfill.DefaultStartupDepth
+			}
+		}
+		if depth > 0 {
+			chainAPI.StartHeaderBackfill(ctx, depth, 20*time.Second)
+			fmt.Printf("  header backfill: prefetching last %d epochs in the background (lookback limit %d, per-call budget %s)\n", depth, *hbfLookback, hbfTimeout.String())
+		} else {
+			fmt.Printf("  header backfill: on demand only (lookback limit %d, per-call budget %s)\n", *hbfLookback, hbfTimeout.String())
 		}
 	}
 
