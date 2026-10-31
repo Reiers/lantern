@@ -76,6 +76,37 @@ type Store struct {
 	// DB (nil-deref in memTable.IncrRef). Fixes #114.
 	spawnMu sync.Mutex
 	bg      sync.WaitGroup
+
+	// touchMu/touched coalesce LRU bumps: a block read many times within
+	// touchInterval gets ONE Badger write, not one per read. A Curio-PDP
+	// read burst re-reads the same state-tree / contract-storage nodes
+	// hundreds of times per head, and each bump is a Badger update
+	// transaction plus a goroutine. lastAccess only orders eviction
+	// candidates, so minute granularity loses nothing.
+	touchMu sync.Mutex
+	touched map[string]int64 // CID key -> unix seconds of last bump
+}
+
+// touchInterval is the minimum spacing between LRU bumps of one block.
+const touchInterval = 60 // seconds
+
+// maxTouched bounds the coalescing map; it is simply reset when full.
+const maxTouched = 1 << 17
+
+// shouldTouch reports whether c's lastAccess should be bumped now.
+func (s *Store) shouldTouch(c cid.Cid) bool {
+	now := time.Now().Unix()
+	k := c.KeyString()
+	s.touchMu.Lock()
+	defer s.touchMu.Unlock()
+	if last, ok := s.touched[k]; ok && now-last < touchInterval {
+		return false
+	}
+	if s.touched == nil || len(s.touched) >= maxTouched {
+		s.touched = make(map[string]int64)
+	}
+	s.touched[k] = now
+	return true
 }
 
 // Options configures the persistent cache.
@@ -167,7 +198,10 @@ func (s *Store) Get(_ context.Context, c cid.Cid) ([]byte, error) {
 	s.hits.Add(1)
 	// Touch lastAccess asynchronously; never block a read on the LRU bump.
 	// spawnBG gates against a concurrent Close so touch never runs against
-	// a torn-down DB (see #114).
+	// a torn-down DB (see #114). shouldTouch coalesces repeat reads.
+	if !s.shouldTouch(c) {
+		return out, nil
+	}
 	if done := s.spawnBG(); done != nil {
 		go func() {
 			defer done()
