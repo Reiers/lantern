@@ -1,6 +1,10 @@
 package evm
 
-import "github.com/holiman/uint256"
+import (
+	"math/big"
+
+	"github.com/holiman/uint256"
+)
 
 // overlay is an ephemeral, in-memory state diff used during an eth_call.
 //
@@ -31,6 +35,11 @@ import "github.com/holiman/uint256"
 // its own storage and transient writes, exactly as the FVM discards the
 // callee actor's state changes on a failed send.
 //
+// It also journals balance moves made by value-carrying calls (the
+// top-level call value and CALL{value} into EVM contracts or accounts):
+// a signed attoFIL delta per address on top of the verified backend
+// balance. A reverted sub-call rolls its transfers back with its storage.
+//
 // CREATE/CREATE2/SELFDESTRUCT remain unsupported (fault with
 // ErrUnsupported): they need contract-creation machinery out of scope here.
 type overlay struct {
@@ -38,7 +47,9 @@ type overlay struct {
 	storage map[Address]map[uint256.Int]uint256.Int
 	// transient maps contract address -> slot -> value for TSTORE writes.
 	transient map[Address]map[uint256.Int]uint256.Int
-	journal   []journalEntry
+	// balances maps address -> signed attoFIL delta from value transfers.
+	balances map[Address]*big.Int
+	journal  []journalEntry
 }
 
 type journalEntry struct {
@@ -47,13 +58,45 @@ type journalEntry struct {
 	key       uint256.Int
 	prev      uint256.Int
 	existed   bool
+	// balance marks a balance-delta entry; prevDelta is the delta before
+	// the write (nil = none).
+	balance   bool
+	prevDelta *big.Int
 }
 
 func newOverlay() *overlay {
 	return &overlay{
 		storage:   make(map[Address]map[uint256.Int]uint256.Int),
 		transient: make(map[Address]map[uint256.Int]uint256.Int),
+		balances:  make(map[Address]*big.Int),
 	}
+}
+
+// balanceDelta returns the net attoFIL moved into (positive) or out of
+// (negative) addr during this call. Never nil.
+func (o *overlay) balanceDelta(addr Address) *big.Int {
+	if o == nil {
+		return new(big.Int)
+	}
+	if d, ok := o.balances[addr]; ok {
+		return new(big.Int).Set(d)
+	}
+	return new(big.Int)
+}
+
+// addBalance adds delta (may be negative) to addr's balance delta.
+func (o *overlay) addBalance(addr Address, delta *big.Int) {
+	if o == nil {
+		return
+	}
+	prev, ok := o.balances[addr]
+	var prevCopy *big.Int
+	if ok {
+		prevCopy = new(big.Int).Set(prev)
+	}
+	o.journal = append(o.journal, journalEntry{balance: true, addr: addr, prevDelta: prevCopy})
+	next := new(big.Int).Add(o.balanceDelta(addr), delta)
+	o.balances[addr] = next
 }
 
 // get returns (value, true) if slot was written in this overlay.
@@ -119,6 +162,14 @@ func (o *overlay) revert(mark int) {
 	}
 	for i := len(o.journal) - 1; i >= mark; i-- {
 		e := o.journal[i]
+		if e.balance {
+			if e.prevDelta == nil {
+				delete(o.balances, e.addr)
+			} else {
+				o.balances[e.addr] = e.prevDelta
+			}
+			continue
+		}
 		maps := o.storage
 		if e.transient {
 			maps = o.transient

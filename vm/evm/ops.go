@@ -420,7 +420,7 @@ func (ip *interpreter) opBalance() error {
 	if err != nil {
 		return err
 	}
-	bal, err := ip.b.GetBalance(wordToAddress(a))
+	bal, err := ip.cs.balanceOf(wordToAddress(a))
 	if err != nil {
 		return err
 	}
@@ -640,8 +640,11 @@ func (ip *interpreter) opReturnData() ([]byte, error) {
 //     empty return data;
 //   - DELEGATECALL into a native actor fails (pushes 0); CALL into a
 //     native actor is not modeled (fault);
-//   - CALL with a non-zero value is not modeled (fault): Lantern does not
-//     track balance moves.
+//   - CALL with a non-zero value moves the value on the call overlay when
+//     the target is an EVM contract or an account-type actor (EOA,
+//     placeholder, burnt funds actor, a new f4 address); value to a native
+//     actor, a precompile or an unknown ID address, or more value than the
+//     contract holds, is not modeled (fault).
 func (ip *interpreter) opCall(op OpCode) error {
 	if _, err := ip.stack.pop(); err != nil { // gas (not metered locally)
 		return err
@@ -672,11 +675,8 @@ func (ip *interpreter) opCall(op OpCode) error {
 	if err != nil {
 		return err
 	}
-	if !value.IsZero() {
-		if ip.readonly {
-			return ip.errReadOnly(op)
-		}
-		return fmt.Errorf("%w: CALL with value transfer at pc %d (balance moves are not modeled locally)", ErrUnsupported, ip.pc)
+	if !value.IsZero() && ip.readonly {
+		return ip.errReadOnly(op)
 	}
 
 	io, is, err := ip.mem.region(inOff, inSize)
@@ -691,14 +691,33 @@ func (ip *interpreter) opCall(op OpCode) error {
 		ret     []byte
 	)
 	if isReservedPrecompileAddress(to) {
+		if !value.IsZero() {
+			return fmt.Errorf("%w: CALL with value to precompile %x at pc %d is not modeled locally", ErrUnsupported, to, ip.pc)
+		}
 		ret, success, err = ip.callPrecompile(to, callInput)
 		if err != nil {
 			return err
 		}
+		ip.subTrace = nil
 	} else {
 		kind, _, err := ip.actorKind(to)
 		if err != nil {
 			return err
+		}
+		if !value.IsZero() {
+			switch {
+			case kind == ActorNative:
+				return fmt.Errorf("%w: CALL with value into native actor %x at pc %d is not modeled locally", ErrUnsupported, to, ip.pc)
+			case kind == ActorNotFound && isMaskedIDAddress(to):
+				return fmt.Errorf("%w: CALL with value to unknown ID address %x at pc %d is not modeled locally", ErrUnsupported, to, ip.pc)
+			}
+			bal, err := ip.cs.balanceOf(ip.self)
+			if err != nil {
+				return err
+			}
+			if bal.Lt(&value) {
+				return fmt.Errorf("%w: CALL value %s exceeds contract balance %s at pc %d (failed send not modeled locally)", ErrUnsupported, value.Dec(), bal.Dec(), ip.pc)
+			}
 		}
 		switch kind {
 		case ActorEVM:
@@ -708,9 +727,12 @@ func (ip *interpreter) opCall(op OpCode) error {
 				// Run the target's code in our own context: same caller,
 				// value, storage and read-only flag.
 				f = frame{caller: ip.caller, self: ip.self, codeAddr: to, input: callInput,
-					value: ip.value, readonly: ip.readonly, depth: ip.depth + 1}
+					value: ip.value, readonly: ip.readonly, delegate: true, depth: ip.depth + 1}
 			} else {
-				f = frame{caller: ip.self, self: to, codeAddr: to, input: callInput,
+				if err := ip.cs.transfer(ip.self, to, value); err != nil {
+					return fmt.Errorf("%w: CALL value transfer at pc %d: %v", ErrUnsupported, ip.pc, err)
+				}
+				f = frame{caller: ip.self, self: to, codeAddr: to, input: callInput, value: value,
 					readonly: ip.readonly || op == STATICCALL, depth: ip.depth + 1}
 			}
 			sub, err := ip.cs.run(f)
@@ -719,11 +741,21 @@ func (ip *interpreter) opCall(op OpCode) error {
 			}
 			if sub.Reverted {
 				ip.ov.revert(mark)
+				ip.subTrace = sub.Trace
+			} else {
+				ip.subTrace = nil
 			}
 			success, ret = !sub.Reverted, sub.Return
 		case ActorAccount, ActorNotFound:
+			// FEVM sends METHOD_SEND to account-type / absent actors: the
+			// value moves (an absent f4 address becomes a placeholder).
+			if err := ip.cs.transfer(ip.self, to, value); err != nil {
+				return fmt.Errorf("%w: CALL value transfer at pc %d: %v", ErrUnsupported, ip.pc, err)
+			}
 			success = true
+			ip.subTrace = nil
 		case ActorNative:
+			ip.subTrace = nil
 			if op != DELEGATECALL {
 				return fmt.Errorf("%w: %s into native actor %x is not modeled locally", ErrUnsupported, op, to)
 			}
@@ -745,6 +777,20 @@ func (ip *interpreter) opCall(op OpCode) error {
 }
 
 // ---- helpers ----
+
+// isMaskedIDAddress reports whether a is an ID address in eth form
+// (0xff || 11 zero bytes || be64 actor id).
+func isMaskedIDAddress(a Address) bool {
+	if a[0] != 0xff {
+		return false
+	}
+	for _, b := range a[1:12] {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
+}
 
 func boolWord(b bool) uint256.Int {
 	var v uint256.Int
