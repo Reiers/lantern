@@ -96,6 +96,11 @@ type ChainAPI struct {
 	localEthCallServed         uint64
 	localEthCallBridgeFallback uint64
 
+	// ethPerfState holds the shared eth_call burst caches (ethcall_perf.go),
+	// built lazily by ethPerf().
+	ethPerfMu    sync.Mutex
+	ethPerfState *ethCallPerf
+
 	// sentTxIdx maps eth tx hashes we broadcast (eth_sendRawTransaction,
 	// lantern#45 Stage 4) to their Filecoin message CIDs, so the receipt
 	// lookup (Stage 5) can resolve them locally. Lazily initialised via
