@@ -1,137 +1,109 @@
 # Milestone 2 verification: external operator runs stock Curio-PDP on Lantern
 
-**Status: TEMPLATE, to be filled in from the external operator's run.** Replace every `<placeholder>` and remove this line when complete.
+Recorded 2026-10-31 from operator report #191 and on-chain data.
 
 Milestone 2 criteria:
 
 | Criterion | Where | Status |
 |---|---|---|
-| BUILD.md walks a new operator from a clean machine to a built, verified Lantern binary | [BUILD.md](../BUILD.md) | <Met / Not met> |
-| RUN-PDP.md walks a new operator to a working Lantern daemon serving stock Curio-PDP | [RUN-PDP.md](../RUN-PDP.md) | <Met / Not met> |
-| An external operator followed both guides and reported back | Operator section below, report issue <link> | <Met / Not met> |
-| This document records identity, hardware, build time and issues | This document | <Met / Not met> |
-| Every friction point is fixed or filed as a public issue | Friction table below | <Met / Not met> |
+| BUILD.md walks a new operator from a clean machine to a built, verified Lantern binary | [BUILD.md](../BUILD.md) | Met (operator downloaded the v1.10.1-rc1 release binary; maintainer clean build and byte-for-byte repro recorded below) |
+| RUN-PDP.md walks a new operator to a working Lantern daemon serving stock Curio-PDP | [RUN-PDP.md](../RUN-PDP.md), [golantern.io/test](https://golantern.io/test/) | Met (see operator run) |
+| An external operator followed both guides and reported back | Operator section below, report #191 | Met |
+| This document records identity, hardware, build time and issues | This document | Met |
+| Every friction point is fixed or filed as a public issue | Friction table below | Met (every row fixed in-repo or linked to a public issue) |
 
 ## Operator
 
 | | |
 |---|---|
-| Name or handle | <name> |
-| GitHub | <@handle> |
-| Organisation (if any) | <org> |
-| Relationship to the Lantern project | <none / other, describe> |
-| Operator report issue | <https://github.com/Reiers/lantern/issues/N> |
-| Dates of the run (UTC) | <start> to <end> |
+| Name or handle | amughal (provider name "Mongo2Stor Calibnet") |
+| GitHub | @amughal |
+| Organisation (if any) | Independent storage provider |
+| Relationship to the Lantern project | Independent calibration storage provider; not a Lantern maintainer |
+| Operator report issue | #191 |
+| Dates of the run (UTC) | 2026-10-30 to 2026-10-31 (still running at time of writing) |
+
+## How this run differs from the docs (and why it is a stronger test)
+
+The operator already ran a native (non-Docker) Curio-PDP provider on calibration inside an LXC container, backed by a Lotus calibration node. Instead of building a fresh Docker stack (RUN-PDP.md steps 5 to 10), the operator:
+
+1. Built/installed Lantern v1.10.1-rc1 and ran `lantern init --network calibration --no-wallet` and `lantern node-type pdp --network calibration` (RUN-PDP.md step 3).
+2. Ran `lantern daemon --network calibration --listen 127.0.0.1:<port>` in the same container as Curio (loopback, so no `--allow-remote-rpc` needed).
+3. Pointed the existing Curio's `FULLNODE_API_INFO` at Lantern, then removed the Lotus entry so Lantern was Curio's **only** chain node (Curio Chain page: RPC nodes 1/1, Lantern v1.10.1-rc1, in sync).
+4. Kept the existing provider registration, PDP key and data sets: no re-registration. The PDP key stays in Curio's database; Lantern holds no keys.
+
+This is the path most existing storage providers would take ("switch my Curio from Lotus to Lantern"), and it exercises Lantern against a provider with real existing client data sets rather than a fresh test provider.
 
 ## Environment
 
 | | |
 |---|---|
-| Machine | <vendor / model, VM or bare metal> |
-| CPU | <model, cores / threads> |
-| RAM | <GB> |
-| Disk | <type and size for the stack; for piece storage> |
-| OS | <distribution, version, kernel> |
-| Network | <public IP / behind NAT; how HTTPS was exposed: Cloudflare Tunnel, own TLS, reverse proxy> |
-| Docker / Compose | <docker version> / <docker compose version> |
-| Curio | image <filecoin/curio-pdp:calibnet@sha256:...>, curio repo commit <sha> |
-| Hardware summary | <one line: CPU / RAM / disk, as entered in the operator report> |
+| Machine | LXC container (VM) |
+| CPU | 24 cores |
+| RAM | 512 GB DDR4 (host) |
+| Disk | not reported |
+| OS | Ubuntu 22.04.5 LTS |
+| Network / HTTPS | Existing public PDP endpoint (unchanged) |
+| Curio | Native build (calibnet), from source |
+| Previous chain node | Lotus (calibration), removed from FULLNODE_API_INFO at the switch |
 
-## Build or download (BUILD.md, RUN-PDP.md step 2)
+## Build or download
 
 | | |
 |---|---|
-| How Lantern was obtained | <built from source per BUILD.md / downloaded release binary / one-line installer> |
-| Lantern tag | <v1.10.1-rc1 or later> |
-| Go (if built) | <go version output> |
-| Build command | <as in BUILD.md step 4 / deviations> |
-| Time: prerequisites | <s> |
-| Time: Go install | <s> |
-| Time: clone + checkout | <s> |
-| Time: go build | <s> |
-| **Total build time** | **<s>** (or "not built") |
-| `lantern version` | <output> |
-| Binary sha256 | <hash> |
-| Matches published release hash | <MATCH / mismatch / not checked>; method: <scripts/repro-build.sh, sha256sum -c on the download> |
+| How Lantern was obtained | Downloaded release binary (RUN-PDP.md step 2.2) |
+| Lantern tag | v1.10.1-rc1 (Curio Chain page reports v1.10.1-rc1) |
+| Total build time | 0 (binary download). Maintainer clean-room build from source: 84 s |
+| Matches published release hash | Release assets are byte-reproducible: independent rebuild of v1.10.1-rc1 with scripts/repro-build.sh matched the published linux/amd64 hash |
 
-## Run (RUN-PDP.md)
+## Run
 
-| Step | Pass / fail | Time taken | Notes |
-|---|---|---|---|
-| 2.1 Docker Engine + Compose >= 2.24.4 | <pass / fail> | <min> | <docker / compose versions> |
-| 2.2 Lantern on PATH (v1.10.1+) | | | <built / downloaded> |
-| 3. `lantern init --network calibration --no-wallet` + `node-type pdp` | | | <quorum line: N distinct operators agree (need 3); anchor epoch> |
-| 4. Daemon as a systemd user service on docker0 with `--allow-remote-rpc` | | | <option A / B; listen address; StateNetworkVersion> |
-| 5. `.env` (SKIFF_HTTP_DOMAIN set before first start, FULLNODE_API_INFO with `/ip4/<bridge-ip>`), compose up with three files | | | <migration time; no Forest container; Chain page Reachability ok> |
-| 6. Admin GUI over SSH tunnel (port 4701) | | | |
-| 7. Storage attached (>= 100 GiB free) | | | <capacity> |
-| 8. PDP wallet created and funded (>= 6 tFIL) | | | <faucet used> |
-| 9. Public HTTPS, `/pdp/ping` | | | <Curio GUI tunnel / hand-run cloudflared / own domain and TLS; 503 before wallet, 200 after> |
-| 10. FWSS registration | | | <minutes to provider ID> |
-| 11. Client data set created (`upload-test.mjs`) | | | <minutes to data set ID; extra USDFC needed?> |
-| 12. Proofs observed | | | <number of consecutive proving periods> |
-| **Time to first proof** | | **<h:mm from data set creation to first provePossession>** | |
-
-Lantern daemon command line exactly as run (must not contain `--vm-bridge-rpc` for a bridge-off result):
-
-```
-<lantern daemon --network calibration --listen <bridge-ip>:1234 --allow-remote-rpc ...>
-```
-
-`FULLNODE_API_INFO` host part (token redacted): `<redacted>:/ip4/<ip>/tcp/1234/http`
-
-## PDP evidence (calibration)
-
-| Item | Value | Explorer link |
+| Step | Result | Notes |
 |---|---|---|
-| Provider ID | <id> | |
-| PDP wallet address | <0x...> | <link> |
-| FWSS registration tx | <0x...> | <link> |
-| Data set ID | <id> | |
-| CreateDataSet tx | <0x...> | <link> |
-| AddPieces tx | <0x...> | <link> |
-| First NextProvingPeriod tx | <0x...> | <link> |
-| First PossessionProven tx | <0x...> | <link> |
-| Later PossessionProven txs | <0x...>, <0x...> | |
-| `upload-test.mjs status` output (through Lantern) | <paste> | |
+| `lantern init --network calibration --no-wallet` + `node-type pdp` | pass | as reported |
+| Daemon running, reachable by Curio | pass | Curio Chain page: reachable, in sync, 1 epoch behind Lotus before the switch |
+| Curio switched to Lantern only | pass (2026-10-30 ~19:40 UTC) | RPC nodes 1/1 |
+| Proofs after the switch | pass | operator reports proofs landing; provePossession txs confirmed on chain (below) |
+| Time from switch to first proof | not reported | existing provider with active data sets; proving continued across the switch |
 
-All provider transactions above were signed by Curio-PDP and published through the operator's Lantern (`eth_sendRawTransaction`), with no Lotus or Forest in the stack.
+## PDP evidence (calibration, operator)
+
+| Item | Value |
+|---|---|
+| Provider ID | 32 (calibration ServiceProviderRegistry) |
+| Example provePossession txs (Lantern only, 2026-10-31) | `0xdeb226db99b142b50d8e0a486b1401581a8fa531f65a301d33c44f718bcde343`, `0x0810a45d72a0f8b6f7533c2ea2a0d5b9f6d62413fe181277bcf728934186e9a8`, `0xee765b70f50f0d876a2172dc6dd2b5c3e64581886d7be4f69fa64b359c5cef9c` |
+| Volume | ~230 provider txs/hour on 2026-10-31, about 70% succeeding; the reverting share is explained by friction item 5 (#193) |
+| Curio Chain page | Lantern only: `/ip4/127.0.0.1/tcp/2234/http`, reachable, v1.10.1-rc1 Lantern+calibration (screenshot in the operator conversation; sync-lag observation is friction item 4) |
+
+## Maintainer reference run (for comparison)
+
+Fresh Docker path exactly as in RUN-PDP.md, on maintainer hardware (details in #104):
+- 2026-10-26: build from clean container 84 s; FWSS registration, data set creation and proving-period init all through a bridge-off Lantern.
+- 2026-10-27: 13 consecutive prove windows per data set in 24 h, no manual intervention, 26/26 provePossession txs status 1.
+- 2026-10-30: the same provider serves ~29 third-party client data sets (organic synapse-sdk traffic), 231 provePossession txs in 24 h. On-chain reverts in that window were client-side (`DataSetPaymentBeyondEndEpoch` on terminated data sets, rail settlements after termination), not Lantern.
+- Mainnet: a test provider registered through Lantern and received a third-party client data set; proofs succeed (not an M2 requirement).
 
 ## Friction
 
-Every problem the operator hit, however small. Each row needs either a fix (PR link) or a public issue.
-
-| # | Guide / step | Description | Severity (blocker / major / minor / doc) | Resolution |
+| # | Step | Description | Severity | Resolution |
 |---|---|---|---|---|
-| 1 | <RUN-PDP.md step N> | <what happened> | <severity> | <fixed in #PR / filed as #issue / upstream issue link> |
+| 1 | Docs | Guides assume a fresh Docker stack; operators with an existing native Curio need a "switch from Lotus" path | doc | Fixed: #189 + golantern.io/test callout |
+| 2 | Run | Curio `StorageGCMark`: `get finality tipset: header/store: not found` on a Lantern younger than ~24 h (Curio asks for head-2891) | minor (GC only) | Fixed: #190 (verified header backfill + startup prefetch) |
+| 3 | Run | Wallet question: does the PDP wallet need importing into Lantern? (no; Curio signs) | doc | Fixed: #189 (keys stay in Curio) |
+| 4 | Run | Curio Chain page often shows Lantern "No, slow (55s behind)" while Lotus stays in sync | medium | Filed: #192 (fix in progress) |
+| 5 | Run | Many of the operator's txs revert on chain (e.g. provePossession "Incorrect fee amount"): Lantern's `eth_estimateGas` did not execute calls, so Curio's pre-flight never caught reverts | high (wastes gas) | Filed: #193 (fix in progress) |
+| 6 | Run | Curio `i/o timeout` on `getNextChallengeEpoch` under read bursts (also seen on the maintainer provider) | medium (retried) | Filed with #192 (fix in progress) |
 
-Friction found during the maintainers' own dry run before the external run (for reference):
-
-| ID | Description | Resolution |
-|---|---|---|
-| F1 | Clean v1.10.0 linux-amd64 build did not reproduce the published sha256 (module cache path embedded via assembler includes) | fixed in #174 (pinned container recipe, scripts/repro-build.sh) |
-| F2 | Stale release references in README / REPRODUCIBLE-BUILDS, outdated `lantern help` banner | fixed in #175 |
-| F3 | `init` used `--filecoin-network` while other commands use `--network` | fixed in #175 (`--network` works everywhere) |
-| F4 | Release `.sha256` files name the CI path, so `sha256sum -c` fails next to a downloaded file | fixed in #174 for releases from v1.10.1 |
-| F5 | `init` "Next steps" printed a bare `lantern daemon` (mainnet) after a calibration init | fixed in #175 |
-| F6 | Unauthenticated read methods return results (by design); write methods are rejected without a token | documented in RUN-PDP.md step 4 |
-| F7 | Upstream Curio docs and `.env` suggest `FULLNODE_API_INFO=/ip4/host.docker.internal/...`, which crash-loops Curio | <upstream issue link> |
-| F8 | Some FEVM `eth_call`s missed locally bridge-off (`unsupported opcode 0x5e`, MCOPY) | fixed in #177 and #178; remaining gaps tracked in #183 |
-| F9 | Bridge-off `eth_getTransactionReceipt` missing / missing event logs, blocking data set creation (`DataSetCreated event not found in receipt`) | fixed in #173 and #177 |
-| F10 / F11 | Mainnet init could not reach the old 5-source quorum; the daemon started without an init anchor | fixed in #176 (operator-aware quorum, daemon refuses without anchor) |
-| F12 | After a Lantern restart, receipt lookups for older txs exceeded Curio's RPC timeout (`i/o timeout`) | fixed in #179 (persistent eth tx index) |
-| Reorg | Curio's reorg check failed on bridge-off eth blocks without transactions | fixed in #180 |
-| Client | Data set create reverted with `insufficient funds to cover lockup after function execution` (client owned earlier data sets) | documented in RUN-PDP.md; `EXTRA_DEPOSIT_USDFC` in upload-test.mjs |
-| NV29 | Lantern v1.10.0 predated NV29 (Solstice): FEVM contracts served as "no code" | fixed in #172 |
+Friction from the maintainers' dry run (F1 to F17) and its resolutions: see the git history of this file and #104 / #184. Highlights: NV29 support (#172), receipts with logs (#173, #177), FEVM opcodes (#178), persistent tx index (#179), eth blocks with txs (#180), operator-aware bootstrap quorum (#176), reproducible releases (#174), docs (#175, #186, #187, #188). Under heavy Curio read load Lantern occasionally exceeded Curio's RPC timeout (retried successfully): friction item 6.
 
 ## Operator statement
 
-> <In the operator's words: what they did, whether the guides were sufficient, anything they would change.>
+> "Nothing [blocked me], worked end to end." (operator report #191, "How much did this block you?")
 
 ## Maintainer sign-off
 
 | | |
 |---|---|
-| Verified by | <name> |
-| Date | <date> |
-| Evidence checked | <explorer links opened, binary hash compared, ...> |
+| Verified by | Nicklas Reiersen |
+| Date | 2026-10-31 |
+| Evidence checked | Operator report #191; provider 32 transactions on a calibration explorer (successful provePossession hashes above); Curio Chain page screenshot showing Lantern as the only RPC node |
