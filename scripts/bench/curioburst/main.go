@@ -191,6 +191,63 @@ func pickDataSets(ctx context.Context, ref *filRPC, n int) ([]uint64, error) {
 
 type tipsetLite struct {
 	Height int64 `json:"Height"`
+	Blocks []struct {
+		Timestamp int64 `json:"Timestamp"`
+	} `json:"Blocks"`
+}
+
+// minTS is the tipset timestamp (all blocks of a tipset share it).
+func (t tipsetLite) minTS() int64 {
+	var m int64
+	for i, b := range t.Blocks {
+		if i == 0 || b.Timestamp < m {
+			m = b.Timestamp
+		}
+	}
+	return m
+}
+
+// lagSample is one ChainHead age observation.
+type lagSample struct {
+	node, ref   float64 // seconds between wall clock and head timestamp
+	epochBehind int64   // ref height - node height
+}
+
+// sampleHeadLag polls ChainHead on both nodes every interval until stop
+// closes. Curio's Chain page calls a node "slow" when
+// now - head.MinTimestamp() >= 1.5 epochs (45 s) and "behind" at >= 5
+// epochs (web/api/webrpc/sync_state.go), so the wall-clock age of the head
+// is exactly what an operator sees.
+func sampleHeadLag(ctx context.Context, node, ref *filRPC, every time.Duration, stop <-chan struct{}) []lagSample {
+	var out []lagSample
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return out
+		case <-t.C:
+		}
+		var a, b tipsetLite
+		cctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		errA := node.call(cctx, "Filecoin.ChainHead", []any{}, &a)
+		errB := ref.call(cctx, "Filecoin.ChainHead", []any{}, &b)
+		cancel()
+		if errA != nil || errB != nil || len(a.Blocks) == 0 || len(b.Blocks) == 0 {
+			continue
+		}
+		now := float64(time.Now().UnixMilli()) / 1000
+		out = append(out, lagSample{node: now - float64(a.minTS()), ref: now - float64(b.minTS()), epochBehind: b.Height - a.Height})
+	}
+}
+
+func pctF(v []float64, p float64) float64 {
+	if len(v) == 0 {
+		return 0
+	}
+	c := append([]float64(nil), v...)
+	sort.Float64s(c)
+	return c[int(float64(len(c)-1)*p)]
 }
 
 type row struct {
@@ -215,6 +272,7 @@ func main() {
 	every := flag.Duration("every", 0, "fixed burst interval instead of head-triggered (0 = on new head)")
 	verify := flag.Bool("verify", true, "compare per-set view results against -ref at the end")
 	jsonOut := flag.String("json", "", "write the summary as JSON to this path")
+	headLag := flag.Duration("headlag", 5*time.Second, "sample node and reference ChainHead age every interval during the run (0 = off)")
 	idleProbe := flag.Bool("ws-idle-probe", false, "only run the websocket keepalive probe: one call, 35s idle (go-ethereum then pings and arms a 30s pong deadline), then a call every 3s for 45s")
 	flag.Parse()
 
@@ -346,6 +404,14 @@ func main() {
 		}
 	}
 
+	stopLag := make(chan struct{})
+	lagDone := make(chan []lagSample, 1)
+	if *headLag > 0 {
+		go func() { lagDone <- sampleHeadLag(ctx, node, ref, *headLag, stopLag) }()
+	} else {
+		lagDone <- nil
+	}
+
 	end := time.Now().Add(*duration)
 	lastHead := int64(-1)
 	for time.Now().Before(end) {
@@ -364,6 +430,29 @@ func main() {
 		} else {
 			time.Sleep(2 * time.Second)
 		}
+	}
+
+	close(stopLag)
+	lags := <-lagDone
+	var lagSummary map[string]any
+	if len(lags) > 0 {
+		var nl, rl []float64
+		behind := map[int64]int{}
+		slow := 0
+		for _, l := range lags {
+			nl = append(nl, l.node)
+			rl = append(rl, l.ref)
+			behind[l.epochBehind]++
+			if l.node >= 45 {
+				slow++
+			}
+		}
+		fmt.Printf("\nhead age vs wall clock (%d samples every %s):\n", len(lags), *headLag)
+		fmt.Printf("  node: p50=%.1fs p95=%.1fs max=%.1fs  (Curio 'slow' >= 45s: %d samples, %.1f%%)\n", pctF(nl, .5), pctF(nl, .95), pctF(nl, 1), slow, 100*float64(slow)/float64(len(lags)))
+		fmt.Printf("  ref:  p50=%.1fs p95=%.1fs max=%.1fs\n", pctF(rl, .5), pctF(rl, .95), pctF(rl, 1))
+		fmt.Printf("  epochs behind ref: %v\n", behind)
+		lagSummary = map[string]any{"samples": len(lags), "node_p50_s": pctF(nl, .5), "node_p95_s": pctF(nl, .95), "node_max_s": pctF(nl, 1),
+			"ref_p50_s": pctF(rl, .5), "ref_p95_s": pctF(rl, .95), "ref_max_s": pctF(rl, 1), "slow_samples": slow, "epochs_behind_ref": behind}
 	}
 
 	by := map[string][]sample{}
@@ -415,18 +504,51 @@ func main() {
 	// one head apart, so a mismatch is re-checked once after both settle.
 	mismatches := 0
 	if *verify {
+		// The node runs "latest" on head.ParentState(), i.e. the state
+		// after executing the tipset eth_getBlockByNumber("latest")
+		// reports. Pin the reference to exactly that block number so the
+		// comparison is at the same state, and discard a round if the
+		// node's head moved while it ran.
+		latestNum := func() string {
+			var blk struct {
+				Number string `json:"number"`
+			}
+			_ = node.call(ctx, "eth_getBlockByNumber", []any{"latest", false}, &blk)
+			return blk.Number
+		}
 		check := func() []string {
 			var bad []string
-			for _, id := range ids {
-				for _, sig := range perSetViews {
-					a, errA := ethCallHex(ctx, node, pdpVerifierCalib, callData(sig, id))
-					b, errB := ethCallHex(ctx, ref, pdpVerifierCalib, callData(sig, id))
-					if (errA == nil) != (errB == nil) || a != b {
-						bad = append(bad, fmt.Sprintf("%d %s node=%s/%v ref=%s/%v", id, sig, a, errA, b, errB))
+			for attempt := 0; attempt < 5; attempt++ {
+				bad = bad[:0]
+				pin := latestNum()
+				type res struct {
+					v   string
+					err error
+				}
+				got := map[string]res{}
+				for _, id := range ids {
+					for _, sig := range perSetViews {
+						v, err := ethCallHex(ctx, node, pdpVerifierCalib, callData(sig, id))
+						got[fmt.Sprint(id, sig)] = res{v, err}
 					}
 				}
+				if pin == "" || latestNum() != pin {
+					continue // head moved mid-round; results span two states
+				}
+				fmt.Printf("verify pinned at block %s\n", pin)
+				for _, id := range ids {
+					for _, sig := range perSetViews {
+						a, errA := got[fmt.Sprint(id, sig)].v, got[fmt.Sprint(id, sig)].err
+						var b string
+						errB := ref.call(ctx, "eth_call", []any{map[string]string{"to": pdpVerifierCalib, "data": "0x" + hex.EncodeToString(callData(sig, id))}, pin}, &b)
+						if (errA == nil) != (errB == nil) || a != b {
+							bad = append(bad, fmt.Sprintf("%d %s node=%s/%v ref=%s/%v", id, sig, a, errA, b, errB))
+						}
+					}
+				}
+				return bad
 			}
-			return bad
+			return []string{"could not pin a stable head for verification"}
 		}
 		bad := check()
 		if len(bad) > 0 {
@@ -444,7 +566,7 @@ func main() {
 		for i, w := range burstWalls {
 			ms[i] = float64(w.Milliseconds())
 		}
-		b, _ := json.MarshalIndent(map[string]any{"rows": rows, "bursts": len(burstWalls), "burst_wall_ms": ms, "mismatches": mismatches, "data_sets": len(ids)}, "", "  ")
+		b, _ := json.MarshalIndent(map[string]any{"rows": rows, "bursts": len(burstWalls), "burst_wall_ms": ms, "mismatches": mismatches, "data_sets": len(ids), "head_lag": lagSummary}, "", "  ")
 		_ = os.WriteFile(*jsonOut, b, 0o644)
 	}
 }
