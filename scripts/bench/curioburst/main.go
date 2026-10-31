@@ -272,6 +272,7 @@ func main() {
 	every := flag.Duration("every", 0, "fixed burst interval instead of head-triggered (0 = on new head)")
 	verify := flag.Bool("verify", true, "compare per-set view results against -ref at the end")
 	jsonOut := flag.String("json", "", "write the summary as JSON to this path")
+	warmup := flag.Int("warmup", 0, "bursts to run before recording latencies (a freshly started node has a cold cache)")
 	headLag := flag.Duration("headlag", 5*time.Second, "sample node and reference ChainHead age every interval during the run (0 = off)")
 	idleProbe := flag.Bool("ws-idle-probe", false, "only run the websocket keepalive probe: one call, 35s idle (go-ethereum then pings and arms a 30s pong deadline), then a call every 3s for 45s")
 	flag.Parse()
@@ -328,7 +329,9 @@ func main() {
 		defer cancel()
 		t0 := time.Now()
 		err := f(cctx)
-		st.add(m, time.Since(t0), err)
+		if len(burstWalls) >= *warmup {
+			st.add(m, time.Since(t0), err)
+		}
 	}
 
 	burst := func(head int64) {
