@@ -455,7 +455,10 @@ func TestOp_CreateAndSelfdestructAreNotServedLocally(t *testing.T) {
 	}
 }
 
-func TestOp_CallWithValueNotServedLocally(t *testing.T) {
+// A CALL{value} the contract can't cover would fail on chain in a way the
+// local EVM does not reproduce: not served (value_test.go covers the
+// modeled transfers).
+func TestOp_CallWithValueBeyondBalanceNotServedLocally(t *testing.T) {
 	be := newTestBackend()
 	a, b := addr(1), addr(2)
 	be.code[b] = prog(CALLVALUE, retTop())

@@ -3,6 +3,7 @@ package evm
 import (
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
@@ -18,6 +19,52 @@ type Result struct {
 	// GasUsed is a coarse gas counter (read calls are not gas-billed on
 	// chain; this is informational / for an estimate ceiling).
 	GasUsed uint64
+	// Trace is the failure backtrace of a reverted call, outermost frame
+	// first: the frame that ended the call, followed by the chain of
+	// reverted sub-calls it bubbled up from (the FVM backtrace Lotus
+	// prints in "vm error=[...]"). Empty for a successful call.
+	Trace []TraceFrame
+}
+
+// Exit codes of the FEVM EVM actor (builtin-actors actors/evm).
+const (
+	// ExitContractReverted is EVM_CONTRACT_REVERTED (REVERT).
+	ExitContractReverted = 33
+	// ExitInvalidInstruction is EVM_CONTRACT_INVALID_INSTRUCTION (INVALID).
+	ExitInvalidInstruction = 34
+)
+
+// TraceFrame is one frame of a revert backtrace.
+type TraceFrame struct {
+	// Addr is the actor the frame ran in (for a DELEGATECALL frame: the
+	// calling contract, as the FVM sends InvokeContractDelegate to self).
+	Addr Address
+	// Delegate is true for a DELEGATECALL frame (FVM method 6).
+	Delegate bool
+	// PC is the program counter of the REVERT / INVALID that ended it.
+	PC uint64
+	// Exit is the actor exit code (ExitContractReverted, ...).
+	Exit uint32
+}
+
+// ExitCode returns the exit code of a reverted result (33 when unknown).
+func (r *Result) ExitCode() uint32 {
+	if r != nil && len(r.Trace) > 0 && r.Trace[0].Exit != 0 {
+		return r.Trace[0].Exit
+	}
+	return ExitContractReverted
+}
+
+// InsufficientFundsError is returned by CallWithValue when the caller's
+// balance does not cover the call value. On chain the message fails
+// before any code runs (SysErrInsufficientFunds, exit 6).
+type InsufficientFundsError struct {
+	Balance uint256.Int
+	Value   uint256.Int
+}
+
+func (e *InsufficientFundsError) Error() string {
+	return fmt.Sprintf("sender does not have funds to transfer (balance %s, transfer %s)", e.Balance.Dec(), e.Value.Dec())
 }
 
 // ErrExecutionReverted signals the call reverted; Result.Return carries
@@ -28,7 +75,8 @@ var ErrExecutionReverted = errors.New("execution reverted")
 // ErrUnsupported is wrapped by every fault where Lantern cannot reproduce
 // the FEVM result locally: an opcode the FEVM does not define (BLOBHASH,
 // BLOBBASEFEE, CALLCODE, ...), an environment value the backend can't
-// supply, contract creation, value transfers, unimplemented precompiles,
+// supply, contract creation, value sent to a native actor / precompile or
+// beyond the contract's balance, unimplemented precompiles,
 // resource caps. Callers must never turn such a fault into a result;
 // eth_call falls back to the bridge or returns an error.
 var ErrUnsupported = errors.New("evm: unsupported")
@@ -58,8 +106,70 @@ const clzMinNetworkVersion = 28
 // router reentrancy) execute correctly instead of falsely reverting.
 // ORIGIN is the eth_call sender for every frame.
 func Call(b Backend, caller, to Address, input []byte) (*Result, error) {
+	return CallWithValue(b, caller, to, input, uint256.Int{})
+}
+
+// CallWithValue is Call with a message value (eth_call / eth_estimateGas
+// "value"): the caller must hold at least value (else
+// *InsufficientFundsError, nothing runs), the value is moved from caller
+// to the target on the ephemeral overlay (so BALANCE / SELFBALANCE see
+// it), and CALLVALUE reads it. Nothing is transferred on chain.
+//
+// Value moved onwards by the contract (CALL{value}) is modeled for EVM
+// contracts and account-type actors (EOAs, placeholders, the burnt funds
+// actor); value to a native actor or a precompile, or a CALL{value} the
+// contract can't cover, faults with ErrUnsupported instead of guessing.
+func CallWithValue(b Backend, caller, to Address, input []byte, value uint256.Int) (*Result, error) {
 	cs := &callState{b: b, ov: newOverlay(), origin: caller}
-	return cs.run(frame{caller: caller, self: to, codeAddr: to, input: input})
+	if !value.IsZero() {
+		if err := cs.transfer(caller, to, value); err != nil {
+			var ife *InsufficientFundsError
+			if errors.As(err, &ife) {
+				return nil, ife
+			}
+			return nil, err
+		}
+	}
+	return cs.run(frame{caller: caller, self: to, codeAddr: to, input: input, value: value})
+}
+
+// balanceOf returns addr's balance: the verified backend balance plus the
+// value moved in / out during this call.
+func (cs *callState) balanceOf(a Address) (uint256.Int, error) {
+	base, err := cs.b.GetBalance(a)
+	if err != nil {
+		return uint256.Int{}, err
+	}
+	d := cs.ov.balanceDelta(a)
+	if d.Sign() == 0 {
+		return base, nil
+	}
+	eff := new(big.Int).Add(base.ToBig(), d)
+	if eff.Sign() < 0 || eff.BitLen() > 256 {
+		return uint256.Int{}, fmt.Errorf("%w: balance of %x out of range after value transfers", ErrUnsupported, a)
+	}
+	var out uint256.Int
+	out.SetFromBig(eff)
+	return out, nil
+}
+
+// transfer moves value from -> to on the overlay. An insufficient balance
+// is reported as *InsufficientFundsError.
+func (cs *callState) transfer(from, to Address, value uint256.Int) error {
+	if value.IsZero() {
+		return nil
+	}
+	bal, err := cs.balanceOf(from)
+	if err != nil {
+		return fmt.Errorf("evm: balance %x: %w", from, err)
+	}
+	if bal.Lt(&value) {
+		return &InsufficientFundsError{Balance: bal, Value: value}
+	}
+	v := value.ToBig()
+	cs.ov.addBalance(from, new(big.Int).Neg(v))
+	cs.ov.addBalance(to, v)
+	return nil
 }
 
 // callState is shared by every frame of one top-level call.
@@ -78,6 +188,7 @@ type frame struct {
 	input    []byte
 	value    uint256.Int
 	readonly bool // STATICCALL context (sticky for nested frames)
+	delegate bool // DELEGATECALL frame (FVM InvokeContractDelegate)
 	depth    int
 }
 
@@ -106,6 +217,7 @@ func newInterpreter(cs *callState, f frame, code []byte) *interpreter {
 		self:     f.self,
 		value:    f.value,
 		readonly: f.readonly,
+		delegate: f.delegate,
 		depth:    f.depth,
 		code:     code,
 		input:    f.input,
@@ -123,6 +235,7 @@ type interpreter struct {
 	self     Address
 	value    uint256.Int
 	readonly bool
+	delegate bool
 	depth    int
 	code     []byte
 	input    []byte
@@ -132,6 +245,17 @@ type interpreter struct {
 	ret      []byte
 	jumpdest map[uint64]bool
 	gas      uint64
+	// subTrace is the backtrace of the most recent sub-call when it
+	// failed (nil once a later sub-call succeeds); a REVERT in this frame
+	// appends it below its own frame.
+	subTrace []TraceFrame
+}
+
+// revertTrace builds the backtrace for a frame ending at the current pc.
+func (ip *interpreter) revertTrace(exit uint32) []TraceFrame {
+	tr := make([]TraceFrame, 0, 1+len(ip.subTrace))
+	tr = append(tr, TraceFrame{Addr: ip.self, Delegate: ip.delegate, PC: ip.pc, Exit: exit})
+	return append(tr, ip.subTrace...)
 }
 
 func (ip *interpreter) run() (*Result, error) {
@@ -296,7 +420,7 @@ func (ip *interpreter) exec(op OpCode) (bool, *Result, error) {
 	case BLOCKHASH:
 		return false, nil, ip.opBlockhash()
 	case SELFBALANCE:
-		bal, err := ip.b.GetBalance(ip.self)
+		bal, err := ip.cs.balanceOf(ip.self)
 		if err != nil {
 			return false, nil, err
 		}
@@ -369,14 +493,14 @@ func (ip *interpreter) exec(op OpCode) (bool, *Result, error) {
 		if err != nil {
 			return false, nil, err
 		}
-		return true, &Result{Return: data, Reverted: true, GasUsed: ip.gas}, nil
+		return true, &Result{Return: data, Reverted: true, GasUsed: ip.gas, Trace: ip.revertTrace(ExitContractReverted)}, nil
 
 	// ---- contract creation / destruction: not modeled locally ----
 	case CREATE, CREATE2, SELFDESTRUCT:
 		return false, nil, fmt.Errorf("%w: %s at pc %d (contract creation/destruction is not modeled locally)", ErrUnsupported, op, ip.pc)
 
 	case INVALID:
-		return true, &Result{Reverted: true, GasUsed: ip.gas}, nil
+		return true, &Result{Reverted: true, GasUsed: ip.gas, Trace: ip.revertTrace(ExitInvalidInstruction)}, nil
 
 	// ---- defined in Ethereum (Cancun) but not by the FEVM ----
 	case BLOBHASH, BLOBBASEFEE, CALLCODE:

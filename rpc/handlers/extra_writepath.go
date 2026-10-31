@@ -267,30 +267,8 @@ func (c *ChainAPI) localEthEstimateGas(ctx context.Context, callObj any) (string
 	return "0x" + bigFromInt64(gas).Text(16), true, nil
 }
 
-// EthEstimateGas estimates gas for a call. lantern#45 Stage 2: served
-// locally via vm.GasEstimator with a conservative margin, bridge fallback
-// retained.
-func (c *ChainAPI) EthEstimateGas(ctx context.Context, callObj any) (string, error) {
-	if out, served, err := c.localEthEstimateGas(ctx, callObj); served {
-		return out, err
-	}
-	if c.Bridge == nil {
-		return "", errBridgeUnconfigured
-	}
-	params, err := json.Marshal([]any{callObj})
-	if err != nil {
-		return "", fmt.Errorf("marshal eth_estimateGas params: %w", err)
-	}
-	raw, err := c.Bridge.RawJSONRPC(ctx, "eth_estimateGas", params)
-	if err != nil {
-		return "", fmt.Errorf("bridge eth_estimateGas: %w", err)
-	}
-	var out string
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("decode eth_estimateGas result: %w", err)
-	}
-	return out, nil
-}
+// EthEstimateGas lives in eth_estimategas.go: it executes the call and
+// only falls back to localEthEstimateGas's heuristic for the gas number.
 
 // bigFromUint64 / bigFromInt64 are tiny helpers to format hex quantities
 // without pulling math/big into every call site.

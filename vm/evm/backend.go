@@ -10,9 +10,15 @@
 // overlay), transient storage (TLOAD/TSTORE, EIP-1153), control flow, LOGs
 // and CALL/STATICCALL/DELEGATECALL for cross-contract reads.
 //
+// Call value is modeled for eth_call / eth_estimateGas semantics
+// (CallWithValue): CALLVALUE, the sender balance check, and balance moves
+// on the ephemeral overlay for CALL{value} into EVM contracts and
+// account-type actors. Nothing is ever transferred on chain.
+//
 // Anything Lantern cannot reproduce exactly (an opcode FEVM does not
 // define, an environment value the backend can't supply, contract
-// creation, value transfers, an unimplemented precompile) faults with an
+// creation, value sent to a native actor or a precompile, an
+// unimplemented precompile) faults with an
 // error wrapping ErrUnsupported. The eth_call handler treats every fault as
 // "not served locally" and falls back to the bridge (or errors when the
 // bridge is off); it never turns a fault into a result.
