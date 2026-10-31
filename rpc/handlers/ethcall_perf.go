@@ -53,8 +53,8 @@ import (
 )
 
 const (
-	perfBlockEntries    = 32768            // ~ tens of MiB of HAMT/KAMT nodes
-	perfBlockMaxSize    = 256 << 10        // don't pin huge blocks in memory
+	perfBlockEntries    = 16384            // HAMT/KAMT nodes; typically a few KiB each
+	perfBlockMaxSize    = 16 << 10         // larger blocks stay in the persistent cache only (worst case 256 MiB here)
 	perfActorEntries    = 4096             // (root, addr) pairs; a few heads' worth
 	perfEVMStateEntries = 4096             // decoded EVM actor heads
 	perfCodeEntries     = 256              // distinct contract bytecodes
