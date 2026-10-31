@@ -72,7 +72,7 @@ This is the path most existing storage providers would take ("switch my Curio fr
 |---|---|
 | Provider ID | 32 (calibration ServiceProviderRegistry) |
 | Example provePossession txs (Lantern only, 2026-10-31) | `0xdeb226db99b142b50d8e0a486b1401581a8fa531f65a301d33c44f718bcde343`, `0x0810a45d72a0f8b6f7533c2ea2a0d5b9f6d62413fe181277bcf728934186e9a8`, `0xee765b70f50f0d876a2172dc6dd2b5c3e64581886d7be4f69fa64b359c5cef9c` |
-| Volume | ~230 provider txs/hour on 2026-10-31, about 70% succeeding; the reverting share is explained by friction item 5 (#193) |
+| Volume | ~230 provider txs/hour on 2026-10-31, about 70% succeeding; the reverted provePossession txs fail with `ProvingPeriodPassed` (proof landed after the deadline), see friction items 4 and 5 |
 | Curio Chain page | Lantern only: `/ip4/127.0.0.1/tcp/2234/http`, reachable, v1.10.1-rc1 Lantern+calibration (screenshot in the operator conversation; sync-lag observation is friction item 4) |
 
 ## Maintainer reference run (for comparison)
@@ -90,8 +90,8 @@ Fresh Docker path exactly as in RUN-PDP.md, on maintainer hardware (details in #
 | 1 | Docs | Guides assume a fresh Docker stack; operators with an existing native Curio need a "switch from Lotus" path | doc | Fixed: #189 + golantern.io/test callout |
 | 2 | Run | Curio `StorageGCMark`: `get finality tipset: header/store: not found` on a Lantern younger than ~24 h (Curio asks for head-2891) | minor (GC only) | Fixed: #190 (verified header backfill + startup prefetch) |
 | 3 | Run | Wallet question: does the PDP wallet need importing into Lantern? (no; Curio signs) | doc | Fixed: #189 (keys stay in Curio) |
-| 4 | Run | Curio Chain page often shows Lantern "No, slow (55s behind)" while Lotus stays in sync | medium | Filed: #192 (fix in progress) |
-| 5 | Run | Many of the operator's txs revert on chain (e.g. provePossession "Incorrect fee amount"): Lantern's `eth_estimateGas` did not execute calls, so Curio's pre-flight never caught reverts | high (wastes gas) | Filed: #193 (fix in progress) |
+| 4 | Run | Curio Chain page often shows Lantern "No, slow (55s behind)" while Lotus stays in sync; a share of proofs land after the proving deadline (`ProvingPeriodPassed`) | high | Filed: #192 (top priority for the next release candidate) |
+| 5 | Run | Late or otherwise doomed txs were broadcast and reverted on chain: Lantern's `eth_estimateGas` did not execute calls, so Curio's pre-flight never caught reverts | medium (wastes gas) | Fixed: #195 (closes #193) |
 | 6 | Run | Curio `i/o timeout` on `getNextChallengeEpoch` under read bursts (also seen on the maintainer provider) | medium (retried) | Filed with #192 (fix in progress) |
 
 Friction from the maintainers' dry run (F1 to F17) and its resolutions: see the git history of this file and #104 / #184. Highlights: NV29 support (#172), receipts with logs (#173, #177), FEVM opcodes (#178), persistent tx index (#179), eth blocks with txs (#180), operator-aware bootstrap quorum (#176), reproducible releases (#174), docs (#175, #186, #187, #188). Under heavy Curio read load Lantern occasionally exceeded Curio's RPC timeout (retried successfully): friction item 6.
