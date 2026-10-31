@@ -75,7 +75,8 @@ var ErrExecutionReverted = errors.New("execution reverted")
 // ErrUnsupported is wrapped by every fault where Lantern cannot reproduce
 // the FEVM result locally: an opcode the FEVM does not define (BLOBHASH,
 // BLOBBASEFEE, CALLCODE, ...), an environment value the backend can't
-// supply, contract creation, value transfers, unimplemented precompiles,
+// supply, contract creation, value sent to a native actor / precompile or
+// beyond the contract's balance, unimplemented precompiles,
 // resource caps. Callers must never turn such a fault into a result;
 // eth_call falls back to the bridge or returns an error.
 var ErrUnsupported = errors.New("evm: unsupported")
