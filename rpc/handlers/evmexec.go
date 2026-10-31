@@ -21,6 +21,7 @@ import (
 	"github.com/filecoin-project/go-state-types/builtin"
 	gscrypto "github.com/filecoin-project/go-state-types/crypto"
 	"github.com/holiman/uint256"
+	"github.com/ipfs/go-cid"
 	"github.com/multiformats/go-multihash"
 	"golang.org/x/crypto/blake2b"
 
@@ -59,6 +60,24 @@ type evmBackend struct {
 	// no header store is wired (probe / one-shot): the env-dependent
 	// opcodes then fault and the call falls back.
 	execTS *ltypes.TipSet
+
+	// perf, when set, routes actor / EVM-state / bytecode / storage reads
+	// through the shared burst caches (ethcall_perf.go). stateRoot is the
+	// root acc is anchored at; actor lookups are cached per (stateRoot,
+	// address), everything else by content address. nil perf = uncached
+	// (probe / one-shot path).
+	perf      *ethCallPerf
+	stateRoot cid.Cid
+}
+
+// getActor resolves filAddr in the call's state, through the shared actor
+// cache when available.
+func (b *evmBackend) getActor(filAddr address.Address) (*accessor.Actor, error) {
+	if b.perf != nil && b.stateRoot.Defined() {
+		return b.perf.getActorCached(b.ctx, b.acc, b.stateRoot, filAddr)
+	}
+	actor, _, err := b.acc.GetActor(b.ctx, filAddr)
+	return actor, err
 }
 
 // GetCode resolves addr -> EVM actor -> bytecode (CID + hash verified).
@@ -67,7 +86,18 @@ func (b *evmBackend) GetCode(a evm.Address) ([]byte, error) {
 	if err != nil || !ok {
 		return nil, err // miss -> empty code (not an error to callers)
 	}
-	return actors.FetchBytecode(b.ctx, st, b.bg)
+	if b.perf == nil {
+		return actors.FetchBytecode(b.ctx, st, b.bg)
+	}
+	if code, ok := b.perf.code.Get(st.BytecodeCID()); ok {
+		return code, nil
+	}
+	code, err := actors.FetchBytecode(b.ctx, st, b.bg)
+	if err != nil {
+		return nil, err
+	}
+	b.perf.code.Add(st.BytecodeCID(), code)
+	return code, nil
 }
 
 // GetStorage reads slot `key` from addr's contract storage KAMT.
@@ -76,12 +106,25 @@ func (b *evmBackend) GetStorage(a evm.Address, key uint256.Int) (uint256.Int, er
 	if err != nil || !ok {
 		return uint256.Int{}, err
 	}
+	var sk slotCacheKey
+	if b.perf != nil {
+		sk = slotCacheKey{root: st.StorageRoot(), slot: key.Bytes32()}
+		if b.stateRoot.Defined() {
+			b.perf.warm.recordSlot(a, sk.slot, int64(b.blockNo))
+		}
+		if v, ok := b.perf.slots.Get(sk); ok {
+			return v, nil
+		}
+	}
 	v, _, err := kamt.GetU256(b.ctx, st.StorageRoot(), key.ToBig(), b.bg)
 	if err != nil {
 		return uint256.Int{}, err
 	}
 	var out uint256.Int
 	out.SetFromBig(v)
+	if b.perf != nil {
+		b.perf.slots.Add(sk, out)
+	}
 	return out, nil
 }
 
@@ -91,7 +134,7 @@ func (b *evmBackend) GetBalance(a evm.Address) (uint256.Int, error) {
 	if err != nil {
 		return uint256.Int{}, nil
 	}
-	actor, _, err := b.acc.GetActor(b.ctx, filAddr)
+	actor, err := b.getActor(filAddr)
 	if err != nil {
 		if isActorNotFound(err) {
 			return uint256.Int{}, nil // unknown -> 0
@@ -121,7 +164,7 @@ func (b *evmBackend) ActorKind(a evm.Address) (evm.ActorKind, error) {
 	if err != nil {
 		return evm.ActorNotFound, nil
 	}
-	actor, _, err := b.acc.GetActor(b.ctx, filAddr)
+	actor, err := b.getActor(filAddr)
 	if err != nil {
 		if isActorNotFound(err) {
 			return evm.ActorNotFound, nil
@@ -256,14 +299,27 @@ func (b *evmBackend) loadEVMActor(a evm.Address) (actors.EVMState, bool, error) 
 	if err != nil {
 		return nil, false, nil
 	}
-	actor, _, err := b.acc.GetActor(b.ctx, filAddr)
+	actor, err := b.getActor(filAddr)
 	if err != nil {
 		if isActorNotFound(err) {
 			return nil, false, nil
 		}
 		return nil, false, fmt.Errorf("load actor %s: %w", filAddr, err)
 	}
+	var sk evmStateKey
+	if b.perf != nil {
+		if b.stateRoot.Defined() {
+			b.perf.warm.recordActor(a, int64(b.blockNo))
+		}
+		sk = evmStateKey{code: actor.Code, head: actor.Head}
+		if st, ok := b.perf.evmStates.Get(sk); ok {
+			return st, true, nil
+		}
+	}
 	st, err := actors.LoadEVM(b.ctx, actor.Code, actor.Head, b.bg, b.reg)
+	if err == nil && b.perf != nil {
+		b.perf.evmStates.Add(sk, st)
+	}
 	if err != nil {
 		if isDefinitelyNotEVM(err, actor.Code, "eth_call") {
 			// Known non-EVM actor (e.g. account/placeholder) -> not a contract.
@@ -353,36 +409,33 @@ func (c *ChainAPI) localEthCallWithReason(ctx context.Context, call ethCallObjec
 	// present (long-running daemon / embedded curio-core), so eth_call sees
 	// current contract state rather than the boot anchor. Fall back to the
 	// boot TrustedRoot when no header store is wired (probe / one-shot).
-	acc := c.Accessor
+	//
+	// The head is read ONCE: the state root, the execution tipset and the
+	// cache generation below must all describe the same head, even if a
+	// new head lands while this call is running.
 	blockNo := uint64(0)
 	tstamp := uint64(0)
 	if c.Trusted != nil {
 		blockNo = uint64(c.Trusted.Epoch)
 	}
 	var execTS *ltypes.TipSet
+	var head *ltypes.TipSet
 	if c.HeaderStore != nil {
-		if head := c.HeaderStore.Head(); head != nil {
-			liveRoot := head.ParentState()
-			if liveRoot.Defined() {
-				liveTR := &trustedroot.TrustedRoot{
-					Epoch:     head.Height(),
-					StateRoot: liveRoot,
-				}
-				acc = accessor.New(liveTR, c.BlockGetter)
-				// head.ParentState() is the state after executing head's
-				// parent: exactly what Lotus eth_call "latest" runs on
-				// (TipSetState(head.Parents())). The FEVM environment
-				// (NUMBER, TIMESTAMP, BASEFEE, PREVRANDAO, BLOCKHASH
-				// window) is that parent tipset's, so resolve it rather
-				// than reporting head's height.
-				parent, err := c.HeaderStore.GetTipSet(head.Parents())
-				if err != nil || parent == nil {
-					return "", false, fmt.Sprintf("execution tipset (head %d parent) not in header store", head.Height()), nil
-				}
-				execTS = parent
-				blockNo = uint64(parent.Height())
-				tstamp = parent.MinTimestamp()
+		if h := c.HeaderStore.Head(); h != nil && h.ParentState().Defined() {
+			head = h
+			// head.ParentState() is the state after executing head's
+			// parent: exactly what Lotus eth_call "latest" runs on
+			// (TipSetState(head.Parents())). The FEVM environment
+			// (NUMBER, TIMESTAMP, BASEFEE, PREVRANDAO, BLOCKHASH
+			// window) is that parent tipset's, so resolve it rather
+			// than reporting head's height.
+			parent, err := c.HeaderStore.GetTipSet(h.Parents())
+			if err != nil || parent == nil {
+				return "", false, fmt.Sprintf("execution tipset (head %d parent) not in header store", h.Height()), nil
 			}
+			execTS = parent
+			blockNo = uint64(parent.Height())
+			tstamp = parent.MinTimestamp()
 		}
 	}
 
@@ -397,54 +450,91 @@ func (c *ChainAPI) localEthCallWithReason(ctx context.Context, call ethCallObjec
 		retries = 2
 		total = 8 * time.Second
 	}
-	bg := newRetryingBlockGetter(c.BlockGetter, retries, total)
-
-	be := &evmBackend{
-		ctx:     ctx,
-		c:       c,
-		acc:     acc,
-		reg:     acc.Registry(),
-		chainID: chainIDForNetwork(c.NetworkName),
-		blockNo: blockNo,
-		tstamp:  tstamp,
-		bg:      bg,
-		execTS:  execTS,
-	}
-
-	// Override the accessor's view of the blockstore so its actor lookups
-	// also benefit from the retry layer. We rebuild the accessor at the
-	// live head above; rebuild once more so it uses bg, not c.BlockGetter.
-	if acc != nil {
-		if c.HeaderStore != nil {
-			if head := c.HeaderStore.Head(); head != nil {
-				liveRoot := head.ParentState()
-				if liveRoot.Defined() {
-					liveTR := &trustedroot.TrustedRoot{
-						Epoch:     head.Height(),
-						StateRoot: liveRoot,
-					}
-					be.acc = accessor.New(liveTR, bg)
-				}
-			}
-		}
-	}
+	to := evm.BytesToAddress(toRaw)
 
 	atomic.AddUint64(&c.localEthCallTotal, 1)
 
-	res, err := evm.Call(be, from, evm.BytesToAddress(toRaw), input)
+	if head == nil {
+		// Probe / one-shot path: boot-anchored accessor, no shared caches.
+		bg := newRetryingBlockGetter(c.BlockGetter, retries, total)
+		acc := c.Accessor
+		be := &evmBackend{
+			ctx:     ctx,
+			c:       c,
+			acc:     acc,
+			reg:     acc.Registry(),
+			chainID: chainIDForNetwork(c.NetworkName),
+			blockNo: blockNo,
+			tstamp:  tstamp,
+			bg:      bg,
+		}
+		o := runLocalEthCall(be, from, to, input, call.To)
+		return o.ret, o.served, o.reason, o.err
+	}
+
+	// Live-head path: shared burst caches + singleflight (ethcall_perf.go).
+	// The result cache generation is the execution state identity, so a
+	// result is only ever reused for a call on the very same state.
+	perf := c.ethPerf()
+	liveRoot := head.ParentState()
+	gen := ethCallGen(execTS.Key().String(), liveRoot)
+	key := hex.EncodeToString(from[:]) + "|" + hex.EncodeToString(toRaw) + "|" + hex.EncodeToString(input)
+	if o, ok := perf.results.get(gen, key); ok {
+		perf.resultHits.Add(1)
+		return o.ret, o.served, o.reason, o.err
+	}
+	perf.resultMisses.Add(1)
+	o, shared, err := sharedDo(ctx, &perf.callFlight, gen+"#"+key, func(sctx context.Context) (ethCallOutcome, error) {
+		if o, ok := perf.results.get(gen, key); ok {
+			return o, nil
+		}
+		bg := newRetryingBlockGetter(perf.blockGetter(), retries, total)
+		acc := accessor.New(&trustedroot.TrustedRoot{Epoch: head.Height(), StateRoot: liveRoot}, bg)
+		be := &evmBackend{
+			ctx:       sctx,
+			c:         c,
+			acc:       acc,
+			reg:       acc.Registry(),
+			chainID:   chainIDForNetwork(c.NetworkName),
+			blockNo:   blockNo,
+			tstamp:    tstamp,
+			bg:        bg,
+			execTS:    execTS,
+			perf:      perf,
+			stateRoot: liveRoot,
+		}
+		perf.executions.Add(1)
+		o := runLocalEthCall(be, from, to, input, call.To)
+		perf.results.put(gen, key, o)
+		return o, nil
+	})
+	if shared {
+		perf.callShared.Add(1)
+	}
+	if err != nil {
+		// Only the caller's own context ends up here; the shared run keeps
+		// going and fills the cache for the next poll.
+		return "", false, "caller context done: " + err.Error(), nil
+	}
+	return o.ret, o.served, o.reason, o.err
+}
+
+// runLocalEthCall executes one call on be and classifies the outcome.
+func runLocalEthCall(be *evmBackend, from, to evm.Address, input []byte, callTo string) ethCallOutcome {
+	res, err := evm.Call(be, from, to, input)
 	if err != nil {
 		// A local execution fault (e.g. an opcode we don't support yet)
 		// is NOT a definitive answer; fall back to the bridge. Record the
 		// reason so we can see what local coverage is still missing.
-		log.Debugw("eth_call: local exec fault, will fall back", "to", call.To, "reason", err.Error())
-		return "", false, "local exec fault: " + err.Error(), nil
+		log.Debugw("eth_call: local exec fault, will fall back", "to", callTo, "reason", err.Error())
+		return ethCallOutcome{reason: "local exec fault: " + err.Error()}
 	}
 	if res.Reverted {
 		// A revert IS a definitive answer. Surface it so EthCall maps it
 		// to eth error code 3 with the revert payload.
-		return "0x" + hex.EncodeToString(res.Return), true, "", &revertError{data: res.Return}
+		return ethCallOutcome{served: true, ret: "0x" + hex.EncodeToString(res.Return), err: &revertError{data: res.Return}}
 	}
-	return "0x" + hex.EncodeToString(res.Return), true, "", nil
+	return ethCallOutcome{served: true, ret: "0x" + hex.EncodeToString(res.Return)}
 }
 
 // revertError carries EVM revert data for the JSON-RPC error mapping

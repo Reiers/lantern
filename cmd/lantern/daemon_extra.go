@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -137,6 +138,10 @@ func serveMetrics(ctx context.Context, addr, token string, f *combined.Fetcher, 
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte("ok\n"))
 	})
+	if pprofEnabled() {
+		registerPprof(mux)
+		fmt.Fprintf(os.Stderr, "WARN LANTERN_PPROF=1: Go profiler mounted at http://%s/debug/pprof/\n", addr)
+	}
 
 	// Issue #5: operator dashboard, opt-in by passing dash != nil.
 	registerDashboard(mux, dash)
