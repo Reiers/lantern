@@ -153,6 +153,9 @@ type Ingestor struct {
 	heldDiverged         atomic.Uint64 // #79: head adoptions held while the divergence gate was closed
 	heldUncorrob         atomic.Uint64 // #80: head adoptions held awaiting multi-peer corroboration
 	backfilled           atomic.Uint64
+	siblingsStored       atomic.Uint64 // blocks at the head height stored so the next epoch finds its parents
+	siblingsMerged       atomic.Uint64 // of those, merged into the head tipset (head grew)
+	parentsFetched       atomic.Uint64 // head+1 blocks whose missing parent headers were fetched directly
 	backfillFailed       atomic.Uint64
 	lastInstallEpoch     atomic.Int64
 	lastInstallNanos     atomic.Int64 // wall-clock UnixNano of the last successful install (#71)
@@ -257,9 +260,14 @@ func (g *Ingestor) process(ctx context.Context, blk *ltypes.BlockMsg) {
 		return
 	}
 
-	// Height fence: only act on blocks that advance our head.
+	// Height fence: only act on blocks that advance our head, or that
+	// complete the head tipset (a sibling at the head height).
 	curHead := g.store.HeadEpoch()
-	if bh.Height <= curHead {
+	if bh.Height < curHead {
+		return
+	}
+	if bh.Height == curHead {
+		g.absorbSibling(ctx, bh, headerCID)
 		return
 	}
 
@@ -284,6 +292,22 @@ func (g *Ingestor) process(ctx context.Context, blk *ltypes.BlockMsg) {
 			g.backfillFailed.Add(1)
 			g.skipped.Add(1)
 			return
+		}
+		if !g.allParentsPresent(parents) {
+			// The gap fill above only covers epochs ABOVE the store head.
+			// A block at head+1 whose parent tipset includes a block we
+			// never received (a sibling of our head block that gossip
+			// delivered late or not at all) lands here; without this it
+			// was skipped and head waited for the next epoch.
+			if err := g.fetchMissingParents(ctx, bh); err != nil {
+				log.Warnw("gossip missing-parent fetch failed",
+					"err", err,
+					"block_epoch", bh.Height,
+					"cur_head", curHead)
+				g.backfillFailed.Add(1)
+				g.skipped.Add(1)
+				return
+			}
 		}
 		g.backfilled.Add(1)
 		if !g.allParentsPresent(parents) {
@@ -392,6 +416,174 @@ func (g *Ingestor) process(ctx context.Context, blk *ltypes.BlockMsg) {
 	g.installed.Add(1)
 	g.lastInstallEpoch.Store(int64(bh.Height))
 	g.lastInstallNanos.Store(time.Now().UnixNano())
+}
+
+// absorbSibling handles a gossiped block at the head's height.
+//
+// A Filecoin tipset is every block at one height that shares the same
+// parents; its blocks arrive one by one over gossip, and Lotus grows its
+// head tipset as they land (the bigger tipset is the heavier one). Lantern
+// used to drop these blocks at the height fence. That left the head as a
+// one-block tipset and, worse, the NEXT epoch's blocks, whose Parents list
+// the full tipset, then found a parent missing from the store and were
+// skipped: on any epoch with more than one block the head stalled until a
+// later block arrived and the gap was backfilled, about one epoch (30 s)
+// behind the network. Curio's Chain page shows that as "slow (55s behind)".
+//
+// The sibling is persisted whenever it provably belongs to the head
+// tipset: same height and identical parent-derived header fields
+// (Parents, ParentStateRoot, ParentMessageReceipts, ParentWeight), which
+// every honest block of one tipset shares. That is header arithmetic only,
+// the same trust level as the rest of this file. The head itself then
+// grows to include it, through the same divergence and corroboration
+// gates as any other head adoption.
+func (g *Ingestor) absorbSibling(ctx context.Context, bh *ltypes.BlockHeader, c cid.Cid) {
+	cur := g.store.Head()
+	if cur == nil || cur.Height() != bh.Height || cur.Contains(c) || len(cur.Blocks()) == 0 {
+		return
+	}
+	if !sameTipsetParent(cur.Blocks()[0], bh) {
+		// A competing block on another fork at the head height. Fork
+		// choice happens on its children (heaviest ParentWeight).
+		return
+	}
+	single, err := ltypes.NewTipSet([]*ltypes.BlockHeader{bh})
+	if err != nil {
+		g.rejected.Add(1)
+		return
+	}
+	if err := g.store.PutTipSet(single); err != nil {
+		g.rejected.Add(1)
+		return
+	}
+	g.siblingsStored.Add(1)
+
+	if gp := g.headAdoptionGate.Load(); gp != nil && !(*gp)() {
+		g.heldDiverged.Add(1)
+		return
+	}
+	if cp := g.headCorroboration.Load(); cp != nil && !(*cp)(c) {
+		// Stored for the next epoch's parent check; the head simply does
+		// not grow onto an uncorroborated block.
+		g.heldUncorrob.Add(1)
+		return
+	}
+	blocks := append(append([]*ltypes.BlockHeader(nil), cur.Blocks()...), bh)
+	grown, err := ltypes.NewTipSet(blocks)
+	if err != nil {
+		g.rejected.Add(1)
+		return
+	}
+	// The head may have moved while we worked (polling Sync); only grow
+	// the tipset we started from.
+	if now := g.store.Head(); now == nil || now.Key() != cur.Key() {
+		return
+	}
+	if err := g.store.SetHead(ctx, grown); err != nil {
+		g.rejected.Add(1)
+		return
+	}
+	g.siblingsMerged.Add(1)
+	g.lastInstallNanos.Store(time.Now().UnixNano())
+}
+
+// sameTipsetParent reports whether a and b can be blocks of one tipset:
+// same height and the same parent-derived fields.
+func sameTipsetParent(a, b *ltypes.BlockHeader) bool {
+	if a.Height != b.Height || len(a.Parents) != len(b.Parents) {
+		return false
+	}
+	for i := range a.Parents {
+		if a.Parents[i] != b.Parents[i] {
+			return false
+		}
+	}
+	if a.ParentStateRoot != b.ParentStateRoot || a.ParentMessageReceipts != b.ParentMessageReceipts {
+		return false
+	}
+	if a.ParentWeight.Nil() || b.ParentWeight.Nil() {
+		return a.ParentWeight.Nil() == b.ParentWeight.Nil()
+	}
+	return a.ParentWeight.Equals(b.ParentWeight)
+}
+
+// fetchMissingParents fetches exactly the parent headers of bh that are not
+// in the store, verifies them (CID re-derived from the bytes, one tipset at
+// a lower height), and persists that parent tipset. Persist only: head
+// adoption stays the single guarded decision in process().
+func (g *Ingestor) fetchMissingParents(ctx context.Context, bh *ltypes.BlockHeader) error {
+	if len(bh.Parents) == 0 {
+		return fmt.Errorf("block @ %d has no parents", bh.Height)
+	}
+	fctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	var ts *ltypes.TipSet
+	if g.chainFetcher != nil {
+		if chain, err := g.chainFetcher.FetchTipsetChain(fctx, bh.Parents, 1); err == nil && len(chain) > 0 {
+			if cand, terr := ltypes.NewTipSet(dedupBlocksByCID(chain[0])); terr == nil && sameCIDSet(cand.Cids(), bh.Parents) {
+				ts = cand
+			}
+		}
+	}
+	if ts == nil {
+		if g.src == nil {
+			return fmt.Errorf("no block source for missing parents")
+		}
+		blocks := make([]*ltypes.BlockHeader, 0, len(bh.Parents))
+		for _, pc := range bh.Parents {
+			if b, err := g.store.Get(pc); err == nil {
+				blocks = append(blocks, b)
+				continue
+			}
+			b, err := g.src.FetchBlock(fctx, pc)
+			if err != nil {
+				return fmt.Errorf("fetch parent %s: %w", pc, err)
+			}
+			blocks = append(blocks, b)
+		}
+		cand, err := ltypes.NewTipSet(blocks)
+		if err != nil {
+			return fmt.Errorf("parent tipset: %w", err)
+		}
+		ts = cand
+	}
+	// ts.Cids() are re-derived from the header bytes, so matching them
+	// against bh.Parents is the content-address check: a peer can only
+	// refuse, never substitute a header.
+	if !sameCIDSet(ts.Cids(), bh.Parents) {
+		return fmt.Errorf("parent tipset does not match the block's Parents")
+	}
+	for _, b := range ts.Blocks()[1:] {
+		if !sameTipsetParent(ts.Blocks()[0], b) {
+			return fmt.Errorf("parent tipset blocks disagree on parent-derived fields")
+		}
+	}
+	if ts.Height() >= bh.Height {
+		return fmt.Errorf("parent tipset height %d not below block height %d", ts.Height(), bh.Height)
+	}
+	if err := g.store.PutTipSet(ts); err != nil {
+		return err
+	}
+	g.parentsFetched.Add(1)
+	return nil
+}
+
+// sameCIDSet reports whether a and b hold the same CIDs (order-insensitive).
+func sameCIDSet(a, b []cid.Cid) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	m := make(map[cid.Cid]int, len(a))
+	for _, c := range a {
+		m[c]++
+	}
+	for _, c := range b {
+		if m[c] == 0 {
+			return false
+		}
+		m[c]--
+	}
+	return true
 }
 
 // ObservedHead returns the highest block height the ingestor has
@@ -727,6 +919,9 @@ type Stats struct {
 	HeldUncorrob         uint64 // #80: head adoptions held awaiting multi-peer corroboration
 	Backfilled           uint64
 	BackfillFailed       uint64
+	SiblingsStored       uint64 // blocks at the head height persisted for the next epoch's parent check
+	SiblingsMerged       uint64 // of those, merged into the head tipset
+	ParentsFetched       uint64 // head+1 blocks whose missing parent headers were fetched directly
 	LastInstallEpoch     abi.ChainEpoch
 }
 
@@ -744,6 +939,9 @@ func (g *Ingestor) Stats() Stats {
 		HeldUncorrob:         g.heldUncorrob.Load(),
 		Backfilled:           g.backfilled.Load(),
 		BackfillFailed:       g.backfillFailed.Load(),
+		SiblingsStored:       g.siblingsStored.Load(),
+		SiblingsMerged:       g.siblingsMerged.Load(),
+		ParentsFetched:       g.parentsFetched.Load(),
 		LastInstallEpoch:     abi.ChainEpoch(g.lastInstallEpoch.Load()),
 	}
 }
@@ -792,10 +990,11 @@ func StatsLogger(ctx context.Context, ing *Ingestor, pub *blockpub.Publisher, in
 		case <-t.C:
 			s := ing.Stats()
 			published, received, rejected := pub.Stats()
-			logf("  [gossip-block] sub-rcv=%d sub-rej=%d ing-rcv=%d installed=%d dedup=%d skipped=%d rejected=%d backfilled=%d backfillFail=%d lastEpoch=%d published=%d\n",
+			logf("  [gossip-block] sub-rcv=%d sub-rej=%d ing-rcv=%d installed=%d dedup=%d skipped=%d rejected=%d backfilled=%d backfillFail=%d siblings=%d/%d parentsFetched=%d lastEpoch=%d published=%d\n",
 				received, rejected,
 				s.Received, s.Installed, s.Dedup, s.Skipped, s.Rejected,
 				s.Backfilled, s.BackfillFailed,
+				s.SiblingsMerged, s.SiblingsStored, s.ParentsFetched,
 				s.LastInstallEpoch, published,
 			)
 		}
