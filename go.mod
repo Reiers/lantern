@@ -18,11 +18,13 @@ require (
 	github.com/filecoin-project/go-crypto v0.1.0
 	github.com/filecoin-project/go-f3 v0.8.13
 	github.com/filecoin-project/go-hamt-ipld/v3 v3.4.1
-	github.com/filecoin-project/go-jsonrpc v0.10.1
+	github.com/filecoin-project/go-jsonrpc v0.10.3
 	github.com/filecoin-project/go-keccak v0.1.0
 	github.com/filecoin-project/go-state-types v0.19.1
 	github.com/gbrlsnchs/jwt/v3 v3.0.1
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/holiman/uint256 v1.3.2
 	github.com/invopop/jsonschema v0.14.0
 	github.com/ipfs/boxo v0.41.0
@@ -44,6 +46,7 @@ require (
 	github.com/whyrusleeping/cbor-gen v0.3.1
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.55.0
+	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da
@@ -74,9 +77,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
 	github.com/google/flatbuffers v24.12.23+incompatible // indirect
 	github.com/google/gopacket v1.1.19 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/hashicorp/golang-lru v1.0.2 // indirect
-	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/ipfs/bbloom v0.1.0 // indirect
 	github.com/ipfs/go-cidutil v0.1.1 // indirect
@@ -168,7 +169,6 @@ require (
 	golang.org/x/exp v0.0.0-20260603202125-055de637280b // indirect
 	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260708182218-49f421fb7959 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.12.0 // indirect

@@ -76,6 +76,10 @@ type Config struct {
 	// blocks with the Filecoin swarm. Empty => boxo default (IPFS), which
 	// will NOT find blocks on the Filecoin network. lantern#50.
 	ProtocolPrefix string
+	// SessionPerGet restores the old behaviour of opening a fresh
+	// Bitswap session for every Get. Default (false) routes Get through
+	// one long-lived session; see Client.shared.
+	SessionPerGet bool
 }
 
 // Client is Lantern's Bitswap client. It satisfies state/hamt.BlockGetter
@@ -89,6 +93,19 @@ type Client struct {
 	preferred []peer.AddrInfo
 	fastDL    time.Duration
 	fullDL    time.Duration
+
+	// shared is one long-lived Bitswap session that every Get goes
+	// through. boxo's Bitswap.GetBlock opens a NEW session per call, and
+	// a new session knows no peers: it broadcasts WANT-HAVE to the whole
+	// swarm, waits for a HAVE, then sends WANT-BLOCK (two round trips
+	// per block, plus broadcast fan-out). State reads are long chains of
+	// dependent single-block fetches (state root -> HAMT levels -> actor
+	// head -> KAMT levels), so that cost is paid once per level. A
+	// long-lived session remembers which peers serve chain state and
+	// sends WANT-BLOCK to them directly (one round trip), falling back to
+	// a broadcast only when they all answer DONT_HAVE. Lives as long as
+	// the ctx passed to New (the same ctx that bounds Bitswap itself).
+	shared exchange.Fetcher
 
 	// stats
 	gotBlocks atomic.Uint64
@@ -138,6 +155,9 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 		fastDL:    cfg.FastDeadline,
 		fullDL:    cfg.FullDeadline,
 	}
+	if !cfg.SessionPerGet {
+		c.shared = bs.NewSession(ctx)
+	}
 
 	// Best-effort dial of preferred peers. We don't block start on this.
 	if len(cfg.PreferredPeers) > 0 {
@@ -166,10 +186,14 @@ func (c *Client) dialPreferred(ctx context.Context, peers []peer.AddrInfo) {
 // block bytes. The caller is responsible for verifying CID == hash(bytes);
 // net/combined.Fetcher does this for production callers.
 func (c *Client) Get(ctx context.Context, k cid.Cid) ([]byte, error) {
+	var getter exchange.Fetcher = c.bs
+	if c.shared != nil {
+		getter = c.shared
+	}
 	// Fast stage: only if we have preferred peers.
 	if len(c.preferred) > 0 {
 		fctx, cancel := context.WithTimeout(ctx, c.fastDL)
-		blk, err := c.bs.GetBlock(fctx, k)
+		blk, err := getter.GetBlock(fctx, k)
 		cancel()
 		if err == nil && blk != nil {
 			c.gotBlocks.Add(1)
@@ -191,7 +215,7 @@ func (c *Client) Get(ctx context.Context, k cid.Cid) ([]byte, error) {
 	}
 	fctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
-	blk, err := c.bs.GetBlock(fctx, k)
+	blk, err := getter.GetBlock(fctx, k)
 	if err != nil {
 		c.errs.Add(1)
 		return nil, fmt.Errorf("net/bitswap: %w", err)

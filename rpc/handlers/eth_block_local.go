@@ -873,6 +873,12 @@ func (c *ChainAPI) ethTipsetGasAndBloom(ctx context.Context, bg hamt.BlockGetter
 	if err != nil {
 		return 0, nil, fmt.Errorf("receipts: %w", err)
 	}
+	// The events walk below is ordered (bloom bits do not care, but error
+	// reporting and emitter caching keep it simple) and each events AMT is
+	// a cold network fetch on a fresh head: walked one after another that
+	// was ~10 s for a busy calibration tipset. Warm every root
+	// concurrently first so the ordered walk reads from the cache.
+	prefetchBlocks(ctx, bg, roots, ethPrefetchParallelism)
 	bloom := make([]byte, 256)
 	emitters := map[abi.ActorID][]byte{} // one state lookup per emitter
 	for _, root := range roots {
@@ -914,6 +920,36 @@ func (c *ChainAPI) ethTipsetGasAndBloom(ctx context.Context, bg hamt.BlockGetter
 		}
 	}
 	return gas, bloom, nil
+}
+
+// ethPrefetchParallelism bounds concurrent warm-up fetches per request.
+const ethPrefetchParallelism = 16
+
+// prefetchBlocks fetches cids through bg concurrently (at most par in
+// flight) purely to warm bg's cache. Errors are ignored: the caller's
+// ordered walk re-reads every block and reports anything that did not
+// land.
+func prefetchBlocks(ctx context.Context, bg hamt.BlockGetter, cids []cid.Cid, par int) {
+	if len(cids) < 2 || par < 2 {
+		return
+	}
+	sem := make(chan struct{}, par)
+	var wg sync.WaitGroup
+	for _, k := range cids {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			wg.Wait()
+			return
+		}
+		wg.Add(1)
+		go func(k cid.Cid) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			_, _ = bg.Get(ctx, k)
+		}(k)
+	}
+	wg.Wait()
 }
 
 // ethBlockFor builds the Lotus eth block for incl. exec is the tipset
