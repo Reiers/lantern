@@ -75,8 +75,8 @@ github.com/filecoin-project/go-f3 v0.8.13 h1:fqWrWDIh5xUp4f06Z3gIK8o0VCq2kfdsgBc
 github.com/filecoin-project/go-f3 v0.8.13/go.mod h1:HCtZMa27a+Cdnjcgb0zLZTbZDvahN+JwP3QBxw6FnxI=
 github.com/filecoin-project/go-hamt-ipld/v3 v3.4.1 h1:wl+ZHruCcE9LvwU7blpwWn35XOcRS6+IBg75G7ZzxzY=
 github.com/filecoin-project/go-hamt-ipld/v3 v3.4.1/go.mod h1:AqjryNfkxffpnqsa5mwnJHlazhVqF6W2nilu+VYKIq8=
-github.com/filecoin-project/go-jsonrpc v0.10.1 h1:iEhgrjO0+rawwOZWRNgexLrWGLA+IEUyWiRRL134Ob8=
-github.com/filecoin-project/go-jsonrpc v0.10.1/go.mod h1:OG7kVBVh/AbDFHIwx7Kw0l9ARmKOS6gGOr0LbdBpbLc=
+github.com/filecoin-project/go-jsonrpc v0.10.3 h1:m0nOgyqJ+wJiqCjPfrt4h2yQXzpPG0e7hPR22DYZiBM=
+github.com/filecoin-project/go-jsonrpc v0.10.3/go.mod h1:Nu/iBnWnNmASDoZfesqD+JJo6TvgRZX9UIGVhTu9JKs=
 github.com/filecoin-project/go-keccak v0.1.0 h1:SWoaAVbqKgB9iXBceIjmgMskr8DlJTAJ8vWK/bQUXRg=
 github.com/filecoin-project/go-keccak v0.1.0/go.mod h1:X3vAWrEOJSO5GnJfzRFZzv8QC/2IacwECuIj11cnE4Y=
 github.com/filecoin-project/go-state-types v0.19.1 h1:uaRRo/fSmKLEHkECucWnAqaEoT7MtGV3Jdo7FcgzlBI=
