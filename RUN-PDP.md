@@ -1,6 +1,6 @@
 # Running stock Curio-PDP on Lantern (calibration)
 
-> **Minimum Lantern version: v1.10.1-rc1 or later.** Earlier releases cannot serve stock Curio-PDP after the NV29 (Solstice) network upgrade: they serve FEVM contracts as "no code", return receipts without event logs, and time out on receipt lookups after a restart. Check with `lantern version` before you start.
+> **Minimum Lantern version: v1.10.1 or later.** Earlier releases cannot serve stock Curio-PDP after the NV29 (Solstice) network upgrade: they serve FEVM contracts as "no code", return receipts without event logs, and time out on receipt lookups after a restart. Check with `lantern version` before you start.
 
 This walkthrough takes a Linux machine to a working PDP storage provider on the Filecoin **calibration** network: the unmodified Curio-PDP Docker image (`filecoin/curio-pdp:calibnet`) using **Lantern as its only chain node**. At the end you have a provider registered with Filecoin Warm Storage Service (FWSS), a client data set stored on it, and proofs landing on chain every proving period.
 
@@ -57,7 +57,7 @@ Throughout, replace placeholders in angle brackets (`<like-this>`). `pdp.example
 
 If you already operate a Curio-PDP provider (native install or Docker) backed by Lotus or Forest, you do not need the fresh Docker stack in steps 5 to 10. Keep your Curio, your registration, your PDP key and your data sets, and only replace the chain node:
 
-1. Install Lantern v1.10.1-rc1 or later ([BUILD.md](BUILD.md) or a release binary) on a host Curio can reach.
+1. Install Lantern v1.10.1 or later ([BUILD.md](BUILD.md) or a release binary) on a host Curio can reach.
 2. `lantern init --network calibration --no-wallet` and `lantern node-type pdp --network calibration` (step 3). If an older Lantern data directory exists and the daemon reports "no trust anchor", run `lantern repair --network calibration`.
 3. Start the daemon. If Curio runs on the same host or container, loopback is enough and no `--allow-remote-rpc` is needed:
    ```
@@ -112,13 +112,13 @@ Being in the `docker` group means nothing below needs sudo, except the one-time 
 
 ### 2.2 Lantern
 
-Get a Lantern binary of **v1.10.1-rc1 or later** onto your `PATH`, either way:
+Get a Lantern binary of **v1.10.1 or later** onto your `PATH`, either way:
 
 - **Build from source** (about 85 s on a clean machine): follow [BUILD.md](BUILD.md).
 - **Download the release binary** (Linux x86_64 shown; `lantern-linux-arm64` also exists):
 
 ```sh
-TAG=v1.10.1-rc1                              # or a newer release
+TAG=v1.10.1                                  # or a newer release
 curl -fsSLO "https://github.com/Reiers/lantern/releases/download/$TAG/lantern-linux-amd64"
 curl -fsSLO "https://github.com/Reiers/lantern/releases/download/$TAG/lantern-linux-amd64.sha256"
 sha256sum -c lantern-linux-amd64.sha256       # lantern-linux-amd64: OK
@@ -468,15 +468,15 @@ Once registered, **third-party clients may pick your provider** on their own and
 
 ## 15. Troubleshooting
 
-Every row in the first table is an error we hit in the run that produced this guide. The Lantern-side ones are fixed in v1.10.1; if you see them on v1.10.1-rc1 or later, file an operator report.
+Every row in the first table is an error we hit in the run that produced this guide. The Lantern-side ones are fixed in v1.10.1; if you see them on v1.10.1 or later, file an operator report.
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | Curio exits with `unknown url scheme ''` and restarts in a loop | `FULLNODE_API_INFO=/ip4/host.docker.internal/...` (as in the upstream `.env`). `/ip4/` needs an IP literal. | Use `<token>:/ip4/172.17.0.1/tcp/1234/http` (your `docker0` IP), then `$C up -d --no-build yugabyte skiff`. |
-| Curio: `GetPDPConfig: no contract code at given address` | Lantern older than NV29 support (v1.10.0 or earlier) serves FEVM contracts as "no code". | Upgrade Lantern to v1.10.1-rc1 or later. `Filecoin.StateNetworkVersion` must return 29. |
-| Curio: `DataSetCreated event not found in receipt` or `failed to extract pieces from receipt`; the data set never appears | Lantern before the receipt-logs fix returned receipts without event logs. | Upgrade Lantern to v1.10.1-rc1 or later, then create a new data set (run the client again). |
-| Curio: `read tcp ...->172.17.0.1:1234: i/o timeout` on receipt lookups after a Lantern restart | Lantern before the persistent transaction index had to scan the chain for older transactions and was slower than Curio's RPC timeout. | Upgrade Lantern to v1.10.1-rc1 or later. A single timeout followed by a successful retry is harmless. |
-| Lantern log: `unsupported opcode 0x5e` | Lantern's local FEVM lacked newer (Cancun) opcodes before #178. | Upgrade Lantern to v1.10.1-rc1 or later. |
+| Curio: `GetPDPConfig: no contract code at given address` | Lantern older than NV29 support (v1.10.0 or earlier) serves FEVM contracts as "no code". | Upgrade Lantern to v1.10.1 or later. `Filecoin.StateNetworkVersion` must return 29. |
+| Curio: `DataSetCreated event not found in receipt` or `failed to extract pieces from receipt`; the data set never appears | Lantern before the receipt-logs fix returned receipts without event logs. | Upgrade Lantern to v1.10.1 or later, then create a new data set (run the client again). |
+| Curio: `read tcp ...->172.17.0.1:1234: i/o timeout` on receipt lookups after a Lantern restart | Lantern before the persistent transaction index had to scan the chain for older transactions and was slower than Curio's RPC timeout. | Upgrade Lantern to v1.10.1 or later. A single timeout followed by a successful retry is harmless. |
+| Lantern log: `unsupported opcode 0x5e` | Lantern's local FEVM lacked newer (Cancun) opcodes before #178. | Upgrade Lantern to v1.10.1 or later. |
 | Client: create transaction reverts with `invariant failure: insufficient funds to cover lockup after function execution` | Each data set locks funds in Filecoin Pay; `prepare` only sizes one new data set, and the client already owns others. | Deposit more USDFC into Filecoin Pay (`EXTRA_DEPOSIT_USDFC=<amount>`, step 11) and run again. |
 | `init` / `repair`: `quorum not reached` or `fewer countable operators than quorum` | Fewer than 3 distinct operators answered (public endpoints flake, or libp2p is blocked). | Re-run; follow the printed hints (`--peer`, `--no-libp2p`, `--bootstrap-quorum`). `lantern doctor --network calibration` shows which sources fail. |
 | `lantern daemon` exits with `no trust anchor at .../bootstrap-anchor.json` | `init` never completed for this network and `LANTERN_HOME` (or `lantern reset --chain-state` removed the anchor). | `lantern init --network calibration --no-wallet` (or `lantern repair --network calibration`) with the same `LANTERN_HOME` as the service, then restart. |
@@ -489,7 +489,7 @@ Other problems you may run into:
 | Symptom | Cause | Fix |
 |---|---|---|
 | Curio task log: `StorageGCMark` fails with `get finality tipset: chain: header/store: not found` | The node is younger than about 24h. StorageGCMark asks for the tipset about one day (2891 epochs) below head, and Lantern v1.10.1-rc1 and earlier only hold headers from the moment the node was initialised. | Harmless for PDP: storage GC marking just retries on its next run, and the error stops by itself once the node has been up for about a day. Fixed in the next release, which backfills the missing headers on demand (and, on PDP/Full, prefetches the last day at startup). |
-| Many on-chain reverts from the PDP wallet (PDPVerifier `Incorrect fee amount`, `DataSetPaymentBeyondEndEpoch`, FilecoinPay `settleRail` exit 7) with Lantern v1.10.1-rc1 or earlier | Those releases answer `eth_estimateGas` with a fixed gas limit without executing the call, so Curio cannot tell that a transaction would revert and broadcasts it anyway (each one burns gas at a limit of about 1.4B). | Upgrade Lantern to the first release after v1.10.1-rc1. Curio then gets the same code-3 revert error from gas estimation that Lotus returns and does not send the transaction. |
+| Many on-chain reverts from the PDP wallet (FWSS `ProvingPeriodPassed` on `provePossession`, `DataSetPaymentBeyondEndEpoch`, FilecoinPay `settleRail` exit 7) with Lantern v1.10.1-rc1 or earlier | Those releases answer `eth_estimateGas` with a fixed gas limit without executing the call, so Curio cannot tell that a transaction would revert and broadcasts it anyway (each one burns gas at a limit of about 1.4B). | Upgrade Lantern to the first release after v1.10.1-rc1. Curio then gets the same code-3 revert error from gas estimation that Lotus returns and does not send the transaction. |
 | `refusing to bind RPC to non-loopback address "172.17.0.1:1234" without --allow-remote-rpc` | Intentional guard for non-loopback binds. | Add `--allow-remote-rpc` (and keep the bind on `docker0`, never `0.0.0.0`). |
 | `init` / `repair`: `conflicting finality answers` | Two sources returned different finalized tipsets for the same F3 instance: one is wrong, broken or on another network. | Do not lower the quorum. Compare against a node you run (`--peer`), re-run later, and file an operator report naming the sources. |
 | `lantern daemon` syncs mainnet or `lantern info` says "not initialised" | A command was run without `--network calibration`. | Add `--network calibration` to every command and to the service. |
