@@ -98,7 +98,11 @@ Friction from the maintainers' dry run (F1 to F17) and its resolutions: see the 
 
 ## Follow-up: v1.10.1
 
-Every Lantern-side friction item from this run (rows 2, 4, 5 and 6) is fixed in v1.10.1 (same code as v1.10.1-rc2, released 2026-11-02). On the maintainer calibration provider, the 24 hours after moving to v1.10.1-rc2 showed 0 Curio `i/o timeout` errors (256 in a 24-hour window before) and 0 failed Curio PDP tasks. The operator moved to v1.10.1-rc2 on 2026-11-01 (#191).
+v1.10.1 (released 2026-11-02, same code as v1.10.1-rc2) fixes the Lantern-side causes of friction rows 2, 4, 5 and 6: header backfill (#190), executed gas estimation (#195), websocket ping/pong and full multi-block head tracking (#196). The operator moved to v1.10.1-rc2 on 2026-11-01.
+
+Observed afterwards:
+- Maintainer calibration provider, first 24 hours on rc2: 0 Curio `i/o timeout` errors (256 in a 24-hour window before) and 0 failed Curio PDP tasks.
+- Share of reverted PDPVerifier transactions in a 30-minute snapshot of all calibration traffic: operator 8% (down from about 30% on rc1), maintainer provider 0%. Some proofs still revert with `ProvingPeriodPassed` over longer windows, on Lantern-backed and Lotus-backed providers alike (one Lotus-era provider in the same snapshot reverted 61%), so this is not specific to Lantern. Gas estimation cannot pre-flight these yet because `provePossession` burns its fee through an FVM precompile the local EVM does not execute; tracked in #199.
 
 ## Operator statement
 
