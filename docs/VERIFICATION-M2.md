@@ -96,6 +96,10 @@ Fresh Docker path exactly as in RUN-PDP.md, on maintainer hardware (details in #
 
 Friction from the maintainers' dry run (F1 to F17) and its resolutions: see the git history of this file and #104 / #184. Highlights: NV29 support (#172), receipts with logs (#173, #177), FEVM opcodes (#178), persistent tx index (#179), eth blocks with txs (#180), operator-aware bootstrap quorum (#176), reproducible releases (#174), docs (#175, #186, #187, #188). Under heavy Curio read load Lantern occasionally exceeded Curio's RPC timeout (retried successfully): friction item 6.
 
+## Follow-up: v1.10.1
+
+Every Lantern-side friction item from this run (rows 2, 4, 5 and 6) is fixed in v1.10.1 (same code as v1.10.1-rc2, released 2026-11-02). On the maintainer calibration provider, the 24 hours after moving to v1.10.1-rc2 showed 0 Curio `i/o timeout` errors (256 in a 24-hour window before) and 0 failed Curio PDP tasks. The operator moved to v1.10.1-rc2 on 2026-11-01 (#191).
+
 ## Operator statement
 
 > "Nothing [blocked me], worked end to end." (operator report #191, "How much did this block you?")

@@ -4,6 +4,26 @@ All notable changes to Lantern.
 
 ## Unreleased
 
+## v1.10.1 (2026-11-02)
+
+Stock Curio-PDP runs with Lantern as its only chain node: no Lotus, no Forest, no RPC bridge. This release is the result of a maintainer dry run, a multi-day calibration soak serving third-party client data sets, and the first external operator run (#191), which switched an existing Curio-PDP provider from Lotus to Lantern. It also restores correct behaviour on both networks after the NV29 (Solstice) upgrade. Same code as v1.10.1-rc2.
+
+**Upgrade notes**
+- v1.10.0 and older serve FEVM contracts as "no code" since NV29. Upgrade.
+- `lantern daemon` now refuses to start without the trust anchor written by `lantern init` or `lantern repair` (#176). Installs that never ran init: run `lantern repair --network <net>` once (or pass `--allow-rpc-anchor` to keep the old, weaker behaviour).
+- The bootstrap quorum now counts distinct operators (default 3, any conflict fails closed). `LANTERN_BOOTSTRAP_QUORUM` is now in operators.
+
+**Highlights**
+- NV29 Solstice support: actors v19, live network version, loud failure on unknown actor code (#172).
+- Bridge-off FEVM surface for Curio-PDP: receipts with logs (#173, #177), persistent eth tx index (#179), eth blocks carry transactions (#180), full FEVM opcode table (#178), `eth_estimateGas` executes calls and reports reverts (#195).
+- Curio stability: websocket ping/pong (no more `i/o timeout`), head tracks full multi-block tipsets, eth_call caches (#196); older headers fetched and verified on demand (#190).
+- Operator-aware bootstrap quorum; daemon requires an init anchor (#176).
+- Byte-reproducible releases, cross-checked across amd64 and arm64 builders, verifiable with `scripts/repro-build.sh` (#174).
+- Operator docs: BUILD.md, RUN-PDP.md, Curio-PDP compose overlay, switching an existing Curio from Lotus, operator report template, Milestone 2 verification record (#175, #186 to #189, #194, #197).
+- Wallet: network-aware `wallet balance` and address prefix (#148, thanks @sharmis-tp).
+
+Detailed notes for every change follow.
+
 ### eth_estimateGas executes the call and reports reverts (stop Curio broadcasting doomed txs)
 Lantern's `eth_estimateGas` returned a fixed heuristic gas limit (0x55b13d93, about 1.44B gas) without executing the call. Lotus executes the message and fails with JSON-RPC code 3 when it would revert, and stock Curio relies on that failure to not broadcast a doomed transaction. With Lantern as its only chain node Curio broadcast transactions that reverted on chain (PDPVerifier `provePossession` / `nextProvingPeriod`, FilecoinPay `settleRail`), each burning gas at the heuristic limit; one operator saw about 30% of roughly 230 transactions per hour revert.
 
